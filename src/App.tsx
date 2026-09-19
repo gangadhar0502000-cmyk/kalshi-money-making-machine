@@ -1,0 +1,189 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { FiltersBar } from './components/FiltersBar'
+import { PaperBankroll } from './components/PaperBankroll'
+import { StatusBanner } from './components/StatusBanner'
+import { TradeIdeasBoard } from './components/TradeIdeasBoard'
+import { DEMO_CATEGORIES } from './fixtures/demoMarkets'
+import { fetchOpenMarkets } from './lib/api'
+import { loadPortfolio, openPaperTrade, savePortfolio } from './lib/bankroll'
+import { scoreAndRank } from './lib/scoring'
+import type {
+  DataSource,
+  FilterState,
+  PaperPortfolio,
+  ScoredOpportunity,
+} from './types/kalshi'
+
+const INITIAL_FILTERS: FilterState = {
+  category: 'All',
+  minVolume: 0,
+  minScore: 0,
+  search: '',
+}
+
+export default function App() {
+  const [loading, setLoading] = useState(true)
+  const [source, setSource] = useState<DataSource>('demo')
+  const [error, setError] = useState<string | undefined>()
+  const [fetchedAt, setFetchedAt] = useState<string | undefined>()
+  const [opportunities, setOpportunities] = useState<ScoredOpportunity[]>([])
+  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS)
+  const [portfolio, setPortfolio] = useState<PaperPortfolio>(() => loadPortfolio())
+
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true)
+    try {
+      const result = await fetchOpenMarkets(signal)
+      if (signal?.aborted) return
+      setSource(result.source)
+      setError(result.error)
+      setFetchedAt(result.fetchedAt)
+      setOpportunities(scoreAndRank(result.markets))
+    } finally {
+      if (!signal?.aborted) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    void refresh(ac.signal)
+    return () => ac.abort()
+  }, [refresh])
+
+  const categories = useMemo(() => {
+    const set = new Set<string>(['All', ...DEMO_CATEGORIES.filter((c) => c !== 'All')])
+    for (const o of opportunities) set.add(o.category)
+    return Array.from(set)
+  }, [opportunities])
+
+  const filtered = useMemo(() => {
+    const q = filters.search.trim().toLowerCase()
+    return opportunities.filter((o) => {
+      if (filters.category !== 'All' && o.category !== filters.category) return false
+      if (o.volume < filters.minVolume) return false
+      if (o.edgeScore < filters.minScore) return false
+      if (q) {
+        const hay = `${o.title} ${o.ticker} ${o.eventTicker}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [opportunities, filters])
+
+  const handlePortfolioChange = (p: PaperPortfolio) => {
+    savePortfolio(p)
+    setPortfolio(p)
+  }
+
+  const handlePaperTrade = (opp: ScoredOpportunity) => {
+    const entry =
+      opp.suggestedSide === 'YES'
+        ? opp.yesAsk || opp.midYes
+        : opp.noAsk || 1 - opp.midYes
+
+    const stakePct =
+      portfolio.stakeMode === 'flat' ? portfolio.flatStakePct : opp.suggestedStakePct
+    const stakeDollars = (portfolio.cash * stakePct) / 100
+
+    if (stakeDollars < 1) {
+      alert('Not enough paper cash for a meaningful stake. Reset bankroll or close positions.')
+      return
+    }
+
+    const ok = confirm(
+      `Paper ${opp.suggestedSide} on "${opp.title}"?\n\n` +
+        `Entry ~${(entry * 100).toFixed(0)}¢ · Stake $${stakeDollars.toFixed(2)} (${stakePct}% of cash)\n\n` +
+        `This is a local simulation only — no real Kalshi order.`,
+    )
+    if (!ok) return
+
+    const next = openPaperTrade(portfolio, {
+      ticker: opp.ticker,
+      title: opp.title,
+      side: opp.suggestedSide,
+      entryPrice: entry,
+      stakeDollars,
+      note: `edge=${opp.edgeScore}`,
+    })
+    setPortfolio(next)
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <header className="mb-6 text-left">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400/90">
+              Zero-cost research scanner
+            </p>
+            <h1 className="bg-gradient-to-r from-emerald-300 via-slate-100 to-amber-300 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent sm:text-4xl">
+              Kalshi Money Making Machine
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-400">
+              Rank open Kalshi markets with transparent liquidity / spread / timing heuristics.
+              Paper-trade ideas locally. Never auto-trades real money — and never claims guaranteed
+              profit.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              className="btn btn-ghost"
+              href="https://docs.kalshi.com/getting_started/quick_start_market_data"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Kalshi API docs
+            </a>
+            <a className="btn btn-ghost" href="https://kalshi.com" target="_blank" rel="noreferrer">
+              kalshi.com
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <div className="mb-4">
+        <StatusBanner
+          source={source}
+          error={error}
+          lastUpdated={fetchedAt}
+          loading={loading}
+          onRefresh={() => void refresh()}
+        />
+      </div>
+
+      <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-left text-xs text-slate-400">
+        <strong className="text-slate-300">Disclaimer:</strong> This is a free research / education
+        tool. Edge scores are heuristic signals for scanning — not mispricing detection, not
+        investment advice, and not a promise of returns. Prediction markets involve risk of loss.
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-4">
+          <FiltersBar
+            filters={filters}
+            categories={categories}
+            onChange={setFilters}
+            count={filtered.length}
+            total={opportunities.length}
+          />
+          <TradeIdeasBoard
+            opportunities={filtered}
+            bankroll={portfolio.cash}
+            onPaperTrade={handlePaperTrade}
+          />
+        </div>
+        <PaperBankroll
+          portfolio={portfolio}
+          opportunities={opportunities}
+          onChange={handlePortfolioChange}
+        />
+      </div>
+
+      <footer className="mt-10 border-t border-slate-800/80 pt-6 text-center text-xs text-slate-500">
+        Kalshi Money Making Machine · Vite + React · Public market data only ·{' '}
+        {source === 'live' ? 'Live API' : 'Demo fixtures'} · Built for local{' '}
+        <code className="text-slate-400">npm run dev</code>
+      </footer>
+    </div>
+  )
+}
