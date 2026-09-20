@@ -6,15 +6,16 @@ A **private research lab** for discovering, paper-testing, and **killing** tradi
 
 Default landing UI = **Crypto 15m Lab**. The older **Edge Finder** (ESPN / Polymarket / NOAA) remains behind a secondary tab.
 
-## Fully free — no API keys
+## Data sources
 
 | Source | Role |
 | --- | --- |
-| Kalshi public Trade API (proxied) | Open crypto 15m markets, bids/asks, volume |
-| Binance / Coinbase public tickers (proxied) | Spot guard for paper MM — no keys |
+| Kalshi public Trade API (Vite `/api/kalshi`) | Open crypto 15m markets |
+| **Read-only local proxy** (`npm run dev:real`) | Signed GET orderbooks / markets — **never places trades** |
+| Binance / Coinbase public tickers | Spot guard for paper MM |
 | Bundled demo fixtures | Offline / rate-limit fallback |
 
-No Odds API, no paid keys, no account required for market data.
+Browser **never** holds the private key. Secrets load server-side from `KALSHI_KEY_ID` / `KALSHI_PRIVATE_KEY` env or box secrets — **not** logged, **not** committed.
 
 ## How crypto 15m markets are detected
 
@@ -56,36 +57,40 @@ Until then: treat every suggestion as an experiment to **falsify**.
 
 
 
-## 15m MM (Paper) — spread capture sim
+## 15m MM (Paper) — near-real read-only books
 
-**Paper only. Live MM needs API keys. On 15m, bots cancel faster — this teaches whether YOUR params survive.**
+**Read-only API · never places trades.** On 15m, bots cancel faster — this teaches whether YOUR params survive.
 
-> **Paper MM green ≠ live.** A green session P&L is **not** evidence of a live edge. Strict realism (default ON) keeps the sim harsh on purpose.
+> **Paper MM green ≠ live.** Strict realism (default ON). UI badge **LIVE BOOK (read-only)** when the local proxy + auth/orderbook path works.
 
-Open the **15m MM (Paper)** tab (next to Crypto Lab / Backtest). Simulates a two-sided YES bid/ask around mid:
+### Run near-real (Mac)
+
+```bash
+npm install
+npm run dev:real   # starts scripts/mm-proxy.mjs (read-only) + Vite
+```
+
+Open the Vite URL → **15m MM (Paper)**. Proxy listens on `127.0.0.1:8787` and exposes only `/local-api/*` GETs. Hard `assertReadOnly(method, path)` refuses non-GET and any order-create path.
+
+Credentials (server-side only): `KALSHI_KEY_ID` + `KALSHI_PRIVATE_KEY` env, or box secrets file. Do not put keys in the browser or README.
 
 | Knob | Role |
 | --- | --- |
 | Half-spread (¢) | Distance from mid for bid & ask |
-| Size | Contracts per side |
-| Max inventory | Position limit (suppresses the crowded side) |
-| Spot move % / $ / window | Spot guard thresholds |
-| Quote refresh (ms) | Timer requotes (+ requote when mid moves) |
-| Base fill prob | Random fill chance per tick (strict default **0.004**) |
-| Mid-cross fill prob | Chance to fill when mid walks through quote (strict **~0.20**; else void/reject) |
-| Strict realism | Default **ON** — harsh fills, fees, settlement. Loose = debug only |
+| Size / max inventory | Quote size and position limit |
+| Spot move % / $ / window | Spot guard (Binance/Coinbase public) |
+| Book poll (ms) | L2 poll via `/local-api/orderbook` |
+| Strict realism | Default **ON** |
 
-**Spot guard (critical):** polls free public BTC/ETH/… spot via Binance (primary) or Coinbase (fallback) — **no API keys**. If spot moves more than X% **or** $Y within Z seconds → cancel simulated quotes / widen / inventory skew (Avellaneda-lite). Events land in the cancel log.
+**Fills (~99% realism target):**
+- Poll real L2; post simulated bid/ask at configurable distance from mid
+- Fill **only** when aggressive flow would consume size at your price (book depth drop / mid walk) — not random 4% spam
+- **Fees:** resting maker on 15m → **$0**; if sim would cross the spread immediately → taker `ceil(0.07·C·P·(1−P))`
+- Spot guard + settlement (mark inventory to 0/1 on close) unchanged
 
-**Fills are not friendly (strict realism):**
-- Mid-cross is **probabilistic** (~15–25%), not automatic — voids/rejects are modeled
-- Random fills are **rare** (`baseFillProb` ≈ 0.004) with **toxicity bias** when spot moved against your resting side
-- Every fill pays Kalshi-style fees: `ceil(0.07·C·P·(1−P))` (to the cent), subtracted from P&L
-- **Settlement risk:** if the window closes with inventory ≠ 0, inventory is marked to **0 or 1** and P&L is realized (can wipe spread gains)
+**P&L units:** YES prices are dollars on **[0, 1]**. Unrealized = `inventory * (mid - avgEntry)` in dollars — never ×100. Total P&L shows **$ and ¢**. If mid/avgEntry look like cents (|p|>1.5), they are normalized `/100` and logged.
 
-If session P&L rises unrealistically fast, the UI shows: **“Sim too friendly / check fill rate — not live edge.”**
-
-No live order placement in this build.
+Fallback when proxy is down: soft-sim (rare fills) with a clear warning.
 
 ## Backtest (settled history)
 
@@ -114,9 +119,13 @@ cd kalshi-money-making-machine
 git pull origin main   # or: git pull origin master
 
 npm install
-cp .env.example .env   # optional; no keys required
+cp .env.example .env   # optional
 
+# Public lab only:
 npm run dev
+
+# Near-real paper MM (read-only Kalshi proxy + Vite):
+npm run dev:real
 ```
 
 Open the URL Vite prints (usually `http://localhost:5173`).
@@ -127,7 +136,7 @@ Open the URL Vite prints (usually `http://localhost:5173`).
 - Read **EXPERIMENTS** panel — usually **NO TRADE**
 - When a paper suggestion appears, log it → resolve later → inspect per-rule stats
 - Open **Backtest** → Run backtest (Auto / Live / Bundled / Demo)
-- Open **15m MM (Paper)** → pick a market → Start paper MM → watch spot guard + toxic fills
+- Open **15m MM (Paper)** → `npm run dev:real` → pick a market → Start → watch **LIVE BOOK (read-only)** + spot guard
 - Edit constants in `src/lib/crypto15m/ruleConfig.ts`, restart/refresh, re-test
 
 ```bash
@@ -146,8 +155,12 @@ src/
     detect.ts             Series / market detection
     ruleConfig.ts         ALL experiment knobs
     rules.ts              Rule evaluators (hypotheses)
-    fees.ts               Kalshi-style fee estimate
+    fees.ts               Maker $0 / taker Kalshi-style fees
     api.ts                Public API fetch + demo fallback
+    mm/                   Paper MM engine, L2 fills, price units
+  scripts/
+    mm-proxy.mjs          Read-only Kalshi proxy (assertReadOnly)
+    dev-real.mjs          proxy + vite launcher
     journal.ts            Paper journal + per-rule stats
     spot.ts               Free public Binance/Coinbase spot (MM guard)
     mm/                   Paper market maker engine + config

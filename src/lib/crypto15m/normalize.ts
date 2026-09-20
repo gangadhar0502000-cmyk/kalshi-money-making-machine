@@ -1,6 +1,7 @@
 import type { KalshiMarketRaw } from '../../types/kalshi'
 import type { Crypto15mMarket } from '../../types/crypto15m'
 import { kalshiMarketUrl, parseCount, parseDollars } from '../format'
+import { asDollarPrice } from './mm/prices'
 import { feePerContract } from './fees'
 import { extractAsset, seriesTickerFromEvent } from './detect'
 import { LAB, THIN_BOOK_BLOCK } from './ruleConfig'
@@ -14,11 +15,11 @@ function minutesBetween(aIso: string | null | undefined, bIso: string): number {
 }
 
 export function normalizeCrypto15m(raw: KalshiMarketRaw, now = Date.now()): Crypto15mMarket {
-  const yesBid = parseDollars(raw.yes_bid_dollars ?? raw.yes_bid)
-  const yesAsk = parseDollars(raw.yes_ask_dollars ?? raw.yes_ask)
-  const noBid = parseDollars(raw.no_bid_dollars)
-  const noAsk = parseDollars(raw.no_ask_dollars)
-  const last = parseDollars(raw.last_price_dollars ?? raw.last_price)
+  const yesBid = asDollarPrice(parseDollars(raw.yes_bid_dollars ?? raw.yes_bid), 'norm.yesBid')
+  const yesAsk = asDollarPrice(parseDollars(raw.yes_ask_dollars ?? raw.yes_ask), 'norm.yesAsk')
+  const noBid = asDollarPrice(parseDollars(raw.no_bid_dollars), 'norm.noBid')
+  const noAsk = asDollarPrice(parseDollars(raw.no_ask_dollars), 'norm.noAsk')
+  const last = asDollarPrice(parseDollars(raw.last_price_dollars ?? raw.last_price), 'norm.last')
 
   let midYes = 0
   if (yesBid > 0 && yesAsk > 0) midYes = (yesBid + yesAsk) / 2

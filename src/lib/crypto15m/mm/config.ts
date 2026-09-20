@@ -17,6 +17,10 @@ export interface PaperMmConfig {
   quoteRefreshMs: number
   /** How often to poll free public spot (ms). */
   spotPollMs: number
+  /** How often to poll read-only L2 orderbook via local proxy (ms). */
+  bookPollMs: number
+  /** Prefer real L2 book fills when proxy is up (default ON). */
+  useLiveBook: boolean
   /** Mid move (cents) that forces an immediate requote. */
   midMoveRequoteCents: number
   /** Avellaneda-lite: cents to skew quotes per unit of inventory. */
@@ -25,16 +29,16 @@ export interface PaperMmConfig {
   guardWidenCents: number
   /** After a hard cancel, pause quoting this many ms. */
   guardCancelMs: number
-  /** Base random fill probability per tick (before toxicity). */
+  /** Base random fill probability per tick (before toxicity). Soft-sim fallback only. */
   baseFillProb: number
   /** Extra fill bias when spot moved against your resting quote. */
   toxicityBias: number
   /**
    * Probability of filling when mid crosses your quote (void/reject otherwise).
-   * Strict realism uses ~0.15–0.25 — never assume 100% mid-cross fills.
+   * Soft-sim fallback only — live book uses depth/mid-walk instead.
    */
   midCrossFillProb: number
-  /** Subtract Kalshi-style fees on every paper fill. */
+  /** Subtract fees on fills (maker $0 on 15m; taker uses Kalshi formula). */
   applyFees: boolean
   /** Realize inventory at 0/1 when the market closes / settles. */
   settleOnClose: boolean
@@ -47,7 +51,7 @@ export interface PaperMmConfig {
   startingCash: number
 }
 
-/** Harsh defaults — random fills rare; mid-cross probabilistic; fees + settlement on. */
+/** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
 export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   halfSpreadCents: 2,
   quoteSize: 5,
@@ -57,6 +61,8 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   spotWindowSec: 8,
   quoteRefreshMs: 1500,
   spotPollMs: 1000,
+  bookPollMs: 750,
+  useLiveBook: true,
   midMoveRequoteCents: 1,
   inventorySkewCentsPerUnit: 0.15,
   guardWidenCents: 4,
@@ -79,6 +85,7 @@ export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
   settleOnClose: false,
   strictRealism: false,
   toxicityBias: 0.1,
+  useLiveBook: true,
 }
 
 /** @deprecated Prefer STRICT_PAPER_MM_CONFIG — kept as alias for imports. */
@@ -107,6 +114,8 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     spotWindowSec: clamp(c.spotWindowSec, 1, 120),
     quoteRefreshMs: Math.round(clamp(c.quoteRefreshMs, 200, 30_000)),
     spotPollMs: Math.round(clamp(c.spotPollMs, 500, 10_000)),
+    bookPollMs: Math.round(clamp(c.bookPollMs, 300, 10_000)),
+    useLiveBook: Boolean(c.useLiveBook),
     midMoveRequoteCents: clamp(c.midMoveRequoteCents, 0.25, 10),
     inventorySkewCentsPerUnit: clamp(c.inventorySkewCentsPerUnit, 0, 2),
     guardWidenCents: clamp(c.guardWidenCents, 0, 30),

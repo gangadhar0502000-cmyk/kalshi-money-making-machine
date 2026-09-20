@@ -17,13 +17,24 @@ export interface MmFill {
   id: string
   t: number
   side: MmFillSide
+  /** YES price in dollars 0–1 (never cents). */
   price: number
   size: number
+  /** Mid in dollars 0–1 at fill. */
   midAtFill: number
   toxic: boolean
-  reason: 'mid_cross' | 'random_toxic' | 'random' | 'settlement'
-  /** Kalshi-style fee deducted on this fill ($). */
+  reason:
+    | 'mid_cross'
+    | 'random_toxic'
+    | 'random'
+    | 'settlement'
+    | 'book_depth'
+    | 'mid_walk'
+    | 'taker_cross'
+  /** Kalshi-style fee deducted on this fill ($). Maker 15m = $0; taker uses formula. */
   feeDollars: number
+  /** True when sim crossed the spread (taker). */
+  taker: boolean
 }
 
 export interface MmCancelEvent {
@@ -45,20 +56,21 @@ export interface MmSnapshot {
   /** Net YES inventory (positive = long YES). */
   inventory: number
   cash: number
+  /** Mid YES in dollars 0–1. */
   midYes: number
   spotPrice: number | null
   spotSource: string | null
-  /** Realized from round-trips / closed legs (spread capture), after fees. */
+  /** Realized from round-trips / closed legs (spread capture), after fees. Dollars. */
   realizedSpreadPnl: number
-  /** Cumulative Kalshi-style fees paid this session. */
+  /** Cumulative fees paid this session (dollars). */
   feesPaid: number
-  /** Mark-to-mid inventory P&L (unrealized). */
+  /** Mark-to-mid inventory P&L (unrealized), dollars: inventory * (mid - avgEntry). */
   unrealizedInventoryPnl: number
-  /** Avg entry of open inventory (YES price). */
+  /** Avg entry of open inventory (YES price dollars 0–1). */
   avgEntry: number | null
   fillCount: number
   cancelCount: number
-  /** Mid-cross attempts that voided / rejected (no fill). */
+  /** Mid-cross attempts that voided / rejected (no fill) — soft-sim only. */
   midCrossRejectCount: number
   guardActiveUntil: number
   guardMode: MmGuardAction | null
@@ -68,6 +80,12 @@ export interface MmSnapshot {
   /** True after inventory was forced to settle at 0/1. */
   settled: boolean
   message: string
+  /** True when local read-only proxy + orderbook polling is healthy. */
+  liveBook: boolean
+  liveBookAuthenticated: boolean
+  bookBestBid: number | null
+  bookBestAsk: number | null
+  unitsWarning: string | null
 }
 
 export interface MmEngineState {

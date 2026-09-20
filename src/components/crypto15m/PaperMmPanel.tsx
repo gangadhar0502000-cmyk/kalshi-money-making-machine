@@ -6,6 +6,8 @@ import {
   type PaperMmConfig,
 } from '../../lib/crypto15m/mm/config'
 import { paperMmEngine } from '../../lib/crypto15m/mm/engine'
+import { formatPnlDual } from '../../lib/crypto15m/mm/prices'
+import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
 
 interface Props {
@@ -42,6 +44,21 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   const [draft, setDraft] = useState<PaperMmConfig>(() => ({
     ...DEFAULT_PAPER_MM_CONFIG,
   }))
+  const [proxyOk, setProxyOk] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    const ping = async () => {
+      const h = await fetchLocalHealth()
+      if (alive) setProxyOk(Boolean(h?.ok))
+    }
+    void ping()
+    const id = window.setInterval(() => void ping(), 5000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
 
   const selected = useMemo(
     () => markets.find((m) => m.ticker === selectedTicker) ?? null,
@@ -81,16 +98,23 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   return (
     <div className="space-y-4 text-left">
       <div className="rounded-xl border border-rose-800/50 bg-rose-950/30 px-4 py-3 text-xs text-rose-100/95">
-        <strong>Paper only.</strong> Live MM needs API keys. On 15m, bots cancel faster — this
-        teaches whether <em>YOUR</em> params survive. Adverse selection is modeled on purpose; do
-        not pretend fills are always friendly. No live order placement in this build.{' '}
-        <strong>Paper MM green ≠ live edge.</strong>
+        <strong>Read-only API · never places trades.</strong> Near-real paper MM polls Kalshi L2
+        via a local proxy (secrets stay server-side). On 15m, bots cancel faster — this teaches
+        whether <em>YOUR</em> params survive. Fills require book depth / mid-walk (not random
+        spam). Maker fee $0 on resting 15m; taker fee if you cross. <strong>Paper MM green ≠ live
+        edge.</strong>
       </div>
 
       {showSoftWarn && (
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
           ⚠ Sim too friendly / check fill rate — not live edge. Session P&amp;L rose unrealistically
           fast for a harsh paper book (or loose mode is on).
+        </div>
+      )}
+
+      {s.unitsWarning && (
+        <div className="rounded-xl border border-rose-500/60 bg-rose-950/50 px-4 py-3 text-sm font-medium text-rose-100">
+          ⚠ Units guard: {s.unitsWarning}
         </div>
       )}
 
@@ -105,6 +129,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+              Read-only API · never places trades
+            </span>
+            {(s.liveBook || proxyOk) && (
+              <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                LIVE BOOK (read-only)
+              </span>
+            )}
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                 source === 'live' ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-800 text-amber-300'
@@ -221,7 +253,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         />
         <Stat
           label="Total P&L"
-          value={formatDollars(totalPnl)}
+          value={formatPnlDual(totalPnl).dollars}
+          sub={formatPnlDual(totalPnl).centsLabel}
           tone={totalPnl >= 0 ? 'good' : 'bad'}
         />
         <Stat
@@ -233,7 +266,20 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           }
           sub={s.spotSource ?? 'polling…'}
         />
-        <Stat label="Market mid" value={formatCents(s.midYes)} />
+        <Stat
+          label="Market mid"
+          value={formatCents(s.midYes)}
+          sub={`$${s.midYes.toFixed(4)}`}
+        />
+        <Stat
+          label="Book BBO"
+          value={
+            s.bookBestBid != null && s.bookBestAsk != null
+              ? `${formatCents(s.bookBestBid)} / ${formatCents(s.bookBestAsk)}`
+              : '—'
+          }
+          sub={s.liveBook ? 'L2 live' : proxyOk ? 'proxy up · waiting' : 'proxy off'}
+        />
         <Stat label="Spot guard" value={guardLive} tone={s.guardMode ? 'warn' : 'neutral'} />
         <Stat
           label="Mid-cross voids"
@@ -390,10 +436,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           </label>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
-          Spot guard: if free public BTC/ETH (etc.) spot moves more than X% <em>or</em> $Y within Z
-          seconds → cancel / widen / skew. Fills: probabilistic mid-cross (void/reject) + rare
-          random with toxicity. Fees use ceil(0.07·C·P·(1−P)). Open inventory at window end settles
-          to 0 or 1 and can wipe spread gains.
+          Run <code className="text-slate-400">npm run dev:real</code> for LIVE BOOK (read-only
+          proxy). Fills require L2 depth consumption or mid-walk through your price — not random
+          4% spam. Maker fee $0 on resting 15m; crossing → taker fee ceil(0.07·C·P·(1−P)). Prices
+          are dollars 0–1 (Total P&amp;L shows $ and ¢). Spot guard still uses Binance/Coinbase
+          public. Settlement marks inventory to 0/1 on close.
         </p>
       </div>
 
@@ -407,7 +454,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             primary: `${f.side === 'buy_yes' ? 'BUY YES' : 'SELL YES'} ${f.size} @ ${
               f.price === 0 || f.price === 1 ? (f.price === 1 ? '1.00' : '0.00') : formatCents(f.price)
             }`,
-            secondary: `${f.reason}${f.toxic ? ' · TOXIC' : ''} · fee ${formatDollars(f.feeDollars)} · mid ${formatCents(f.midAtFill)} · ${new Date(f.t).toLocaleTimeString()}`,
+            secondary: `${f.reason}${f.taker ? ' · TAKER' : ' · maker'}${f.toxic ? ' · TOXIC' : ''} · fee ${formatDollars(f.feeDollars)} · mid ${formatCents(f.midAtFill)} ($${f.midAtFill.toFixed(4)}) · ${new Date(f.t).toLocaleTimeString()}`,
           }))}
         />
         <LogPanel
