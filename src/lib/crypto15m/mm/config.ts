@@ -21,6 +21,8 @@ export interface PaperMmConfig {
   bookPollMs: number
   /** Prefer real L2 book fills when proxy is up (default ON). */
   useLiveBook: boolean
+  /** Minimum ms between any two paper fills (kills money-printer round-trips). */
+  fillCooldownMs: number
   /** Mid move (cents) that forces an immediate requote. */
   midMoveRequoteCents: number
   /** Avellaneda-lite: cents to skew quotes per unit of inventory. */
@@ -54,8 +56,8 @@ export interface PaperMmConfig {
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
 export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   halfSpreadCents: 2,
-  quoteSize: 5,
-  maxInventory: 25,
+  quoteSize: 1,
+  maxInventory: 10,
   spotMovePct: 0.12,
   spotMoveDollars: 40,
   spotWindowSec: 8,
@@ -63,6 +65,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   spotPollMs: 1000,
   bookPollMs: 750,
   useLiveBook: true,
+  fillCooldownMs: 5000,
   midMoveRequoteCents: 1,
   inventorySkewCentsPerUnit: 0.15,
   guardWidenCents: 4,
@@ -86,6 +89,7 @@ export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
   strictRealism: false,
   toxicityBias: 0.1,
   useLiveBook: true,
+  fillCooldownMs: 5000,
 }
 
 /** @deprecated Prefer STRICT_PAPER_MM_CONFIG — kept as alias for imports. */
@@ -116,6 +120,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     spotPollMs: Math.round(clamp(c.spotPollMs, 500, 10_000)),
     bookPollMs: Math.round(clamp(c.bookPollMs, 300, 10_000)),
     useLiveBook: Boolean(c.useLiveBook),
+    fillCooldownMs: Math.round(clamp(c.fillCooldownMs, 0, 60_000)),
     midMoveRequoteCents: clamp(c.midMoveRequoteCents, 0.25, 10),
     inventorySkewCentsPerUnit: clamp(c.inventorySkewCentsPerUnit, 0, 2),
     guardWidenCents: clamp(c.guardWidenCents, 0, 30),

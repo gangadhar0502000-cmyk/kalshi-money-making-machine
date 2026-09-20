@@ -18,7 +18,12 @@ import {
   presetsForMode,
   type PaperMmConfig,
 } from './config'
-import { detectBookFills, type OrderBookSnapshot } from './orderbook'
+import {
+  detectBookFills,
+  DEFAULT_DETECT_STATE,
+  type DetectBookFillsState,
+  type OrderBookSnapshot,
+} from './orderbook'
 import { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
 import { asDollarPrice, clampPx } from './prices'
 import type {
@@ -91,6 +96,11 @@ export class PaperMmEngine {
   private bookBestAsk: number | null = null
   private unitsWarning: string | null = null
   private lastUnrealizedAbs = 0
+  private lastFillAt = 0
+  private midWalkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
+  private moneyPrinterBug = false
+  private lastTotalPnl = 0
+  private lastTotalPnlAt = 0
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
@@ -191,6 +201,7 @@ export class PaperMmEngine {
       bookBestBid: this.bookBestBid,
       bookBestAsk: this.bookBestAsk,
       unitsWarning: this.unitsWarning,
+      moneyPrinterBug: this.moneyPrinterBug,
     }
   }
 
@@ -206,6 +217,8 @@ export class PaperMmEngine {
       this.bookBestBid = null
       this.bookBestAsk = null
       this.liveBook = false
+      this.midWalkState = { ...DEFAULT_DETECT_STATE }
+      this.lastFillAt = 0
       if (this.running) {
         this.rebuildQuote(true)
         void this.pollSpot()
@@ -228,6 +241,11 @@ export class PaperMmEngine {
     this.sessionStartedAt = Date.now()
     this.unitsWarning = null
     this.lastUnrealizedAbs = 0
+    this.moneyPrinterBug = false
+    this.lastTotalPnl = 0
+    this.lastTotalPnlAt = 0
+    this.lastFillAt = 0
+    this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = this.config.strictRealism
       ? 'Paper MM running (strict realism). Read-only API · never places trades.'
       : 'Paper MM running (LOOSE debug). Fills are soft — not live edge.'
@@ -267,6 +285,11 @@ export class PaperMmEngine {
     this.prevBook = null
     this.unitsWarning = null
     this.lastUnrealizedAbs = 0
+    this.moneyPrinterBug = false
+    this.lastTotalPnl = 0
+    this.lastTotalPnlAt = 0
+    this.lastFillAt = 0
+    this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = 'Session reset. Paper cash restored. Read-only API · never places trades.'
     this.emit()
   }
@@ -370,22 +393,36 @@ export class PaperMmEngine {
       this.rebuildQuote(false)
     }
 
-    if (this.quote?.active) {
-      const signals = detectBookFills(
-        this.prevBook,
-        book,
-        this.quote,
-        this.inventory,
-        this.config.maxInventory,
-      )
-      const stats = this.spotHist.stats(this.config.spotWindowSec)
-      for (const sig of signals) {
-        const toxic =
-          (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
-          (sig.side === 'sell_yes' && stats.signedPct > 0.02)
-        this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
+    if (this.quote?.active && !this.moneyPrinterBug) {
+      const now = Date.now()
+      const cooling = now - this.lastFillAt < this.config.fillCooldownMs
+      if (!cooling) {
+        const signals = detectBookFills(
+          this.prevBook,
+          book,
+          this.quote,
+          this.inventory,
+          this.config.maxInventory,
+          this.midWalkState,
+        )
+        // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
+        const sig = signals[0]
+        if (sig) {
+          const stats = this.spotHist.stats(this.config.spotWindowSec)
+          const toxic =
+            (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
+            (sig.side === 'sell_yes' && stats.signedPct > 0.02)
+          this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
+          this.lastFillAt = now
+          this.rebuildQuote(true)
+        }
+      } else {
+        // Keep mid-walk arming fresh while cooling; do not detect fills
+        const bid = this.quote.yesBid
+        const ask = this.quote.yesAsk
+        if (mid > bid + 1e-9) this.midWalkState.midWalkBidArmed = true
+        if (mid < ask - 1e-9) this.midWalkState.midWalkAskArmed = true
       }
-      if (signals.length) this.rebuildQuote(true)
     }
 
     this.prevBook = book
@@ -563,6 +600,10 @@ export class PaperMmEngine {
       return
     }
     const now = Date.now()
+    if (this.moneyPrinterBug) {
+      if (this.quote) this.quote = { ...this.quote, active: false }
+      return
+    }
     const guardCancel = this.guardMode === 'cancel' && now < this.guardActiveUntil
     if (guardCancel) {
       if (this.quote) this.quote = { ...this.quote, active: false }
@@ -608,9 +649,13 @@ export class PaperMmEngine {
     }
   }
 
-  /** Soft-sim fallback when L2 proxy is unavailable. */
+  /** Soft-sim fallback when L2 proxy is unavailable. Disabled under strict / live book. */
   private simulateSoftFills(midRaw: number): void {
     if (!this.running || !this.quote?.active || !this.market || this.settled) return
+    if (this.moneyPrinterBug) return
+    // Kill soft fills entirely when live book is up, or always under strict realism
+    if (this.config.strictRealism) return
+    if (this.config.useLiveBook && this.liveBook) return
     const mid = asDollarPrice(midRaw, 'soft.mid')
     const q = this.quote
     const stats = this.spotHist.stats(this.config.spotWindowSec)
@@ -619,7 +664,9 @@ export class PaperMmEngine {
 
     if (mid <= q.yesBid && this.inventory < this.config.maxInventory) {
       if (Math.random() < this.config.midCrossFillProb) {
+        if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
         this.applyFill('buy_yes', q.yesBid, q.size, mid, spotDown, 'mid_cross', false)
+        this.lastFillAt = Date.now()
         this.rebuildQuote(true)
       } else {
         this.midCrossRejectCount += 1
@@ -629,7 +676,9 @@ export class PaperMmEngine {
     }
     if (mid >= q.yesAsk && this.inventory > -this.config.maxInventory) {
       if (Math.random() < this.config.midCrossFillProb) {
+        if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
         this.applyFill('sell_yes', q.yesAsk, q.size, mid, spotUp, 'mid_cross', false)
+        this.lastFillAt = Date.now()
         this.rebuildQuote(true)
       } else {
         this.midCrossRejectCount += 1
@@ -637,9 +686,6 @@ export class PaperMmEngine {
       }
       return
     }
-
-    // Strict + preferred live book: do not spam random fills while waiting for book.
-    if (this.config.strictRealism && this.config.useLiveBook) return
 
     let buyProb = this.config.baseFillProb
     let sellProb = this.config.baseFillProb
@@ -651,6 +697,7 @@ export class PaperMmEngine {
     buyProb = clampProb(buyProb)
     sellProb = clampProb(sellProb)
 
+    if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
     const r = Math.random()
     if (r < buyProb && this.inventory < this.config.maxInventory) {
       this.applyFill(
@@ -662,6 +709,7 @@ export class PaperMmEngine {
         spotDown ? 'random_toxic' : 'random',
         false,
       )
+      this.lastFillAt = Date.now()
       this.rebuildQuote(true)
     } else if (r < buyProb + sellProb && this.inventory > -this.config.maxInventory) {
       this.applyFill(
@@ -673,6 +721,7 @@ export class PaperMmEngine {
         spotUp ? 'random_toxic' : 'random',
         false,
       )
+      this.lastFillAt = Date.now()
       this.rebuildQuote(true)
     }
   }
@@ -755,6 +804,33 @@ export class PaperMmEngine {
     if (toxic) {
       this.message = `Toxic ${side} @ ${(price * 100).toFixed(0)}¢ — spot moved against you.`
     }
+
+    this.checkMoneyPrinterBug()
+  }
+
+  /**
+   * If |Δ Total P&L| > $1 in under 2s, freeze quoting — money-printer fill bug.
+   */
+  private checkMoneyPrinterBug(): void {
+    if (this.moneyPrinterBug) return
+    const mid = this.midDollars()
+    const total = this.realizedSpreadPnl + this.unrealizedDollars(mid)
+    const now = Date.now()
+    if (this.lastTotalPnlAt > 0) {
+      const dt = now - this.lastTotalPnlAt
+      const dPnl = Math.abs(total - this.lastTotalPnl)
+      if (dt < 2000 && dPnl > 1) {
+        this.moneyPrinterBug = true
+        if (this.quote) this.quote = { ...this.quote, active: false }
+        this.message =
+          'MONEY PRINTER BUG — paused. |Δ Total P&L| > $1 in under 2s. Reset session. Read-only · never places trades.'
+        console.error(
+          `[paper-mm] MONEY PRINTER BUG: ΔP&L=$${dPnl.toFixed(2)} in ${dt}ms — quoting frozen`,
+        )
+      }
+    }
+    this.lastTotalPnl = total
+    this.lastTotalPnlAt = now
   }
 }
 

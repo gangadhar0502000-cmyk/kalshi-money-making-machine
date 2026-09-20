@@ -86,6 +86,11 @@ export interface MmSnapshot {
   bookBestBid: number | null
   bookBestAsk: number | null
   unitsWarning: string | null
+  /**
+   * True when |Δ Total P&L| > $1 in under 2s — quoting frozen.
+   * Indicates a money-printer fill bug; user must Reset.
+   */
+  moneyPrinterBug: boolean
 }
 
 export interface MmEngineState {

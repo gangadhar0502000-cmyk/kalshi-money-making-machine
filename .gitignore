@@ -33,3 +33,6 @@ pnpm-debug.log*
 # OS / misc
 .cache
 coverage
+.env.local
+*.pem
+*.key

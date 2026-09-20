@@ -105,7 +105,17 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         edge.</strong>
       </div>
 
-      {showSoftWarn && (
+      {s.moneyPrinterBug && (
+        <div className="rounded-xl border-2 border-rose-500 bg-rose-600 px-4 py-4 text-base font-bold text-white shadow-lg shadow-rose-900/50">
+          🛑 MONEY PRINTER BUG — paused
+          <p className="mt-1 text-sm font-medium text-rose-100">
+            |Δ Total P&amp;L| exceeded $1 in under 2 seconds. Quoting frozen. Hit Reset, then
+            restart. Read-only API · never places trades.
+          </p>
+        </div>
+      )}
+
+      {showSoftWarn && !s.moneyPrinterBug && (
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
           ⚠ Sim too friendly / check fill rate — not live edge. Session P&amp;L rose unrealistically
           fast for a harsh paper book (or loose mode is on).
@@ -155,10 +165,20 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                s.running ? 'bg-violet-950 text-violet-200' : 'bg-slate-800 text-slate-400'
+                s.moneyPrinterBug
+                  ? 'bg-rose-600 text-white'
+                  : s.running
+                    ? 'bg-violet-950 text-violet-200'
+                    : 'bg-slate-800 text-slate-400'
               }`}
             >
-              {s.settled ? 'SETTLED' : s.running ? 'RUNNING' : 'STOPPED'}
+              {s.moneyPrinterBug
+                ? 'MONEY PRINTER BUG'
+                : s.settled
+                  ? 'SETTLED'
+                  : s.running
+                    ? 'RUNNING'
+                    : 'STOPPED'}
             </span>
           </div>
         </div>

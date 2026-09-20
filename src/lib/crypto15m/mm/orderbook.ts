@@ -1,6 +1,9 @@
 /**
  * Parse Kalshi L2 orderbook_fp and detect maker fills from depth changes / mid walks.
  * Prices in dollars 0–1. Does not place orders.
+ *
+ * Hard realism: at most ONE fill per poll (never buy+sell same tick),
+ * book_depth only at touch (±0.5¢), mid_walk only on armed crossings.
  */
 
 import { asDollarPrice } from './prices'
@@ -107,8 +110,24 @@ export type BookFillSignal = {
   taker: boolean
 }
 
+/** Touch tolerance: 0.5¢ = $0.005 */
+const TOUCH_TOL = 0.005
+
+export type DetectBookFillsState = {
+  /** Mid was above our bid since last bid mid_walk — armed for next down-cross. */
+  midWalkBidArmed: boolean
+  /** Mid was below our ask since last ask mid_walk — armed for next up-cross. */
+  midWalkAskArmed: boolean
+}
+
+export const DEFAULT_DETECT_STATE: DetectBookFillsState = {
+  midWalkBidArmed: true,
+  midWalkAskArmed: true,
+}
+
 /**
  * Infer fills for resting (or crossing) simulated quotes from consecutive L2 snapshots.
+ * Returns at most ONE signal — never buy and sell in the same poll.
  */
 export function detectBookFills(
   prev: OrderBookSnapshot | null,
@@ -116,111 +135,134 @@ export function detectBookFills(
   quote: { yesBid: number; yesAsk: number; size: number; active: boolean },
   inventory: number,
   maxInventory: number,
+  walkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE },
 ): BookFillSignal[] {
-  const out: BookFillSignal[] = []
-  if (!quote.active) return out
+  if (!quote.active) return []
 
   const bid = asDollarPrice(quote.yesBid, 'quote.bid')
   const ask = asDollarPrice(quote.yesAsk, 'quote.ask')
   const size = Math.max(1, Math.round(quote.size))
 
-  // Immediate cross → taker
+  // Immediate cross → taker (single fill, then stop)
   if (bid >= next.bestAsk - 1e-9 && inventory < maxInventory) {
-    const avail = Math.max(size, Math.floor(depthAskAtOrBelow(next, bid)))
-    out.push({
-      side: 'buy_yes',
-      price: Math.min(bid, next.bestAsk),
-      size: Math.min(size, Math.max(1, avail)),
-      reason: 'taker_cross',
-      taker: true,
-    })
-    return out
+    const avail = Math.max(1, Math.floor(depthAskAtOrBelow(next, bid)))
+    return [
+      {
+        side: 'buy_yes',
+        price: Math.min(bid, next.bestAsk),
+        size: Math.min(size, avail),
+        reason: 'taker_cross',
+        taker: true,
+      },
+    ]
   }
   if (ask <= next.bestBid + 1e-9 && inventory > -maxInventory) {
-    const avail = Math.max(size, Math.floor(depthBidAtOrAbove(next, ask)))
-    out.push({
-      side: 'sell_yes',
-      price: Math.max(ask, next.bestBid),
-      size: Math.min(size, Math.max(1, avail)),
-      reason: 'taker_cross',
-      taker: true,
-    })
-    return out
+    const avail = Math.max(1, Math.floor(depthBidAtOrAbove(next, ask)))
+    return [
+      {
+        side: 'sell_yes',
+        price: Math.max(ask, next.bestBid),
+        size: Math.min(size, avail),
+        reason: 'taker_cross',
+        taker: true,
+      },
+    ]
   }
 
-  if (!prev || prev.ticker !== next.ticker) return out
+  // book_depth / mid_walk require a previous snapshot of the same ticker
+  if (!prev || prev.ticker !== next.ticker) {
+    // Still update arming from current mid so first cross after book appears works
+    const mid = asDollarPrice(next.mid, 'next.mid')
+    if (mid > bid + 1e-9) walkState.midWalkBidArmed = true
+    if (mid < ask - 1e-9) walkState.midWalkAskArmed = true
+    return []
+  }
 
   const prevMid = asDollarPrice(prev.mid, 'prev.mid')
   const nextMid = asDollarPrice(next.mid, 'next.mid')
 
-  // Mid walk through resting quotes
+  // Re-arm when mid is clearly on the safe side of the quote (uncrossed)
+  if (nextMid > bid + 1e-9) walkState.midWalkBidArmed = true
+  if (nextMid < ask - 1e-9) walkState.midWalkAskArmed = true
+
+  // Mid walk through resting quotes — only once per crossing (armed)
   if (
+    walkState.midWalkBidArmed &&
     prevMid > bid + 1e-9 &&
     nextMid <= bid + 1e-9 &&
     inventory < maxInventory
   ) {
-    out.push({
-      side: 'buy_yes',
-      price: bid,
-      size,
-      reason: 'mid_walk',
-      taker: false,
-    })
-  } else if (
+    walkState.midWalkBidArmed = false
+    return [
+      {
+        side: 'buy_yes',
+        price: bid,
+        size,
+        reason: 'mid_walk',
+        taker: false,
+      },
+    ]
+  }
+  if (
+    walkState.midWalkAskArmed &&
     prevMid < ask - 1e-9 &&
     nextMid >= ask - 1e-9 &&
     inventory > -maxInventory
   ) {
-    out.push({
-      side: 'sell_yes',
-      price: ask,
-      size,
-      reason: 'mid_walk',
-      taker: false,
-    })
+    walkState.midWalkAskArmed = false
+    return [
+      {
+        side: 'sell_yes',
+        price: ask,
+        size,
+        reason: 'mid_walk',
+        taker: false,
+      },
+    ]
   }
 
-  // Depth consumption at our price (aggressive flow)
+  // Depth consumption at our price — ONLY if we are at the touch (±0.5¢)
+  const bidAtTouch =
+    Math.abs(bid - next.bestBid) <= TOUCH_TOL + 1e-9 ||
+    Math.abs(bid - prev.bestBid) <= TOUCH_TOL + 1e-9
   const bidDepthPrev = depthBidAtOrAbove(prev, bid)
   const bidDepthNext = depthBidAtOrAbove(next, bid)
   const bidConsumed = bidDepthPrev - bidDepthNext
-  // Only count if we were competitive (at/near touch)
-  const bidCompetitive = bid + 1e-9 >= next.bestBid - 0.02 || bid + 1e-9 >= prev.bestBid - 0.02
-  if (
-    bidConsumed >= 1 &&
-    bidCompetitive &&
-    inventory < maxInventory &&
-    !out.some((f) => f.side === 'buy_yes')
-  ) {
-    const fillSz = Math.min(size, Math.max(1, Math.floor(bidConsumed)))
-    out.push({
-      side: 'buy_yes',
-      price: bid,
-      size: fillSz,
-      reason: 'book_depth',
-      taker: false,
-    })
+  if (bidAtTouch && bidConsumed >= 1 && inventory < maxInventory) {
+    const fillSz = Math.min(size, Math.floor(bidConsumed))
+    if (fillSz >= 1) {
+      return [
+        {
+          side: 'buy_yes',
+          price: bid,
+          size: fillSz,
+          reason: 'book_depth',
+          taker: false,
+        },
+      ]
+    }
   }
 
+  const askAtTouch =
+    Math.abs(ask - next.bestAsk) <= TOUCH_TOL + 1e-9 ||
+    Math.abs(ask - prev.bestAsk) <= TOUCH_TOL + 1e-9
   const askDepthPrev = depthAskAtOrBelow(prev, ask)
   const askDepthNext = depthAskAtOrBelow(next, ask)
   const askConsumed = askDepthPrev - askDepthNext
-  const askCompetitive = ask - 1e-9 <= next.bestAsk + 0.02 || ask - 1e-9 <= prev.bestAsk + 0.02
-  if (
-    askConsumed >= 1 &&
-    askCompetitive &&
-    inventory > -maxInventory &&
-    !out.some((f) => f.side === 'sell_yes')
-  ) {
-    const fillSz = Math.min(size, Math.max(1, Math.floor(askConsumed)))
-    out.push({
-      side: 'sell_yes',
-      price: ask,
-      size: fillSz,
-      reason: 'book_depth',
-      taker: false,
-    })
+  if (askAtTouch && askConsumed >= 1 && inventory > -maxInventory) {
+    const fillSz = Math.min(size, Math.floor(askConsumed))
+    if (fillSz >= 1) {
+      return [
+        {
+          side: 'sell_yes',
+          price: ask,
+          size: fillSz,
+          reason: 'book_depth',
+          taker: false,
+        },
+      ]
+    }
   }
 
-  return out
+  return []
 }
