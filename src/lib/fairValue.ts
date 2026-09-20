@@ -5,13 +5,24 @@ import {
   fetchNoaaFair,
   type NoaaFairEstimate,
 } from './external/noaa'
-import { detectSportsMarket, fetchOddsFair } from './external/odds'
+import {
+  detectSportsMarket,
+  fetchEspnFallbackFair,
+  matchOddsFair,
+  oddsApiConfigured,
+  parseSportsMarket,
+  prefetchOddsUniverse,
+  type OddsFairEstimate,
+  type SportsMarketParse,
+} from './external/odds'
 import { assessLiquidity } from './liquidity'
 
 export interface FairValueResult {
   fairProb: number
   sources: FairSource[]
   usedExternal: boolean
+  /** Structure-only (no NOAA/odds/demo external) */
+  structureOnly: boolean
 }
 
 interface MidInfo {
@@ -33,9 +44,7 @@ function midOf(raw: KalshiMarketRaw): number {
 
 /**
  * Cross-market / structure heuristics (honest when labeled weak).
- * - Event-peer mean pull for same event_ticker
- * - Nested threshold consistency (higher bar → lower YES)
- * - Complementarity hint when titles look mutually exclusive
+ * Never presented as a TRADE signal in Strict Mode.
  */
 export function structureFair(
   market: KalshiMarketRaw,
@@ -58,13 +67,10 @@ export function structureFair(
     sources.push({ kind, label, detail, weight })
   }
 
-  // Weak prior: mild shrink toward 50¢ — documents uncertainty, never claimed as edge alone
   push(0.5, 0.15, 'weak_prior', 'Weak 50¢ prior', 'Shrink toward coin-flip when signals are thin (weak)')
 
-  // Peer mean within same event (cross-market)
   if (peers.length > 0) {
     const peerMean = peers.reduce((s, p) => s + p.midYes, 0) / peers.length
-    // Only gently pull — peers are related but not identical contracts
     push(
       clamp(selfMid * 0.7 + peerMean * 0.3, 0.02, 0.98),
       0.35,
@@ -74,7 +80,6 @@ export function structureFair(
     )
   }
 
-  // Nested numeric thresholds in same event: "above X" should be monotone
   const selfThresh = extractThreshold(market.title || market.yes_sub_title || '')
   if (selfThresh !== null && peers.length > 0) {
     const nested = peers
@@ -82,12 +87,9 @@ export function structureFair(
       .filter((p) => p.thr !== null) as Array<MidInfo & { thr: number }>
 
     if (nested.length > 0) {
-      // If a higher threshold trades richer than a lower one, fair-adjust toward monotone
-      let adjusted = selfMid
       for (const p of nested) {
         if (p.thr > selfThresh && p.midYes > selfMid + 0.02) {
-          // Violation: higher bar priced higher — pull our fair up a bit / theirs would be down
-          adjusted = clamp((selfMid + p.midYes) / 2 + 0.02, 0.02, 0.98)
+          const adjusted = clamp((selfMid + p.midYes) / 2 + 0.02, 0.02, 0.98)
           push(
             adjusted,
             0.4,
@@ -96,7 +98,7 @@ export function structureFair(
             `Higher threshold ${p.thr} mid ${(p.midYes * 100).toFixed(0)}¢ > this ${selfThresh} mid ${(selfMid * 100).toFixed(0)}¢ — structure adjust (weak)`,
           )
         } else if (p.thr < selfThresh && p.midYes < selfMid - 0.02) {
-          adjusted = clamp((selfMid + p.midYes) / 2 - 0.02, 0.02, 0.98)
+          const adjusted = clamp((selfMid + p.midYes) / 2 - 0.02, 0.02, 0.98)
           push(
             adjusted,
             0.4,
@@ -109,7 +111,6 @@ export function structureFair(
     }
   }
 
-  // Complementarity: title pairs like "Dem control" vs implied opposite in same event
   const complement = peers.find((p) => looksComplementary(market.title || '', p.title))
   if (complement) {
     const implied = clamp(1 - complement.midYes, 0.02, 0.98)
@@ -122,8 +123,8 @@ export function structureFair(
     )
   }
 
-  // Anchor to own mid so we don't invent large edges from structure alone
-  push(selfMid, 0.4, 'structure', 'Kalshi mid anchor', `Own mid ${(selfMid * 100).toFixed(0)}¢ as structure anchor`)
+  // Heavy anchor to own mid so structure alone cannot invent large fake edges
+  push(selfMid, 0.55, 'structure', 'Kalshi mid anchor', `Own mid ${(selfMid * 100).toFixed(0)}¢ as structure anchor (not external fair)`)
 
   fair = weightSum > 0 ? clamp(acc / weightSum, 0.02, 0.98) : selfMid
   return { fair, sources }
@@ -154,12 +155,14 @@ function looksComplementary(a: string, b: string): boolean {
 
 export interface ExternalContext {
   noaaByTicker: Record<string, NoaaFairEstimate>
-  oddsByTicker: Record<string, { fairProb: number; detail: string }>
+  oddsByTicker: Record<string, OddsFairEstimate>
+  sportsParses: Record<string, SportsMarketParse>
+  oddsApiConfigured: boolean
 }
 
 /**
  * Prefetch free external signals for a market universe.
- * NOAA works without keys; Odds API is optional via VITE_ODDS_API_KEY.
+ * NOAA works without keys; Odds API via VITE_ODDS_API_KEY; ESPN keyless fallback.
  */
 export async function prefetchExternals(
   markets: KalshiMarketRaw[],
@@ -167,9 +170,10 @@ export async function prefetchExternals(
 ): Promise<ExternalContext> {
   const noaaByTicker: ExternalContext['noaaByTicker'] = {}
   const oddsByTicker: ExternalContext['oddsByTicker'] = {}
+  const sportsParses: ExternalContext['sportsParses'] = {}
 
   const weatherJobs: Promise<void>[] = []
-  const oddsJobs: Promise<void>[] = []
+  const sportsParsesList: SportsMarketParse[] = []
 
   for (const m of markets) {
     const title = m.title || m.yes_sub_title || m.ticker
@@ -193,28 +197,62 @@ export async function prefetchExternals(
     }
 
     if (detectSportsMarket(title, m.ticker, m.category || '')) {
-      oddsJobs.push(
-        (async () => {
-          const odds = await fetchOddsFair(title, signal)
-          if (odds) {
-            oddsByTicker[m.ticker] = { fairProb: odds.fairProb, detail: odds.detail }
-          } else if (m.demo_fair_prob !== undefined && m.demo_fair_source) {
-            oddsByTicker[m.ticker] = {
-              fairProb: m.demo_fair_prob,
-              detail: m.demo_fair_source,
-            }
-          }
-        })(),
-      )
+      const parsed = parseSportsMarket(title, m.ticker, m.category || '')
+      sportsParses[m.ticker] = parsed
+      sportsParsesList.push(parsed)
     }
   }
 
+  // Batch Odds API by league (one request per sport, not per market)
+  let bySport = new Map()
+  if (sportsParsesList.length > 0 && oddsApiConfigured()) {
+    try {
+      bySport = await prefetchOddsUniverse(sportsParsesList, signal)
+    } catch {
+      bySport = new Map()
+    }
+  }
+
+  const oddsJobs: Promise<void>[] = []
+  for (const m of markets) {
+    const parsed = sportsParses[m.ticker]
+    if (!parsed) continue
+
+    oddsJobs.push(
+      (async () => {
+        let odds: OddsFairEstimate | null = matchOddsFair(parsed, bySport)
+
+        if (!odds) {
+          odds = await fetchEspnFallbackFair(parsed, signal)
+        }
+
+        if (odds) {
+          oddsByTicker[m.ticker] = odds
+        } else if (m.demo_fair_prob !== undefined && m.demo_fair_source) {
+          oddsByTicker[m.ticker] = {
+            fairProb: m.demo_fair_prob,
+            detail: m.demo_fair_source,
+            bookCount: 0,
+            source: 'demo',
+            marketType: 'unknown',
+          }
+        }
+      })(),
+    )
+  }
+
   await Promise.allSettled([...weatherJobs, ...oddsJobs])
-  return { noaaByTicker, oddsByTicker }
+  return {
+    noaaByTicker,
+    oddsByTicker,
+    sportsParses,
+    oddsApiConfigured: oddsApiConfigured(),
+  }
 }
 
 /**
  * Blend structure + external sources into a single fair P(YES).
+ * External sources dominate when present; structure alone stays tightly mid-anchored.
  */
 export function estimateFairValue(
   market: KalshiMarketRaw,
@@ -225,13 +263,13 @@ export function estimateFairValue(
   const sources: FairSource[] = [...structSources]
   let usedExternal = false
 
-  let acc = structFair * 0.35
-  let w = 0.35
+  let acc = 0
+  let w = 0
 
   const noaa = externals.noaaByTicker[market.ticker]
   if (noaa) {
     const isLive = noaa.detail.startsWith('NWS')
-    const weight = isLive ? 0.7 : 0.55
+    const weight = isLive ? 0.85 : 0.7
     acc += noaa.fairProb * weight
     w += weight
     usedExternal = true
@@ -245,27 +283,32 @@ export function estimateFairValue(
 
   const odds = externals.oddsByTicker[market.ticker]
   if (odds) {
-    const isDemo = odds.detail.toLowerCase().includes('demo')
-    const weight = isDemo ? 0.5 : 0.65
+    const isDemo = odds.source === 'demo'
+    const isFallback = odds.source === 'espn_fallback'
+    const weight = isDemo ? 0.75 : isFallback ? 0.55 : 0.9
     acc += odds.fairProb * weight
     w += weight
     usedExternal = true
     sources.push({
-      kind: isDemo ? 'demo_external' : 'odds_api',
-      label: isDemo ? 'Demo sports fair' : 'Odds API',
+      kind: isDemo ? 'demo_external' : isFallback ? 'odds_fallback' : 'odds_api',
+      label: isDemo
+        ? 'Demo sports fair'
+        : isFallback
+          ? 'ESPN keyless fallback'
+          : 'Odds API consensus',
       detail: odds.detail,
       weight,
     })
   }
 
-  // Explicit fixture override for non-weather demo edge examples
+  // Explicit fixture override for non-weather / non-sports demo edge examples
   if (
     market.demo_fair_prob !== undefined &&
     !noaa &&
     !odds &&
     market.demo_fair_source
   ) {
-    const weight = 0.6
+    const weight = 0.85
     acc += market.demo_fair_prob * weight
     w += weight
     usedExternal = true
@@ -277,8 +320,22 @@ export function estimateFairValue(
     })
   }
 
-  const fairProb = clamp(acc / w, 0.02, 0.98)
-  return { fairProb, sources, usedExternal }
+  // When we have external fair, lightly blend structure; when not, structure-only
+  if (usedExternal) {
+    acc += structFair * 0.15
+    w += 0.15
+  } else {
+    acc = structFair
+    w = 1
+  }
+
+  const fairProb = clamp(acc / Math.max(w, 1e-9), 0.02, 0.98)
+  return {
+    fairProb,
+    sources,
+    usedExternal,
+    structureOnly: !usedExternal,
+  }
 }
 
 export function buildUniverse(markets: KalshiMarketRaw[]): MidInfo[] {
@@ -290,4 +347,3 @@ export function buildUniverse(markets: KalshiMarketRaw[]): MidInfo[] {
     category: m.category || 'Other',
   }))
 }
-

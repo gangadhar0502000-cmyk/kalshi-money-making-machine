@@ -38,11 +38,12 @@ export interface KalshiMarketsResponse {
 
 export type Side = 'YES' | 'NO'
 
-export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW'
+export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNRANKED'
 
 export type FairSourceKind =
   | 'noaa'
   | 'odds_api'
+  | 'odds_fallback'
   | 'cross_market'
   | 'structure'
   | 'demo_external'
@@ -55,6 +56,9 @@ export interface FairSource {
   /** Weight 0–1 used when blending sources */
   weight: number
 }
+
+/** TRADE = external fair + liquidity; RESEARCH = structure-only / weak */
+export type OpportunityKind = 'TRADE' | 'RESEARCH'
 
 export interface ScoredOpportunity {
   ticker: string
@@ -81,7 +85,12 @@ export interface ScoredOpportunity {
   edgePct: number
   /** Absolute edge used for ranking / filters */
   absEdgePct: number
-  /** Legacy display score: blends |edge| with liquidity for sorting */
+  /**
+   * Rank score for sorting only — NOT edge.
+   * Never display as the hero "edge" metric.
+   */
+  rankScore: number
+  /** @deprecated alias of rankScore for older UI bits */
   edgeScore: number
   confidence: ConfidenceLevel
   fairSources: FairSource[]
@@ -91,6 +100,12 @@ export interface ScoredOpportunity {
   kalshiUrl: string
   passedLiquidityGate: boolean
   liquidityFailReasons: string[]
+  /** True when NOAA / Odds API / demo external contributed to fair */
+  hasExternalFair: boolean
+  /** TRADE only when liquid + external fair; else RESEARCH (structure-only) */
+  opportunityKind: OpportunityKind
+  /** True when sports/climate market lacked external fair (blocked in strict) */
+  blockedMissingExternal: boolean
   scoreBreakdown: {
     liquidity: number
     spread: number
@@ -143,4 +158,18 @@ export interface FilterState {
   search: string
   /** When true (default), hide markets that fail the hard liquidity gate */
   hideIlliquid: boolean
+  /**
+   * Strict mode (default ON): only show TRADE opportunities —
+   * passed liquidity + external fair value + |edge| ≥ threshold.
+   * Structure-only vibes are hidden.
+   */
+  strictMode: boolean
+}
+
+export interface ScoreMeta {
+  oddsApiConfigured: boolean
+  sportsMarketsSeen: number
+  sportsBlockedNoExternal: number
+  structureOnlyCount: number
+  tradeableCount: number
 }

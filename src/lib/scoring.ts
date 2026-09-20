@@ -1,6 +1,8 @@
 import type {
   ConfidenceLevel,
   KalshiMarketRaw,
+  OpportunityKind,
+  ScoreMeta,
   ScoredOpportunity,
   Side,
 } from '../types/kalshi'
@@ -17,6 +19,7 @@ import {
   kalshiMarketUrl,
 } from './format'
 import { assessLiquidity } from './liquidity'
+import { oddsApiConfigured } from './external/odds'
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n))
@@ -52,26 +55,35 @@ function scoreSpread(spreadCents: number): number {
   return clamp(20 - (spreadCents - 8) * 2, 0, 20)
 }
 
-/** Minimum |edge| in percentage points to surface as a trade card by default ranking boost */
+/** Strict-mode default minimum |edge| in percentage points */
+export const STRICT_MIN_EDGE_PP = 5
+/** Loose / research minimum */
 export const MIN_EDGE_PP = 3
+
+const EXTERNAL_KINDS = new Set(['noaa', 'odds_api', 'odds_fallback', 'demo_external'])
 
 function confidenceFor(
   usedExternal: boolean,
   liquidityOk: boolean,
   absEdgePct: number,
   sources: { kind: string }[],
+  opportunityKind: OpportunityKind,
 ): ConfidenceLevel {
-  const hasExternal = sources.some(
-    (s) => s.kind === 'noaa' || s.kind === 'odds_api' || s.kind === 'demo_external',
-  )
-  // HIGH only when external fair source used + liquidity ok + meaningful edge
-  if (liquidityOk && absEdgePct >= MIN_EDGE_PP && (hasExternal || usedExternal)) return 'HIGH'
-  if (liquidityOk && absEdgePct >= 2) return 'MEDIUM'
+  if (opportunityKind === 'RESEARCH' || !usedExternal) return 'UNRANKED'
+
+  const hasExternal = sources.some((s) => EXTERNAL_KINDS.has(s.kind))
+  if (liquidityOk && absEdgePct >= STRICT_MIN_EDGE_PP && (hasExternal || usedExternal)) {
+    // ESPN fallback alone stays MEDIUM
+    const onlyFallback =
+      sources.filter((s) => EXTERNAL_KINDS.has(s.kind)).every((s) => s.kind === 'odds_fallback')
+    if (onlyFallback) return 'MEDIUM'
+    return 'HIGH'
+  }
+  if (liquidityOk && absEdgePct >= MIN_EDGE_PP && usedExternal) return 'MEDIUM'
   return 'LOW'
 }
 
 function kellyLiteStake(entry: number, fairProb: number, side: Side): number {
-  // fair for the side we buy
   const p = side === 'YES' ? fairProb : 1 - fairProb
   const price = clamp(entry, 0.01, 0.99)
   const b = (1 - price) / price
@@ -99,8 +111,14 @@ export function scoreMarket(
   const edgePct = edgeFrac * 100
   const absEdgePct = Math.abs(edgePct)
 
+  const hasExternalFair = fair.usedExternal
+  const opportunityKind: OpportunityKind =
+    liq.passed && hasExternalFair ? 'TRADE' : 'RESEARCH'
+
+  const blockedMissingExternal =
+    liq.isSports && liq.passed && !hasExternalFair
+
   let suggestedSide: Side = edgePct >= 0 ? 'YES' : 'NO'
-  // Require minimum edge to lean; otherwise cheaper-side scan cue only
   if (absEdgePct < 1.5) {
     suggestedSide = liq.midYes <= 0.5 ? 'YES' : 'NO'
   }
@@ -114,25 +132,27 @@ export function scoreMarket(
         ? liq.noAsk
         : 1 - liq.midYes
 
-  const suggestedStakePct = kellyLiteStake(entry, fair.fairProb, suggestedSide)
+  const suggestedStakePct =
+    opportunityKind === 'TRADE' ? kellyLiteStake(entry, fair.fairProb, suggestedSide) : 0
 
   const conf = confidenceFor(
     fair.usedExternal,
     liq.passed,
     absEdgePct,
     fair.sources,
+    opportunityKind,
   )
 
   const spread = scoreSpread(liq.spreadCents)
   const time = scoreTime(hours)
   const volumeMomentum = scoreVolumeMomentum(liq.volume, liq.volume24h)
   const fairConfidence =
-    conf === 'HIGH' ? 90 : conf === 'MEDIUM' ? 60 : 30
+    conf === 'HIGH' ? 90 : conf === 'MEDIUM' ? 60 : conf === 'LOW' ? 30 : 10
 
-  // Rank score: tradeable |edge| dominates, gated by liquidity
-  const edgeScore = Math.round(
+  // Rank score for sorting ONLY — never the hero "edge" metric in UI
+  const rankScore = Math.round(
     clamp(
-      (liq.passed ? 1 : 0.25) *
+      (opportunityKind === 'TRADE' ? 1 : 0.15) *
         (absEdgePct * 6 + liq.liquidityScore * 0.35 + fairConfidence * 0.25 + spread * 0.15),
       0,
       100,
@@ -140,11 +160,18 @@ export function scoreMarket(
   )
 
   const title = raw.title?.trim() || raw.yes_sub_title?.trim() || raw.ticker
-  const category = inferCategory(raw)
+  const category = liq.category || inferCategory(raw)
   const rationale: string[] = []
 
-  if (!liq.passed) {
-    rationale.push(`Filtered / weak liquidity: ${liq.failReasons[0] ?? 'failed gate'}`)
+  if (opportunityKind === 'RESEARCH') {
+    if (!liq.passed) {
+      rationale.push(`Illiquid / failed gate: ${liq.failReasons[0] ?? 'failed gate'}`)
+    }
+    if (!hasExternalFair) {
+      rationale.push(
+        'UNRANKED / research-only: no external fair value (structure heuristics only). Not a trade suggestion.',
+      )
+    }
   } else {
     rationale.push(
       `Liquidity OK (score ${liq.liquidityScore}, vol ${Math.round(liq.volume).toLocaleString()}, spread ${liq.spreadCents.toFixed(1)}¢)`,
@@ -152,22 +179,26 @@ export function scoreMarket(
   }
 
   rationale.push(
-    `Fair YES ${(fair.fairProb * 100).toFixed(1)}% vs Kalshi mid ${formatCents(liq.midYes)} → edge ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)} pp`,
+    `Fair YES ${(fair.fairProb * 100).toFixed(1)}% vs Kalshi mid ${(liq.midYes * 100).toFixed(1)}% → edge ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)} pp`,
   )
 
   const sourceLabels = fair.sources
-    .filter((s) => s.kind !== 'weak_prior' && s.kind !== 'structure')
+    .filter((s) => EXTERNAL_KINDS.has(s.kind))
     .slice(0, 3)
     .map((s) => s.label)
   if (sourceLabels.length) {
-    rationale.push(`Sources: ${sourceLabels.join(', ')}`)
+    rationale.push(`External sources: ${sourceLabels.join(', ')}`)
   } else {
-    rationale.push('Sources: structure / weak prior only (not HIGH confidence)')
+    rationale.push('Sources: structure / weak prior only — hidden in Strict Mode')
   }
 
-  rationale.push(
-    `Suggest ${suggestedSide} @ ~${formatCents(entry)} · Kelly-lite ~${suggestedStakePct}% bankroll · confidence ${conf}`,
-  )
+  if (opportunityKind === 'TRADE') {
+    rationale.push(
+      `Trade lean: ${suggestedSide} @ ~${formatCents(entry)} · Kelly-lite ~${suggestedStakePct}% · confidence ${conf}`,
+    )
+  } else {
+    rationale.push('No trade CTA — turn off Strict Mode only to inspect research cards.')
+  }
   rationale.push('Research signal only — not guaranteed profit or financial advice.')
 
   return {
@@ -191,7 +222,8 @@ export function scoreMarket(
     fairProb: fair.fairProb,
     edgePct,
     absEdgePct,
-    edgeScore,
+    rankScore,
+    edgeScore: rankScore,
     confidence: conf,
     fairSources: fair.sources,
     suggestedSide,
@@ -200,6 +232,9 @@ export function scoreMarket(
     kalshiUrl: kalshiMarketUrl(raw.ticker, raw.event_ticker),
     passedLiquidityGate: liq.passed,
     liquidityFailReasons: liq.failReasons,
+    hasExternalFair,
+    opportunityKind,
+    blockedMissingExternal,
     scoreBreakdown: {
       liquidity: liq.liquidityScore,
       spread: Math.round(spread),
@@ -212,7 +247,12 @@ export function scoreMarket(
 
 export function scoreAndRank(
   markets: KalshiMarketRaw[],
-  externals: ExternalContext = { noaaByTicker: {}, oddsByTicker: {} },
+  externals: ExternalContext = {
+    noaaByTicker: {},
+    oddsByTicker: {},
+    sportsParses: {},
+    oddsApiConfigured: oddsApiConfigured(),
+  },
 ): ScoredOpportunity[] {
   const universe = buildUniverse(markets)
   return markets
@@ -222,19 +262,40 @@ export function scoreAndRank(
     })
     .map((m) => scoreMarket(m, universe, externals))
     .sort((a, b) => {
-      // Tradeable edges first
+      // TRADE edges first, then by |edge|
+      if (a.opportunityKind !== b.opportunityKind) {
+        return a.opportunityKind === 'TRADE' ? -1 : 1
+      }
       if (a.passedLiquidityGate !== b.passedLiquidityGate) {
         return a.passedLiquidityGate ? -1 : 1
       }
-      return b.absEdgePct - a.absEdgePct || b.edgeScore - a.edgeScore
+      return b.absEdgePct - a.absEdgePct || b.rankScore - a.rankScore
     })
+}
+
+export function buildScoreMeta(
+  opportunities: ScoredOpportunity[],
+  oddsConfigured: boolean,
+): ScoreMeta {
+  const sports = opportunities.filter((o) => o.category === 'Sports' || o.blockedMissingExternal)
+  return {
+    oddsApiConfigured: oddsConfigured,
+    sportsMarketsSeen: sports.length,
+    sportsBlockedNoExternal: opportunities.filter((o) => o.blockedMissingExternal).length,
+    structureOnlyCount: opportunities.filter((o) => !o.hasExternalFair).length,
+    tradeableCount: opportunities.filter((o) => o.opportunityKind === 'TRADE').length,
+  }
 }
 
 /** Async path: prefetch externals then score. */
 export async function scoreAndRankAsync(
   markets: KalshiMarketRaw[],
   signal?: AbortSignal,
-): Promise<ScoredOpportunity[]> {
+): Promise<{ opportunities: ScoredOpportunity[]; meta: ScoreMeta }> {
   const externals = await prefetchExternals(markets, signal)
-  return scoreAndRank(markets, externals)
+  const opportunities = scoreAndRank(markets, externals)
+  return {
+    opportunities,
+    meta: buildScoreMeta(opportunities, externals.oddsApiConfigured),
+  }
 }

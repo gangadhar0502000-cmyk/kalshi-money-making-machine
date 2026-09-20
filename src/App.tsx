@@ -6,23 +6,25 @@ import { TradeIdeasBoard } from './components/TradeIdeasBoard'
 import { DEMO_CATEGORIES } from './fixtures/demoMarkets'
 import { fetchOpenMarkets } from './lib/api'
 import { loadPortfolio, openPaperTrade, savePortfolio } from './lib/bankroll'
-import { scoreAndRankAsync } from './lib/scoring'
+import { STRICT_MIN_EDGE_PP, scoreAndRankAsync } from './lib/scoring'
 import type {
   DataSource,
   FilterState,
   PaperPortfolio,
+  ScoreMeta,
   ScoredOpportunity,
 } from './types/kalshi'
 
-/** Defaults hide junk: mid 15–85¢, min liquidity, min edge. */
+/** Strict defaults: hide junk + structure-only; min |edge| 5pp. */
 const INITIAL_FILTERS: FilterState = {
   category: 'All',
-  minLiquidity: 40,
-  minEdgePct: 3,
+  minLiquidity: 45,
+  minEdgePct: STRICT_MIN_EDGE_PP,
   midMin: 15,
   midMax: 85,
   search: '',
   hideIlliquid: true,
+  strictMode: true,
 }
 
 export default function App() {
@@ -31,6 +33,7 @@ export default function App() {
   const [error, setError] = useState<string | undefined>()
   const [fetchedAt, setFetchedAt] = useState<string | undefined>()
   const [opportunities, setOpportunities] = useState<ScoredOpportunity[]>([])
+  const [meta, setMeta] = useState<ScoreMeta | undefined>()
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS)
   const [portfolio, setPortfolio] = useState<PaperPortfolio>(() => loadPortfolio())
 
@@ -44,7 +47,8 @@ export default function App() {
       setFetchedAt(result.fetchedAt)
       const scored = await scoreAndRankAsync(result.markets, signal)
       if (signal?.aborted) return
-      setOpportunities(scored)
+      setOpportunities(scored.opportunities)
+      setMeta(scored.meta)
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
@@ -65,6 +69,10 @@ export default function App() {
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase()
     return opportunities.filter((o) => {
+      if (filters.strictMode) {
+        // Strict: only TRADE (liquid + external fair); never surface Suggest-as-trade vibes
+        if (o.opportunityKind !== 'TRADE') return false
+      }
       if (filters.hideIlliquid && !o.passedLiquidityGate) return false
       if (filters.category !== 'All' && o.category !== filters.category) return false
       if (o.liquidityScore < filters.minLiquidity) return false
@@ -85,6 +93,11 @@ export default function App() {
   }
 
   const handlePaperTrade = (opp: ScoredOpportunity) => {
+    if (opp.opportunityKind !== 'TRADE') {
+      alert('Strict Edge Finder: paper trades only on TRADE cards with external fair value.')
+      return
+    }
+
     const entry =
       opp.suggestedSide === 'YES'
         ? opp.yesAsk || opp.midYes
@@ -126,18 +139,27 @@ export default function App() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400/90">
-              Edge Finder · liquidity first
+              Edge Finder v2 · strict external fair
             </p>
             <h1 className="bg-gradient-to-r from-emerald-300 via-slate-100 to-amber-300 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent sm:text-4xl">
               Kalshi Money Making Machine
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Find <strong className="font-medium text-slate-300">tradeable edge</strong> — hard-filter
-              illiquid junk, estimate fair probability from free external / cross-market signals, and
-              show edge vs Kalshi mid. Research tool only; never claims guaranteed profit.
+              Find <strong className="font-medium text-slate-300">tradeable edge</strong> vs sportsbook
+              / NOAA fair value — not illiquid 99¢ junk or structure-only vibes. Primary metric is{' '}
+              <strong className="font-medium text-slate-300">Edge pp</strong>, not a heuristic
+              “Score”. Research tool only; printing money is not guaranteed.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              className="btn btn-ghost"
+              href="https://the-odds-api.com"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Odds API (free key)
+            </a>
             <a
               className="btn btn-ghost"
               href="https://docs.kalshi.com/getting_started/quick_start_market_data"
@@ -161,6 +183,7 @@ export default function App() {
           loading={loading}
           onRefresh={() => void refresh()}
           junkHidden={junkHidden}
+          meta={meta}
         />
       </div>
 
@@ -184,6 +207,7 @@ export default function App() {
             opportunities={filtered}
             bankroll={portfolio.cash}
             onPaperTrade={handlePaperTrade}
+            strictMode={filters.strictMode}
           />
         </div>
         <PaperBankroll
@@ -194,7 +218,7 @@ export default function App() {
       </div>
 
       <footer className="mt-10 border-t border-slate-800/80 pt-6 text-center text-xs text-slate-500">
-        Kalshi Money Making Machine · Edge Finder · Vite + React ·{' '}
+        Kalshi Money Making Machine · Edge Finder v2 · Vite + React ·{' '}
         {source === 'live' ? 'Live API' : 'Demo fixtures'} ·{' '}
         <code className="text-slate-400">npm run dev</code>
       </footer>

@@ -17,18 +17,43 @@ export function FiltersBar({ filters, categories, onChange, count, total }: Prop
             Edge filters
           </h2>
           <p className="text-xs text-slate-500">
-            Showing {count} of {total} markets · junk hidden by default
+            Showing {count} of {total} · Strict Mode hides structure-only vibes
           </p>
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
-          <input
-            type="checkbox"
-            className="rounded border-slate-600"
-            checked={filters.hideIlliquid}
-            onChange={(e) => onChange({ ...filters, hideIlliquid: e.target.checked })}
-          />
-          Hide illiquid / failed gate
-        </label>
+        <div className="flex flex-wrap gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-emerald-300">
+            <input
+              type="checkbox"
+              className="rounded border-slate-600"
+              checked={filters.strictMode}
+              onChange={(e) => {
+                const strictMode = e.target.checked
+                onChange({
+                  ...filters,
+                  strictMode,
+                  // Snap defaults when enabling strict
+                  ...(strictMode
+                    ? {
+                        minEdgePct: Math.max(filters.minEdgePct, 5),
+                        hideIlliquid: true,
+                        minLiquidity: Math.max(filters.minLiquidity, 45),
+                      }
+                    : {}),
+                })
+              }}
+            />
+            Strict Mode
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="rounded border-slate-600"
+              checked={filters.hideIlliquid}
+              onChange={(e) => onChange({ ...filters, hideIlliquid: e.target.checked })}
+            />
+            Hide illiquid / failed gate
+          </label>
+        </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="xl:col-span-2">
@@ -82,7 +107,7 @@ export function FiltersBar({ filters, categories, onChange, count, total }: Prop
         </div>
         <div>
           <label className="label" htmlFor="minEdge">
-            Min |edge| %
+            Min |edge| pp
           </label>
           <input
             id="minEdge"

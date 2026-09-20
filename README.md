@@ -1,21 +1,32 @@
-# Kalshi Money Making Machine — Edge Finder
+# Kalshi Money Making Machine — Edge Finder v2
 
-A **serious, local research tool** for finding **tradeable edge** on [Kalshi](https://kalshi.com) — not a toy “99¢ sure thing” scanner.
+A **serious, local research tool** for finding **tradeable edge** on [Kalshi](https://kalshi.com) — not a toy “99¢ sure thing” scanner, and not structure-only vibes dressed up as trades.
 
-> **Disclaimer:** Educational research only. Estimated fair values and edges are **not** financial advice, **not** proof of mispricing, and **never** guaranteed profit. You can lose money in prediction markets. Do your own research.
+> **Disclaimer:** Educational research only. Estimated fair values and edges are **not** financial advice, **not** proof of mispricing, and **never** guaranteed profit. **Printing money is not guaranteed.** You can lose money in prediction markets. Do your own research.
 
-## Thesis
+## Strict Mode thesis (default ON)
 
-1. **Liquidity first** — Hard-exclude illiquid / locked books (near 1¢ or 99¢ with no depth, tiny volume, empty books, absurd spreads). Prefer mid-priced markets (default **15–85¢**) with real volume and tight spreads.
-2. **Fair value** — Estimate P(YES) from free signals when possible; otherwise honest **structure / cross-market** heuristics labeled weak.
-3. **Edge = fair − Kalshi mid** (percentage points). Surface only above a minimum |edge| threshold. Tag confidence (**HIGH** only when an external fair source was used **and** liquidity passed).
-4. **Trade cards** — Market, Kalshi mid, fair estimate, edge %, liquidity score, suggested side, Kelly-lite stake %, and **why** (sources). Paper-trade locally; never auto-routes real orders.
+1. **Liquidity first** — Hard-exclude illiquid / locked books. **Sports** need higher bars: volume ≥ **5,000** *or* (OI ≥ 2,000 + spread ≤ 4¢ + mid 20–80¢). No more “Suggest YES @ 7–13¢” on thin totals with volume &lt; 500.
+2. **External fair value required** — TRADE cards need NOAA, The Odds API (or demo external fixtures), not Kalshi-mid structure heuristics alone. Structure-only → **UNRANKED / research-only**, hidden in Strict Mode, never a trade CTA.
+3. **Edge pp is the hero metric** — `edge_pp = (fair_prob − kalshi_mid) × 100`. “Rank score” is sorting-only and labeled as such — not confused with edge.
+4. **Min |edge| ≥ 5pp** in Strict Mode defaults.
 
-## Quick start
+Turn Strict Mode off only to inspect UNRANKED research cards.
+
+## Quick start (pull + env)
 
 ```bash
-cd kalshi-money-making-machine
+git pull origin main
+# if your remote default is still master:
+# git pull origin master
+
+cd kalshi-money-making-machine   # if needed
 npm install
+
+cp .env.example .env
+# Edit .env — get a free key at https://the-odds-api.com
+# VITE_ODDS_API_KEY=your_key_here
+
 npm run dev
 ```
 
@@ -26,60 +37,49 @@ npm run build
 npm run preview
 ```
 
-Optional sports odds (free tier key — app works without it):
+## Odds API setup (sports edge)
+
+Strict sports edges need **The Odds API** free key:
+
+1. Create a free account at [https://the-odds-api.com](https://the-odds-api.com)
+2. Copy the API key into `.env`:
 
 ```bash
-cp .env.example .env
-# edit VITE_ODDS_API_KEY=...
+VITE_ODDS_API_KEY=your_key_here
 ```
 
-## Edge methodology (specific)
+3. Restart `npm run dev` (Vite only reads env at startup)
+
+The app matches Kalshi **MLB / NCAAF / NFL / NBA / NHL** moneylines, spreads, and totals to sportsbook consensus implied probabilities and computes Edge pp.
+
+**Keyless fallback:** Without a key, a weak ESPN scoreboard fallback may fill a few moneylines (marked `odds_fallback`, not HIGH). Demo fixtures still show HIGH external-edge cards offline. The UI banner states how many sports markets are blocked for lacking external fair.
+
+## Edge methodology
 
 | Step | What happens |
 | --- | --- |
-| Liquidity gate | Fail if no bid/ask, volume &lt; 2k, OI &lt; 500, spread &gt; 8¢, or near-locked mid with thin depth |
-| Structure fair | Same-event peer blend, nested threshold monotone fixes, complement mids (`1 − peer`), mild 50¢ shrink — **documented weak** when alone |
-| External fair | **NOAA/NWS** (`api.weather.gov`, no key) for detectable weather/temp markets; optional **The Odds API** if `VITE_ODDS_API_KEY` set |
-| Edge | `edge_pp = (fair_prob − kalshi_mid) × 100`; suggest YES if positive, NO if negative |
-| Confidence | **HIGH** = external source (live NOAA/odds or demo-external fixture) + liquidity OK + |edge| ≥ ~3pp; else MEDIUM/LOW |
-| Stake | Quarter-Kelly on estimated edge, capped at **5%** of paper bankroll |
+| Liquidity gate | Fail illiquid / locked / wide books; **sports** use higher volume / tight-spread rules |
+| Structure fair | Peer blend, ladder monotone, complements — **UNRANKED** when alone |
+| External fair | **NOAA/NWS** (weather, no key); **Odds API** (sports, `VITE_ODDS_API_KEY`); ESPN keyless fallback (weak) |
+| Edge | `edge_pp = (fair − mid) × 100`; TRADE lean YES if positive, NO if negative |
+| Confidence | **HIGH** = external (Odds/NOAA/demo) + liquid + \|edge\| ≥ 5pp; structure-only = **UNRANKED** |
+| Stake | Quarter-Kelly on TRADE cards only, capped at **5%** paper bankroll |
 
-Demo fixtures intentionally include **liquid mid-priced edge examples** and **illiquid junk** so you can prove the filter works offline.
+## Card layout
 
-## External sources
-
-| Source | Key required? | Behavior |
-| --- | --- | --- |
-| Kalshi public Trade API | No | Market list / mids (Vite proxy) |
-| Cross-market / structure | No | Always on; weak when sole signal |
-| NOAA / NWS forecast | No | Weather-tagged markets via `/api/noaa` proxy |
-| The Odds API | Optional | Sports; skipped if no `VITE_ODDS_API_KEY` |
-
-No paid APIs are required. Do not commit secrets (`.env` is gitignored).
-
-## UI filters (defaults hide junk)
-
-- Min liquidity score
-- Min |edge| %
-- Mid-price band (¢)
-- Category + search
-- “Hide illiquid / failed gate” (on by default)
-
-## Interpreting a HIGH edge card
-
-**HIGH** means: the book passed the liquidity gate **and** at least one external fair source contributed (NOAA, Odds API, or an explicit demo-external fixture offline). It does **not** mean the trade is safe, arb’d, or profitable. Always read the source details on the card and size with Kelly-lite / flat % paper rules.
+Each TRADE card shows: **Fair % · Kalshi mid % · Edge pp · Confidence · Sources**. Paper trade is disabled on UNRANKED cards.
 
 ## Project layout
 
 ```
 src/
-  components/     Edge filters, trade cards, paper bankroll
-  fixtures/       Demo markets (edges + junk)
+  components/     Filters (Strict Mode), trade cards, paper bankroll
+  fixtures/       Demo HIGH-edge + junk
   lib/
-    liquidity.ts  Hard liquidity gate
+    liquidity.ts  Hard gate (sports-aware)
     fairValue.ts  Fair blend + prefetch
-    scoring.ts    Edge, confidence, Kelly-lite
-    external/     NOAA + optional Odds API
+    scoring.ts    Edge pp, TRADE vs RESEARCH
+    external/     NOAA + Odds API + ESPN fallback
   types/          Shared TypeScript types
 ```
 

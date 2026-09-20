@@ -26,15 +26,22 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/noaa/, ''),
         secure: true,
         headers: {
-          'User-Agent': 'KalshiMoneyMakingMachine/1.0 (edge-finder research; local dev)',
+          'User-Agent': 'KalshiMoneyMakingMachine/2.0 (edge-finder research; local dev)',
           Accept: 'application/geo+json',
         },
       },
-      // Optional The Odds API (key passed as query param from client when set)
+      // The Odds API (key passed as query param from client when set)
       '/api/odds': {
         target: 'https://api.the-odds-api.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/odds/, ''),
+        secure: true,
+      },
+      // Keyless ESPN scoreboard fallback (spread/ML snippets when present)
+      '/api/espn': {
+        target: 'https://site.api.espn.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/espn/, ''),
         secure: true,
       },
     },

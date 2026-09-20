@@ -1,5 +1,5 @@
 import type { KalshiMarketRaw } from '../types/kalshi'
-import { parseCount, parseDollars } from './format'
+import { inferCategory, parseCount, parseDollars } from './format'
 
 export interface LiquidityAssessment {
   midYes: number
@@ -16,23 +16,39 @@ export interface LiquidityAssessment {
   liquidityScore: number
   passed: boolean
   failReasons: string[]
+  category: string
+  isSports: boolean
 }
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n))
 }
 
-/** Hard defaults for "can you actually trade this?" */
+/** Baseline gate for non-sports markets */
 export const LIQUIDITY_DEFAULTS = {
-  minVolume: 2_000,
-  minOpenInterest: 500,
-  maxSpreadCents: 8,
-  /** Locked / near-settled junk */
+  minVolume: 5_000,
+  minOpenInterest: 1_000,
+  maxSpreadCents: 6,
   lockedLow: 0.03,
   lockedHigh: 0.97,
-  /** Prefer mid-priced research band */
   preferredMidLow: 0.15,
   preferredMidHigh: 0.85,
+} as const
+
+/**
+ * Sports need higher bars — thin sports totals at 7–13¢ with vol <500
+ * are the classic false-"edge" trap from the old MVP.
+ */
+export const SPORTS_LIQUIDITY = {
+  minVolume: 5_000,
+  /** Alternate path: strong OI + tight book + mid band */
+  altMinOpenInterest: 2_000,
+  altMaxSpreadCents: 4,
+  altMidLow: 0.2,
+  altMidHigh: 0.8,
+  maxSpreadCents: 5,
+  lockedLow: 0.05,
+  lockedHigh: 0.95,
 } as const
 
 function scoreLiquidity(volume: number, openInterest: number, volume24h: number): number {
@@ -53,9 +69,17 @@ function scoreSpread(spreadCents: number, hasBook: boolean): number {
   return clamp(20 - (spreadCents - 8) * 2, 0, 20)
 }
 
+export function isSportsCategory(category: string, raw: KalshiMarketRaw): boolean {
+  if (category === 'Sports') return true
+  const blob = `${raw.ticker} ${raw.event_ticker} ${raw.title ?? ''} ${raw.category ?? ''}`.toUpperCase()
+  return /NFL|NBA|MLB|NHL|NCAAF|NCAAB|SOCCER|UFC|SPORT|SUPER.?BOWL|AFC|NFC|MARCH.?MADNESS|KX[A-Z]*(GAME|MLB|NFL|NBA|NHL|NCAAF)/.test(
+    blob,
+  )
+}
+
 /**
  * Assess tradeability. Hard-excludes illiquid / locked / no-book markets.
- * Prefer mid-priced markets with real volume and tight spreads.
+ * Sports use higher volume / tighter-spread bars.
  */
 export function assessLiquidity(raw: KalshiMarketRaw): LiquidityAssessment {
   const yesBid = parseDollars(raw.yes_bid_dollars ?? raw.yes_bid)
@@ -72,6 +96,9 @@ export function assessLiquidity(raw: KalshiMarketRaw): LiquidityAssessment {
   const volume24h = parseCount(raw.volume_24h_fp)
   const openInterest = parseCount(raw.open_interest_fp)
 
+  const category = inferCategory(raw)
+  const sports = isSportsCategory(category, raw)
+
   const liqRaw = scoreLiquidity(volume, openInterest, volume24h)
   const spreadScore = scoreSpread(spreadCents, hasBook)
   const liquidityScore = Math.round(liqRaw * 0.65 + spreadScore * 0.35)
@@ -80,28 +107,53 @@ export function assessLiquidity(raw: KalshiMarketRaw): LiquidityAssessment {
   const D = LIQUIDITY_DEFAULTS
 
   if (!hasBook) failReasons.push('No usable bid/ask book')
-  if (volume < D.minVolume) failReasons.push(`Volume ${Math.round(volume)} < ${D.minVolume}`)
-  if (openInterest < D.minOpenInterest)
-    failReasons.push(`Open interest ${Math.round(openInterest)} < ${D.minOpenInterest}`)
-  if (spreadCents > D.maxSpreadCents)
-    failReasons.push(`Spread ${spreadCents.toFixed(1)}¢ > ${D.maxSpreadCents}¢`)
 
-  const lockedExtreme =
-    midYes <= D.lockedLow || midYes >= D.lockedHigh
-  if (lockedExtreme && (volume < D.minVolume * 5 || !hasBook || spreadCents > 3)) {
-    failReasons.push(
-      `Near-locked mid ${Math.round(midYes * 100)}¢ with thin depth (junk / settled book)`,
-    )
-  }
+  if (sports) {
+    const S = SPORTS_LIQUIDITY
+    const volumeOk = volume >= S.minVolume
+    const altOk =
+      openInterest >= S.altMinOpenInterest &&
+      spreadCents <= S.altMaxSpreadCents &&
+      midYes >= S.altMidLow &&
+      midYes <= S.altMidHigh &&
+      hasBook
 
-  // Soft preference: extreme mids outside 15–85 with mediocre liquidity still fail
-  if (
-    (midYes < D.preferredMidLow || midYes > D.preferredMidHigh) &&
-    liquidityScore < 55
-  ) {
-    failReasons.push(
-      `Mid ${Math.round(midYes * 100)}¢ outside preferred 15–85¢ band with weak liquidity`,
-    )
+    if (!volumeOk && !altOk) {
+      failReasons.push(
+        `Sports liquidity: need volume ≥ ${S.minVolume.toLocaleString()} OR (OI ≥ ${S.altMinOpenInterest.toLocaleString()} + spread ≤ ${S.altMaxSpreadCents}¢ + mid 20–80¢); got vol ${Math.round(volume)}, OI ${Math.round(openInterest)}, spread ${spreadCents.toFixed(1)}¢`,
+      )
+    }
+    if (spreadCents > S.maxSpreadCents) {
+      failReasons.push(`Sports spread ${spreadCents.toFixed(1)}¢ > ${S.maxSpreadCents}¢`)
+    }
+    const lockedExtreme = midYes <= S.lockedLow || midYes >= S.lockedHigh
+    if (lockedExtreme) {
+      failReasons.push(
+        `Sports near-locked mid ${Math.round(midYes * 100)}¢ — thin totals / settled junk`,
+      )
+    }
+  } else {
+    if (volume < D.minVolume) failReasons.push(`Volume ${Math.round(volume)} < ${D.minVolume}`)
+    if (openInterest < D.minOpenInterest)
+      failReasons.push(`Open interest ${Math.round(openInterest)} < ${D.minOpenInterest}`)
+    if (spreadCents > D.maxSpreadCents)
+      failReasons.push(`Spread ${spreadCents.toFixed(1)}¢ > ${D.maxSpreadCents}¢`)
+
+    const lockedExtreme = midYes <= D.lockedLow || midYes >= D.lockedHigh
+    if (lockedExtreme && (volume < D.minVolume * 5 || !hasBook || spreadCents > 3)) {
+      failReasons.push(
+        `Near-locked mid ${Math.round(midYes * 100)}¢ with thin depth (junk / settled book)`,
+      )
+    }
+
+    if (
+      (midYes < D.preferredMidLow || midYes > D.preferredMidHigh) &&
+      liquidityScore < 55
+    ) {
+      failReasons.push(
+        `Mid ${Math.round(midYes * 100)}¢ outside preferred 15–85¢ band with weak liquidity`,
+      )
+    }
   }
 
   return {
@@ -119,5 +171,7 @@ export function assessLiquidity(raw: KalshiMarketRaw): LiquidityAssessment {
     liquidityScore,
     passed: failReasons.length === 0,
     failReasons,
+    category,
+    isSports: sports,
   }
 }

@@ -66,7 +66,7 @@ export function inferCategory(m: {
   if (/FED|CPI|UNEMP|INFL|GDP|JOBS|RATE/.test(blob)) return 'Economics'
   if (/SPX|NASDAQ|DOW|STOCK|IPO/.test(blob)) return 'Finance'
   if (/HOUSE|SENATE|PRES|ELECTION|DEM|GOP|CONGRESS/.test(blob)) return 'Politics'
-  if (/NFL|NBA|MLB|NHL|SOCCER|UFC|SPORT|SUPER.?BOWL/.test(blob)) return 'Sports'
+  if (/NFL|NBA|MLB|NHL|NCAAF|NCAAB|SOCCER|UFC|SPORT|SUPER.?BOWL|KX(MLB|NFL|NBA|NHL|NCAAF|GAME)/.test(blob)) return 'Sports'
   if (/WEATHER|CLIMATE|TEMP|HURRICANE/.test(blob)) return 'Climate'
   if (/OSCAR|EMMY|GRAMMY|MOVIE|FILM/.test(blob)) return 'Entertainment'
   if (/OIL|GOLD|WTI|COMMOD/.test(blob)) return 'Commodities'
