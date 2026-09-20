@@ -7,21 +7,24 @@ import {
 } from './external/noaa'
 import {
   detectSportsMarket,
-  fetchEspnFallbackFair,
-  matchOddsFair,
-  oddsApiConfigured,
+  matchEspnFair,
   parseSportsMarket,
-  prefetchOddsUniverse,
-  type OddsFairEstimate,
+  prefetchEspnUniverse,
+  type SportsFairEstimate,
   type SportsMarketParse,
-} from './external/odds'
+} from './external/espn'
+import {
+  matchPolymarketFair,
+  prefetchPolymarket,
+  type PolymarketFairEstimate,
+} from './external/polymarket'
 import { assessLiquidity } from './liquidity'
 
 export interface FairValueResult {
   fairProb: number
   sources: FairSource[]
   usedExternal: boolean
-  /** Structure-only (no NOAA/odds/demo external) */
+  /** Structure-only (no NOAA/ESPN/Polymarket/demo external) */
   structureOnly: boolean
 }
 
@@ -155,22 +158,28 @@ function looksComplementary(a: string, b: string): boolean {
 
 export interface ExternalContext {
   noaaByTicker: Record<string, NoaaFairEstimate>
-  oddsByTicker: Record<string, OddsFairEstimate>
+  sportsByTicker: Record<string, SportsFairEstimate>
+  polyByTicker: Record<string, PolymarketFairEstimate>
   sportsParses: Record<string, SportsMarketParse>
-  oddsApiConfigured: boolean
+  freeFetchFailed: boolean
+  freeFetchErrors: string[]
+  espnMatchCount: number
+  polymarketMatchCount: number
 }
 
 /**
  * Prefetch free external signals for a market universe.
- * NOAA works without keys; Odds API via VITE_ODDS_API_KEY; ESPN keyless fallback.
+ * NOAA / ESPN / Polymarket — no API keys required.
  */
 export async function prefetchExternals(
   markets: KalshiMarketRaw[],
   signal?: AbortSignal,
 ): Promise<ExternalContext> {
   const noaaByTicker: ExternalContext['noaaByTicker'] = {}
-  const oddsByTicker: ExternalContext['oddsByTicker'] = {}
+  const sportsByTicker: ExternalContext['sportsByTicker'] = {}
+  const polyByTicker: ExternalContext['polyByTicker'] = {}
   const sportsParses: ExternalContext['sportsParses'] = {}
+  const freeFetchErrors: string[] = []
 
   const weatherJobs: Promise<void>[] = []
   const sportsParsesList: SportsMarketParse[] = []
@@ -181,17 +190,23 @@ export async function prefetchExternals(
     if (hint) {
       weatherJobs.push(
         (async () => {
-          const live = await fetchNoaaFair(hint, signal)
-          const est =
-            live ??
-            (m.demo_fair_prob !== undefined
-              ? {
-                  fairProb: m.demo_fair_prob,
-                  cityKey: hint.cityKey,
-                  detail: m.demo_fair_source || 'Demo external fair (fixture)',
-                }
-              : demoClimatologyFair(hint))
-          if (est) noaaByTicker[m.ticker] = est
+          try {
+            const live = await fetchNoaaFair(hint, signal)
+            const est =
+              live ??
+              (m.demo_fair_prob !== undefined
+                ? {
+                    fairProb: m.demo_fair_prob,
+                    cityKey: hint.cityKey,
+                    detail: m.demo_fair_source || 'Demo external fair (fixture)',
+                  }
+                : demoClimatologyFair(hint))
+            if (est) noaaByTicker[m.ticker] = est
+          } catch (e) {
+            freeFetchErrors.push(
+              e instanceof Error ? `NOAA: ${e.message}` : 'NOAA fetch failed',
+            )
+          }
         })(),
       )
     }
@@ -203,50 +218,82 @@ export async function prefetchExternals(
     }
   }
 
-  // Batch Odds API by league (one request per sport, not per market)
-  let bySport = new Map()
-  if (sportsParsesList.length > 0 && oddsApiConfigured()) {
+  let espnResult: Awaited<ReturnType<typeof prefetchEspnUniverse>> = {
+    byLeague: new Map(),
+    errors: [],
+  }
+  if (sportsParsesList.length > 0) {
     try {
-      bySport = await prefetchOddsUniverse(sportsParsesList, signal)
-    } catch {
-      bySport = new Map()
+      espnResult = await prefetchEspnUniverse(sportsParsesList, signal)
+      freeFetchErrors.push(...espnResult.errors)
+    } catch (e) {
+      freeFetchErrors.push(e instanceof Error ? e.message : 'ESPN prefetch failed')
     }
   }
 
-  const oddsJobs: Promise<void>[] = []
+  let polyMarkets: Parameters<typeof matchPolymarketFair>[3] = []
+  try {
+    const poly = await prefetchPolymarket(signal)
+    polyMarkets = poly.markets
+    if (poly.error) freeFetchErrors.push(poly.error)
+  } catch (e) {
+    freeFetchErrors.push(e instanceof Error ? e.message : 'Polymarket prefetch failed')
+  }
+
+  let espnMatchCount = 0
+  let polymarketMatchCount = 0
+
+  const matchJobs: Promise<void>[] = []
   for (const m of markets) {
+    const title = m.title || m.yes_sub_title || m.ticker
     const parsed = sportsParses[m.ticker]
-    if (!parsed) continue
-
-    oddsJobs.push(
-      (async () => {
-        let odds: OddsFairEstimate | null = matchOddsFair(parsed, bySport)
-
-        if (!odds) {
-          odds = await fetchEspnFallbackFair(parsed, signal)
-        }
-
-        if (odds) {
-          oddsByTicker[m.ticker] = odds
-        } else if (m.demo_fair_prob !== undefined && m.demo_fair_source) {
-          oddsByTicker[m.ticker] = {
-            fairProb: m.demo_fair_prob,
-            detail: m.demo_fair_source,
-            bookCount: 0,
-            source: 'demo',
-            marketType: 'unknown',
+    if (parsed) {
+      matchJobs.push(
+        (async () => {
+          const espnHit = matchEspnFair(parsed, espnResult.byLeague)
+          if (espnHit) {
+            sportsByTicker[m.ticker] = espnHit
+            espnMatchCount += 1
+          } else if (m.demo_fair_prob !== undefined && m.demo_fair_source) {
+            sportsByTicker[m.ticker] = {
+              fairProb: m.demo_fair_prob,
+              detail: m.demo_fair_source,
+              bookCount: 0,
+              source: 'demo',
+              marketType: 'unknown',
+            }
           }
+        })(),
+      )
+    }
+
+    matchJobs.push(
+      (async () => {
+        const polyHit = matchPolymarketFair(title, m.ticker, m.category || '', polyMarkets)
+        if (polyHit) {
+          polyByTicker[m.ticker] = polyHit
+          polymarketMatchCount += 1
         }
       })(),
     )
   }
 
-  await Promise.allSettled([...weatherJobs, ...oddsJobs])
+  await Promise.allSettled([...weatherJobs, ...matchJobs])
+
+  const freeFetchFailed =
+    freeFetchErrors.length > 0 &&
+    ((sportsParsesList.length > 0 && espnMatchCount === 0 && espnResult.errors.length > 0) ||
+      freeFetchErrors.some((e) => /HTTP 429|rate|Polymarket HTTP|ESPN .* HTTP/i.test(e)))
+
   return {
     noaaByTicker,
-    oddsByTicker,
+    sportsByTicker,
+    polyByTicker,
     sportsParses,
-    oddsApiConfigured: oddsApiConfigured(),
+    freeFetchFailed,
+    freeFetchErrors,
+    espnMatchCount,
+    polymarketMatchCount,
   }
 }
 
@@ -281,22 +328,31 @@ export function estimateFairValue(
     })
   }
 
-  const odds = externals.oddsByTicker[market.ticker]
-  if (odds) {
-    const isDemo = odds.source === 'demo'
-    const isFallback = odds.source === 'espn_fallback'
-    const weight = isDemo ? 0.75 : isFallback ? 0.55 : 0.9
-    acc += odds.fairProb * weight
+  const sports = externals.sportsByTicker[market.ticker]
+  if (sports) {
+    const isDemo = sports.source === 'demo'
+    const weight = isDemo ? 0.75 : 0.9
+    acc += sports.fairProb * weight
     w += weight
     usedExternal = true
     sources.push({
-      kind: isDemo ? 'demo_external' : isFallback ? 'odds_fallback' : 'odds_api',
-      label: isDemo
-        ? 'Demo sports fair'
-        : isFallback
-          ? 'ESPN keyless fallback'
-          : 'Odds API consensus',
-      detail: odds.detail,
+      kind: isDemo ? 'demo_external' : 'espn',
+      label: isDemo ? 'Demo sports fair' : 'ESPN public odds',
+      detail: sports.detail,
+      weight,
+    })
+  }
+
+  const poly = externals.polyByTicker[market.ticker]
+  if (poly) {
+    const weight = 0.8
+    acc += poly.fairProb * weight
+    w += weight
+    usedExternal = true
+    sources.push({
+      kind: 'polymarket',
+      label: 'Polymarket public mid',
+      detail: poly.detail,
       weight,
     })
   }
@@ -305,7 +361,8 @@ export function estimateFairValue(
   if (
     market.demo_fair_prob !== undefined &&
     !noaa &&
-    !odds &&
+    !sports &&
+    !poly &&
     market.demo_fair_source
   ) {
     const weight = 0.85

@@ -19,10 +19,9 @@ export function TradeIdeasBoard({
       <div className="panel p-8 text-center text-slate-400">
         {strictMode ? (
           <>
-            No <strong className="text-slate-200">TRADE</strong> edges match Strict Mode (external
-            fair + liquidity + min |edge|). Add{' '}
-            <code className="text-slate-300">VITE_ODDS_API_KEY</code>, lower min |edge|, or turn off
-            Strict Mode to inspect UNRANKED research cards.
+            No <strong className="text-slate-200">TRADE</strong> edges match Strict Mode (free
+            external fair + liquidity + min |edge|). Lower min |edge|, wait for ESPN/Polymarket
+            matches, or turn off Strict Mode to inspect UNRANKED research cards.
           </>
         ) : (
           <>

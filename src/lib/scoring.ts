@@ -19,7 +19,6 @@ import {
   kalshiMarketUrl,
 } from './format'
 import { assessLiquidity } from './liquidity'
-import { oddsApiConfigured } from './external/odds'
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n))
@@ -60,7 +59,7 @@ export const STRICT_MIN_EDGE_PP = 5
 /** Loose / research minimum */
 export const MIN_EDGE_PP = 3
 
-const EXTERNAL_KINDS = new Set(['noaa', 'odds_api', 'odds_fallback', 'demo_external'])
+const EXTERNAL_KINDS = new Set(['noaa', 'espn', 'polymarket', 'demo_external'])
 
 function confidenceFor(
   usedExternal: boolean,
@@ -73,10 +72,6 @@ function confidenceFor(
 
   const hasExternal = sources.some((s) => EXTERNAL_KINDS.has(s.kind))
   if (liquidityOk && absEdgePct >= STRICT_MIN_EDGE_PP && (hasExternal || usedExternal)) {
-    // ESPN fallback alone stays MEDIUM
-    const onlyFallback =
-      sources.filter((s) => EXTERNAL_KINDS.has(s.kind)).every((s) => s.kind === 'odds_fallback')
-    if (onlyFallback) return 'MEDIUM'
     return 'HIGH'
   }
   if (liquidityOk && absEdgePct >= MIN_EDGE_PP && usedExternal) return 'MEDIUM'
@@ -249,9 +244,13 @@ export function scoreAndRank(
   markets: KalshiMarketRaw[],
   externals: ExternalContext = {
     noaaByTicker: {},
-    oddsByTicker: {},
+    sportsByTicker: {},
+    polyByTicker: {},
     sportsParses: {},
-    oddsApiConfigured: oddsApiConfigured(),
+    freeFetchFailed: false,
+    freeFetchErrors: [],
+    espnMatchCount: 0,
+    polymarketMatchCount: 0,
   },
 ): ScoredOpportunity[] {
   const universe = buildUniverse(markets)
@@ -275,15 +274,18 @@ export function scoreAndRank(
 
 export function buildScoreMeta(
   opportunities: ScoredOpportunity[],
-  oddsConfigured: boolean,
+  externals: ExternalContext,
 ): ScoreMeta {
   const sports = opportunities.filter((o) => o.category === 'Sports' || o.blockedMissingExternal)
   return {
-    oddsApiConfigured: oddsConfigured,
+    freeFetchFailed: externals.freeFetchFailed,
+    freeFetchErrors: externals.freeFetchErrors,
     sportsMarketsSeen: sports.length,
     sportsBlockedNoExternal: opportunities.filter((o) => o.blockedMissingExternal).length,
     structureOnlyCount: opportunities.filter((o) => !o.hasExternalFair).length,
     tradeableCount: opportunities.filter((o) => o.opportunityKind === 'TRADE').length,
+    espnMatchCount: externals.espnMatchCount,
+    polymarketMatchCount: externals.polymarketMatchCount,
   }
 }
 
@@ -296,6 +298,6 @@ export async function scoreAndRankAsync(
   const opportunities = scoreAndRank(markets, externals)
   return {
     opportunities,
-    meta: buildScoreMeta(opportunities, externals.oddsApiConfigured),
+    meta: buildScoreMeta(opportunities, externals),
   }
 }

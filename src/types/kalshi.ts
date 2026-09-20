@@ -42,8 +42,8 @@ export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNRANKED'
 
 export type FairSourceKind =
   | 'noaa'
-  | 'odds_api'
-  | 'odds_fallback'
+  | 'espn'
+  | 'polymarket'
   | 'cross_market'
   | 'structure'
   | 'demo_external'
@@ -100,7 +100,7 @@ export interface ScoredOpportunity {
   kalshiUrl: string
   passedLiquidityGate: boolean
   liquidityFailReasons: string[]
-  /** True when NOAA / Odds API / demo external contributed to fair */
+  /** True when NOAA / ESPN / Polymarket / demo external contributed to fair */
   hasExternalFair: boolean
   /** TRADE only when liquid + external fair; else RESEARCH (structure-only) */
   opportunityKind: OpportunityKind
@@ -167,9 +167,13 @@ export interface FilterState {
 }
 
 export interface ScoreMeta {
-  oddsApiConfigured: boolean
+  /** True when free ESPN/Polymarket/NOAA fetches hit hard failures (e.g. rate limit) */
+  freeFetchFailed: boolean
+  freeFetchErrors: string[]
   sportsMarketsSeen: number
   sportsBlockedNoExternal: number
   structureOnlyCount: number
   tradeableCount: number
+  espnMatchCount: number
+  polymarketMatchCount: number
 }

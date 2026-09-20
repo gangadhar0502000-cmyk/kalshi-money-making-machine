@@ -1,5 +1,4 @@
 import type { DataSource, ScoreMeta } from '../types/kalshi'
-import { oddsApiConfigured } from '../lib/external/odds'
 
 interface Props {
   source: DataSource
@@ -21,42 +20,28 @@ export function StatusBanner({
   meta,
 }: Props) {
   const isDemo = source === 'demo'
-  const hasOddsKey = meta?.oddsApiConfigured ?? oddsApiConfigured()
+  const freeFetchFailed = meta?.freeFetchFailed ?? false
   const blocked = meta?.sportsBlockedNoExternal ?? 0
+  const fetchErrors = meta?.freeFetchErrors ?? []
 
   return (
     <div className="space-y-3">
-      {!hasOddsKey && (
+      {freeFetchFailed && (
         <div className="rounded-xl border border-amber-400/50 bg-amber-500/15 px-4 py-3 text-left shadow-lg shadow-amber-900/20">
           <p className="text-sm font-bold text-amber-100">
-            Strict sports edge needs a free Odds API key
+            Free external feeds failed (rate limit or network)
           </p>
           <p className="mt-1 text-xs leading-relaxed text-amber-50/90">
-            Get one at{' '}
-            <a
-              className="font-semibold underline decoration-amber-300/80 underline-offset-2 hover:text-white"
-              href="https://the-odds-api.com"
-              target="_blank"
-              rel="noreferrer"
-            >
-              https://the-odds-api.com
-            </a>
-            , then put{' '}
-            <code className="rounded bg-black/30 px-1.5 py-0.5 font-mono text-[11px] text-amber-100">
-              VITE_ODDS_API_KEY=your_key
-            </code>{' '}
-            in <code className="font-mono text-[11px]">.env</code> and restart{' '}
-            <code className="font-mono text-[11px]">npm run dev</code>. Without it, sports markets
-            cannot get external fair value
+            ESPN, Polymarket, or NOAA returned errors
+            {fetchErrors.length ? ` (${fetchErrors.slice(0, 2).join('; ')})` : ''}.
+            No paid API key is required — wait and refresh, or use demo fixtures offline.
             {blocked > 0 ? (
               <>
                 {' '}
                 — <strong className="text-amber-50">{blocked} market{blocked === 1 ? '' : 's'}</strong>{' '}
-                blocked for lacking external fair
+                still lack an external fair match.
               </>
             ) : null}
-            . A weak ESPN keyless fallback may fill a few moneylines; demo fixtures still show
-            HIGH external-edge cards offline.
           </p>
         </div>
       )}
@@ -76,7 +61,7 @@ export function StatusBanner({
           <p className="mt-0.5 text-slate-300/90">
             {isDemo
               ? `Live fetch unavailable${error ? ` (${error.slice(0, 100)})` : ''}. Demo set includes HIGH external-edge cards and illiquid junk so you can verify Strict Mode offline.`
-              : 'Edge pp = fair − Kalshi mid. Strict Mode requires external fair (Odds API / NOAA) + liquidity — not structure vibes.'}
+              : 'Edge pp = fair − Kalshi mid. Strict Mode requires free external fair (ESPN / Polymarket / NOAA) + liquidity — not structure vibes. Fully free — no API keys.'}
             {junkHidden > 0 ? ` · ${junkHidden} failed liquidity gate.` : ''}
             {meta
               ? ` · ${meta.tradeableCount} TRADE / ${meta.structureOnlyCount} structure-only.`

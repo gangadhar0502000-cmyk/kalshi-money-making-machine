@@ -18,7 +18,7 @@ export function TradeIdeaCard({ opp, bankroll, onPaperTrade }: Props) {
   const isTrade = opp.opportunityKind === 'TRADE'
 
   const externalSources = opp.fairSources.filter((s) =>
-    ['noaa', 'odds_api', 'odds_fallback', 'demo_external'].includes(s.kind),
+    ['noaa', 'espn', 'polymarket', 'demo_external'].includes(s.kind),
   )
 
   return (

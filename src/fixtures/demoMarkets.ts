@@ -27,7 +27,7 @@ export const DEMO_MARKETS: KalshiMarketRaw[] = [
     open_interest_fp: '11200.00',
     demo_fair_prob: 0.62,
     demo_fair_source:
-      'Demo sports fair: Odds API-style ML consensus Yankees ~62% across 8 books (fixture)',
+      'Demo sports fair: ESPN-style ML consensus Yankees ~62% across 8 books (fixture)',
   },
   {
     ticker: 'KXNCAAF-26SEP19ALAUG-TOTAL-OVER52',
@@ -48,7 +48,7 @@ export const DEMO_MARKETS: KalshiMarketRaw[] = [
     open_interest_fp: '8400.00',
     demo_fair_prob: 0.51,
     demo_fair_source:
-      'Demo sports fair: books O/U 52.5 Over ~51% consensus (fixture; live Odds API optional)',
+      'Demo sports fair: books O/U 52.5 Over ~51% consensus (fixture; live ESPN/Polymarket free feeds)',
   },
   {
     ticker: 'KXNFL-26SB-AFCEAFC',
@@ -68,7 +68,7 @@ export const DEMO_MARKETS: KalshiMarketRaw[] = [
     volume_24h_fp: '9800.00',
     open_interest_fp: '40500.00',
     demo_fair_prob: 0.56,
-    demo_fair_source: 'Demo sports fair: books imply AFC ~56% (fixture; live Odds API optional)',
+    demo_fair_source: 'Demo sports fair: books imply AFC ~56% (fixture; live ESPN/Polymarket free feeds)',
   },
   {
     ticker: 'KXBTC-26DEC31-B100000',

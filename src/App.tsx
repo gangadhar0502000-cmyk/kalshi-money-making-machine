@@ -139,27 +139,20 @@ export default function App() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400/90">
-              Edge Finder v2 · strict external fair
+              Edge Finder v3 · fully free — no API keys
             </p>
             <h1 className="bg-gradient-to-r from-emerald-300 via-slate-100 to-amber-300 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent sm:text-4xl">
               Kalshi Money Making Machine
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Find <strong className="font-medium text-slate-300">tradeable edge</strong> vs sportsbook
-              / NOAA fair value — not illiquid 99¢ junk or structure-only vibes. Primary metric is{' '}
-              <strong className="font-medium text-slate-300">Edge pp</strong>, not a heuristic
-              “Score”. Research tool only; printing money is not guaranteed.
+              Find <strong className="font-medium text-slate-300">tradeable edge</strong> vs free ESPN /
+              Polymarket / NOAA fair value — not illiquid 99¢ junk or structure-only vibes.
+              Fully free — no API keys. Primary metric is{' '}
+              <strong className="font-medium text-slate-300">Edge pp</strong>. Research tool only;
+              printing money is not guaranteed.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a
-              className="btn btn-ghost"
-              href="https://the-odds-api.com"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Odds API (free key)
-            </a>
             <a
               className="btn btn-ghost"
               href="https://docs.kalshi.com/getting_started/quick_start_market_data"
@@ -218,7 +211,7 @@ export default function App() {
       </div>
 
       <footer className="mt-10 border-t border-slate-800/80 pt-6 text-center text-xs text-slate-500">
-        Kalshi Money Making Machine · Edge Finder v2 · Vite + React ·{' '}
+        Kalshi Money Making Machine · Edge Finder v3 · Vite + React ·{' '}
         {source === 'live' ? 'Live API' : 'Demo fixtures'} ·{' '}
         <code className="text-slate-400">npm run dev</code>
       </footer>
