@@ -61,6 +61,33 @@ export function assertReadOnly(method, path) {
   }
 }
 
+function loadDotEnvLocal() {
+  try {
+    const envPath = new URL('../.env.local', import.meta.url)
+    const raw = fs.readFileSync(envPath, 'utf8')
+    for (const line of raw.split(/\n/)) {
+      const t = line.trim()
+      if (!t || t.startsWith('#')) continue
+      const eq = t.indexOf('=')
+      if (eq < 1) continue
+      const k = t.slice(0, eq).trim()
+      let v = t.slice(eq + 1).trim()
+      if (
+        (v.startsWith('"') && v.endsWith('"')) ||
+        (v.startsWith("'") && v.endsWith("'"))
+      ) {
+        v = v.slice(1, -1)
+      }
+      v = v.replace(/\\n/g, '\n')
+      if (!process.env[k]) process.env[k] = v
+    }
+  } catch {
+    /* optional */
+  }
+}
+
+loadDotEnvLocal()
+
 function loadSecrets() {
   let keyId = process.env.KALSHI_KEY_ID || ''
   let privateKeyRaw = process.env.KALSHI_PRIVATE_KEY || ''
