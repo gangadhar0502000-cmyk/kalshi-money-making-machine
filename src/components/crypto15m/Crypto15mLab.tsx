@@ -18,6 +18,7 @@ import { CryptoMarketFeed } from './CryptoMarketFeed'
 import { LiveContextPanel } from './LiveContextPanel'
 import { PaperJournalPanel } from './PaperJournalPanel'
 import { RuleExperimentsPanel } from './RuleExperimentsPanel'
+import { BacktestPanel } from './BacktestPanel'
 
 export function Crypto15mLab() {
   const [loading, setLoading] = useState(true)
@@ -159,6 +160,7 @@ export function Crypto15mLab() {
             onSelect={setSelectedTicker}
           />
           <RuleExperimentsPanel market={selected} onTakePaper={handleTake} />
+          <BacktestPanel />
           <PaperJournalPanel
             entries={entries}
             stats={stats}

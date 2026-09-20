@@ -53,6 +53,26 @@ Every taken paper suggestion is logged locally (browser `localStorage`):
 
 Until then: treat every suggestion as an experiment to **falsify**.
 
+
+## Backtest (settled history)
+
+**Past ≠ future. Kill losers.**
+
+The Crypto 15m Lab includes a **Backtest** panel that replays the same experiment rules on historical windows.
+
+**Default source = REAL** bundled Kalshi snapshot (`src/fixtures/liveSettledCrypto15m.json`): settled `status=settled` markets + **1-minute candlesticks** from the public Trade API. Not synthetic.
+
+| Mode | What it uses |
+| --- | --- |
+| **REAL bundled (default)** | Committed snapshot of real settled crypto 15m + candles |
+| Auto | Same REAL snapshot (avoids live 429 stalls); use Live to refresh |
+| Live | Public API `status=settled` + candlesticks (often rate-limited) |
+| DEMO | Synthetic paths only — clearly labeled; last resort |
+
+Per rule (signals): n, win rate, net $ after Kalshi-style fees (`ceil(0.07·C·P·(1−P))`), max drawdown, profit factor. Vetoes report fire counts. Quiet windows → **NO TRADE**.
+
+**Honesty:** public history is thin under rate limits. The shipped snapshot is real but small (BTC 15m windows captured at build time). Expand it by re-fetching when the API allows — do not invent fills.
+
 ## How to use the lab (Mac)
 
 ```bash
@@ -73,6 +93,7 @@ Open the URL Vite prints (usually `http://localhost:5173`).
 - Select a market → live context (countdown, mid trail, thin-book warning)
 - Read **EXPERIMENTS** panel — usually **NO TRADE**
 - When a paper suggestion appears, log it → resolve later → inspect per-rule stats
+- Open **Backtest** → Run backtest (Auto / Live / Bundled / Demo)
 - Edit constants in `src/lib/crypto15m/ruleConfig.ts`, restart/refresh, re-test
 
 ```bash
@@ -93,7 +114,9 @@ src/
     fees.ts               Kalshi-style fee estimate
     api.ts                Public API fetch + demo fallback
     journal.ts            Paper journal + per-rule stats
+    backtest/             Settled-history rule replay engine
   fixtures/demoCrypto15m.ts
+  fixtures/liveSettledCrypto15m.json  Bundled real settled+candles snapshot
   components/EdgeFinderApp.tsx   Secondary general edge finder
 ```
 

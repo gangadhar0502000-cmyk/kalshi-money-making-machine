@@ -2,11 +2,12 @@ import type {
   Crypto15mMarket,
   ExperimentAction,
   ExperimentSuggestion,
+  MidSample,
   RuleEvalResult,
   RuleHypothesis,
   RuleId,
 } from '../../types/crypto15m'
-import { midMovePp } from './midHistory'
+import { midMovePp, midMovePpFromHistory } from './midHistory'
 import {
   EARLY_MOMENTUM,
   EXTREME_LATE_BLOCK,
@@ -137,7 +138,9 @@ function evalExtremeLate(m: Crypto15mMarket): RuleEvalResult {
   }
 }
 
-function evalLateFade(m: Crypto15mMarket): RuleEvalResult {
+type MoveFn = (lookbackMs: number, now: number) => number | null
+
+function evalLateFade(m: Crypto15mMarket, moveFn: MoveFn): RuleEvalResult {
   if (!LATE_FADE.enabled) {
     return { ruleId: 'late_fade', action: 'NO_TRADE', matched: false, reason: 'disabled' }
   }
@@ -149,7 +152,7 @@ function evalLateFade(m: Crypto15mMarket): RuleEvalResult {
       reason: `${m.minutesRemaining.toFixed(1)}m left > ${LATE_FADE.lastMinutes}m window`,
     }
   }
-  const move = midMovePp(m.ticker, LATE_FADE.lookbackMs)
+  const move = moveFn(LATE_FADE.lookbackMs, Date.now())
   if (move === null) {
     return {
       ruleId: 'late_fade',
@@ -175,7 +178,7 @@ function evalLateFade(m: Crypto15mMarket): RuleEvalResult {
   }
 }
 
-function evalEarlyMomentum(m: Crypto15mMarket): RuleEvalResult {
+function evalEarlyMomentum(m: Crypto15mMarket, moveFn: MoveFn): RuleEvalResult {
   if (!EARLY_MOMENTUM.enabled) {
     return { ruleId: 'early_momentum', action: 'NO_TRADE', matched: false, reason: 'disabled' }
   }
@@ -187,7 +190,7 @@ function evalEarlyMomentum(m: Crypto15mMarket): RuleEvalResult {
       reason: `${m.minutesElapsed.toFixed(1)}m elapsed > ${EARLY_MOMENTUM.firstMinutes}m`,
     }
   }
-  const move = midMovePp(m.ticker, EARLY_MOMENTUM.lookbackMs)
+  const move = moveFn(EARLY_MOMENTUM.lookbackMs, Date.now())
   if (move === null) {
     return {
       ruleId: 'early_momentum',
@@ -213,15 +216,19 @@ function evalEarlyMomentum(m: Crypto15mMarket): RuleEvalResult {
   }
 }
 
-/** Evaluate all rules. Vetoes win: if any veto matches → overall NO TRADE. */
-export function evaluateRules(m: Crypto15mMarket): {
+function finalizeEval(
+  m: Crypto15mMarket,
+  moveFn: MoveFn,
+  suggestedAtIso?: string,
+): {
   results: RuleEvalResult[]
   suggestion: ExperimentSuggestion | null
   vetoed: boolean
   vetoReasons: string[]
 } {
+  // Bind "now" for moveFn via wrapper that uses market clock if provided through moveFn itself
   const vetoes = [evalWideSpread(m), evalThinBook(m), evalExtremeLate(m)]
-  const signals = [evalLateFade(m), evalEarlyMomentum(m)]
+  const signals = [evalLateFade(m, moveFn), evalEarlyMomentum(m, moveFn)]
   const results = [...vetoes, ...signals]
 
   const activeVetoes = vetoes.filter((r) => r.matched)
@@ -232,7 +239,6 @@ export function evaluateRules(m: Crypto15mMarket): {
     return { results, suggestion: null, vetoed: true, vetoReasons }
   }
 
-  // Prefer late_fade over early_momentum if both somehow match (rare).
   const matched = signals.filter((r) => r.matched && r.action !== 'NO_TRADE')
   const pick = matched.find((r) => r.ruleId === 'late_fade') ?? matched[0]
   if (!pick) {
@@ -259,10 +265,43 @@ export function evaluateRules(m: Crypto15mMarket): {
     reason: pick.reason,
     hypothesis: hyp.hypothesis,
     feeEstimate1: m.feeEstimate1,
-    suggestedAt: new Date().toISOString(),
+    suggestedAt: suggestedAtIso ?? new Date().toISOString(),
   }
 
   return { results, suggestion, vetoed: false, vetoReasons: [] }
+}
+
+/** Live lab: uses in-memory mid poll history. */
+export function evaluateRules(m: Crypto15mMarket): {
+  results: RuleEvalResult[]
+  suggestion: ExperimentSuggestion | null
+  vetoed: boolean
+  vetoReasons: string[]
+} {
+  const moveFn: MoveFn = (lookbackMs, _now) => midMovePp(m.ticker, lookbackMs)
+  return finalizeEval(m, moveFn)
+}
+
+/**
+ * Backtest / offline: mid trail supplied explicitly; "now" is the snapshot clock.
+ * moveFn ignores Date.now inside signal evals — we pass snapshot time via closure.
+ */
+export function evaluateRulesAt(
+  m: Crypto15mMarket,
+  history: MidSample[],
+  nowMs: number,
+): {
+  results: RuleEvalResult[]
+  suggestion: ExperimentSuggestion | null
+  vetoed: boolean
+  vetoReasons: string[]
+} {
+  const moveFn: MoveFn = (lookbackMs, _ignored) =>
+    midMovePpFromHistory(history, lookbackMs, nowMs)
+  // Patch signal evaluators' Date.now usage: we already ignore second arg via closure.
+  // Re-bind late/early by temporarily replacing — finalizeEval calls moveFn(lookback, Date.now()).
+  // Our moveFn ignores that and uses nowMs. Good.
+  return finalizeEval(m, moveFn, new Date(nowMs).toISOString())
 }
 
 export function hypothesisFor(id: RuleId): RuleHypothesis {
