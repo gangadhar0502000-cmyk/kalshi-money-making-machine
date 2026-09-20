@@ -1,13 +1,18 @@
 /**
  * Paper crypto 15m market maker — simulate quotes, fills, and spot-guard cancels.
  * Does NOT place live Kalshi orders.
+ *
+ * Strict realism (default): rare random fills, probabilistic mid-cross, Kalshi fees,
+ * and settlement risk when the window closes with inventory open.
  */
 
 import type { Crypto15mMarket } from '../../../types/crypto15m'
+import { estimateKalshiFeeDollars } from '../fees'
 import { SpotHistory, fetchPublicSpot, type SpotTick } from '../spot'
 import {
   DEFAULT_PAPER_MM_CONFIG,
   clampConfig,
+  presetsForMode,
   type PaperMmConfig,
 } from './config'
 import type {
@@ -38,6 +43,25 @@ function nextId(prefix: string): string {
   return `${prefix}-${Date.now()}-${idSeq}`
 }
 
+/** Infer binary settlement price: prefer raw.result, else mid threshold. */
+function settlementYesPrice(market: Crypto15mMarket): number {
+  const result = (market.raw?.result ?? '').toLowerCase()
+  if (result === 'yes') return 1
+  if (result === 'no') return 0
+  // Soft inference when feed still shows mid after close
+  return market.midYes >= 0.5 ? 1 : 0
+}
+
+function marketLooksSettled(market: Crypto15mMarket): boolean {
+  const st = (market.status ?? '').toLowerCase()
+  if (st === 'settled' || st === 'finalized' || st === 'determined') return true
+  if (st === 'closed' && market.raw?.result) return true
+  if (market.minutesRemaining <= 0) return true
+  const closeMs = Date.parse(market.closeTime)
+  if (Number.isFinite(closeMs) && Date.now() >= closeMs) return true
+  return false
+}
+
 export class PaperMmEngine {
   private config: PaperMmConfig = { ...DEFAULT_PAPER_MM_CONFIG }
   private running = false
@@ -45,6 +69,7 @@ export class PaperMmEngine {
   private inventory = 0
   private cash = DEFAULT_PAPER_MM_CONFIG.startingCash
   private realizedSpreadPnl = 0
+  private feesPaid = 0
   private avgEntry: number | null = null
   private quote: MmQuote | null = null
   private fills: MmFill[] = []
@@ -56,6 +81,9 @@ export class PaperMmEngine {
   private guardActiveUntil = 0
   private guardMode: MmGuardAction | null = null
   private lastTickAt: number | null = null
+  private sessionStartedAt: number | null = null
+  private settled = false
+  private midCrossRejectCount = 0
   private message = 'Idle — pick a market and Start paper MM.'
   private spotTimer: number | null = null
   private quoteTimer: number | null = null
@@ -75,12 +103,20 @@ export class PaperMmEngine {
   }
 
   setConfig(partial: Partial<PaperMmConfig>): void {
+    // Toggling strict realism pulls harsh/loose fill+fee+settlement knobs together
+    if (partial.strictRealism !== undefined && partial.strictRealism !== this.config.strictRealism) {
+      partial = { ...presetsForMode(partial.strictRealism), ...partial }
+    }
     this.config = clampConfig({ ...this.config, ...partial })
     if (!this.running) {
       this.cash = this.config.startingCash
     }
     this.rebuildQuote(true)
     this.emit()
+  }
+
+  setStrictRealism(strict: boolean): void {
+    this.setConfig({ strictRealism: strict })
   }
 
   getState(): MmEngineState {
@@ -109,13 +145,17 @@ export class PaperMmEngine {
       spotPrice: this.lastSpot?.price ?? null,
       spotSource: this.lastSpot?.source ?? null,
       realizedSpreadPnl: this.realizedSpreadPnl,
+      feesPaid: this.feesPaid,
       unrealizedInventoryPnl: unrealized,
       avgEntry: this.avgEntry,
       fillCount: this.fills.length,
       cancelCount: this.cancels.length,
+      midCrossRejectCount: this.midCrossRejectCount,
       guardActiveUntil: this.guardActiveUntil,
       guardMode: this.guardMode,
       lastTickAt: this.lastTickAt,
+      sessionStartedAt: this.sessionStartedAt,
+      settled: this.settled,
       message: this.message,
     }
   }
@@ -127,6 +167,7 @@ export class PaperMmEngine {
       this.lastMid = market?.midYes ?? null
       this.spotHist.clear()
       this.lastSpot = null
+      this.settled = false
       if (this.running) {
         this.rebuildQuote(true)
         void this.pollSpot()
@@ -144,8 +185,11 @@ export class PaperMmEngine {
       return
     }
     this.running = true
-    this.message =
-      'Paper MM running. Live placement needs Kalshi API keys — not in this build.'
+    this.settled = false
+    this.sessionStartedAt = Date.now()
+    this.message = this.config.strictRealism
+      ? 'Paper MM running (strict realism). Live placement needs Kalshi API keys — not in this build.'
+      : 'Paper MM running (LOOSE debug). Fills are soft — not live edge.'
     this.rebuildQuote(true)
     this.armTimers()
     void this.pollSpot()
@@ -167,12 +211,16 @@ export class PaperMmEngine {
     this.inventory = 0
     this.cash = this.config.startingCash
     this.realizedSpreadPnl = 0
+    this.feesPaid = 0
     this.avgEntry = null
     this.fills = []
     this.cancels = []
     this.quote = null
     this.spotHist.clear()
     this.lastSpot = null
+    this.sessionStartedAt = null
+    this.settled = false
+    this.midCrossRejectCount = 0
     this.message = 'Session reset. Paper cash restored.'
     this.emit()
   }
@@ -285,7 +333,14 @@ export class PaperMmEngine {
     const now = Date.now()
     this.lastTickAt = now
 
-    if (this.running) {
+    if (this.running && this.config.settleOnClose && !this.settled && marketLooksSettled(market)) {
+      this.settleInventory(market)
+      this.lastMid = mid
+      this.emit()
+      return
+    }
+
+    if (this.running && !this.settled) {
       const midMoved =
         this.lastMid != null &&
         Math.abs(mid - this.lastMid) * 100 >= this.config.midMoveRequoteCents
@@ -300,15 +355,75 @@ export class PaperMmEngine {
   }
 
   private tick(): void {
-    if (!this.running || !this.market) return
+    if (!this.running || !this.market || this.settled) return
     const now = Date.now()
     this.lastTickAt = now
+
+    if (this.config.settleOnClose && marketLooksSettled(this.market)) {
+      this.settleInventory(this.market)
+      this.emit()
+      return
+    }
+
     if (now - this.lastQuoteAt >= this.config.quoteRefreshMs) {
       this.rebuildQuote(false)
     }
     // Soft random fills even between market polls (demo / slow polls)
     this.simulateFills(this.market.midYes)
     this.emit()
+  }
+
+  /**
+   * When the 15m window closes with open inventory, mark YES to 0 or 1 and realize.
+   * Can wipe spread gains — intentional settlement risk.
+   */
+  private settleInventory(market: Crypto15mMarket): void {
+    if (this.settled) return
+    this.settled = true
+    if (this.quote) this.quote = { ...this.quote, active: false }
+
+    const settlePx = settlementYesPrice(market)
+    const inv = this.inventory
+
+    if (inv !== 0 && this.avgEntry != null) {
+      const size = Math.abs(inv)
+      // Realize mark-to-settlement vs avg entry
+      const pnlPer = inv > 0 ? settlePx - this.avgEntry : this.avgEntry - settlePx
+      this.realizedSpreadPnl += pnlPer * size
+
+      // Cash mark: long YES receives settle; short covers at settle
+      if (inv > 0) {
+        this.cash += settlePx * size
+      } else {
+        this.cash -= settlePx * size
+      }
+
+      // Binary settlement at 0/1 → Kalshi fee formula is $0 (P*(1-P)=0).
+      const displayPx = settlePx === 0 ? 0 : settlePx === 1 ? 1 : settlePx
+      this.fills.push({
+        id: nextId('f'),
+        t: Date.now(),
+        side: inv > 0 ? 'sell_yes' : 'buy_yes',
+        price: displayPx,
+        size,
+        midAtFill: market.midYes,
+        toxic: true,
+        reason: 'settlement',
+        feeDollars: 0,
+      })
+      if (this.fills.length > 500) this.fills.splice(0, this.fills.length - 500)
+
+      this.message =
+        `SETTLEMENT: inventory ${inv > 0 ? '+' : ''}${inv} marked to ${settlePx === 1 ? 'YES=1' : 'YES=0'} ` +
+        `(P&L ${pnlPer * size >= 0 ? '+' : ''}${(pnlPer * size).toFixed(2)}). Spread gains can wipe.`
+    } else {
+      this.message = 'Market closed/settled with flat inventory.'
+    }
+
+    this.inventory = 0
+    this.avgEntry = null
+    this.running = false
+    this.clearTimers()
   }
 
   private rebuildQuote(force: boolean): void {
@@ -342,7 +457,7 @@ export class PaperMmEngine {
     // Suppress toxic side at inventory limit
     let activeBid = !atMaxLong
     let activeAsk = !atMaxShort
-    if (!this.running) {
+    if (!this.running || this.settled) {
       activeBid = false
       activeAsk = false
     }
@@ -351,7 +466,7 @@ export class PaperMmEngine {
       yesBid: activeBid ? bid : bid,
       yesAsk: activeAsk ? ask : ask,
       size: this.config.quoteSize,
-      active: this.running && (activeBid || activeAsk) && !guardCancel,
+      active: this.running && !this.settled && (activeBid || activeAsk) && !guardCancel,
       skewCents,
       halfSpreadCents: half,
     }
@@ -366,24 +481,33 @@ export class PaperMmEngine {
   }
 
   private simulateFills(mid: number): void {
-    if (!this.running || !this.quote?.active || !this.market) return
+    if (!this.running || !this.quote?.active || !this.market || this.settled) return
     const q = this.quote
     const stats = this.spotHist.stats(this.config.spotWindowSec)
     const spotUp = stats.signedPct > 0.02
     const spotDown = stats.signedPct < -0.02
 
-    // 1) Mid-cross fills (market mid walks through your quote)
+    // 1) Mid-cross — probabilistic fill (void/reject modeled); never assume 100%
     if (mid <= q.yesBid && this.inventory < this.config.maxInventory) {
-      // Someone hits your bid → you buy YES. Toxic if spot is dumping (YES likely worse).
-      const toxic = spotDown
-      this.applyFill('buy_yes', q.yesBid, q.size, mid, toxic, 'mid_cross')
-      this.rebuildQuote(true)
+      if (Math.random() < this.config.midCrossFillProb) {
+        const toxic = spotDown
+        this.applyFill('buy_yes', q.yesBid, q.size, mid, toxic, 'mid_cross')
+        this.rebuildQuote(true)
+      } else {
+        this.midCrossRejectCount += 1
+        this.message = `Mid-cross VOID/reject on bid @ ${(q.yesBid * 100).toFixed(0)}¢ (p=${this.config.midCrossFillProb}).`
+      }
       return
     }
     if (mid >= q.yesAsk && this.inventory > -this.config.maxInventory) {
-      const toxic = spotUp
-      this.applyFill('sell_yes', q.yesAsk, q.size, mid, toxic, 'mid_cross')
-      this.rebuildQuote(true)
+      if (Math.random() < this.config.midCrossFillProb) {
+        const toxic = spotUp
+        this.applyFill('sell_yes', q.yesAsk, q.size, mid, toxic, 'mid_cross')
+        this.rebuildQuote(true)
+      } else {
+        this.midCrossRejectCount += 1
+        this.message = `Mid-cross VOID/reject on ask @ ${(q.yesAsk * 100).toFixed(0)}¢ (p=${this.config.midCrossFillProb}).`
+      }
       return
     }
 
@@ -434,6 +558,14 @@ export class PaperMmEngine {
   ): void {
     const signed = side === 'buy_yes' ? size : -size
 
+    const fee =
+      this.config.applyFees ? estimateKalshiFeeDollars(size, price) : 0
+    if (fee > 0) {
+      this.cash -= fee
+      this.feesPaid += fee
+      this.realizedSpreadPnl -= fee
+    }
+
     // Cash: buy YES spends price; sell YES receives price (per contract)
     if (side === 'buy_yes') {
       this.cash -= price * size
@@ -480,6 +612,7 @@ export class PaperMmEngine {
       midAtFill: mid,
       toxic,
       reason,
+      feeDollars: fee,
     })
     if (this.fills.length > 500) this.fills.splice(0, this.fills.length - 500)
 

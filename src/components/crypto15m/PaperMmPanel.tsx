@@ -21,6 +21,21 @@ function useEngineState(): MmEngineState {
   return state
 }
 
+/** Session P&L rising too fast for strict fill rates → soft-sim warning. */
+function isUnrealisticallyFastPnl(
+  totalPnl: number,
+  sessionStartedAt: number | null,
+  strictRealism: boolean,
+  baseFillProb: number,
+): boolean {
+  if (totalPnl < 8) return false
+  if (!strictRealism || baseFillProb > 0.015) return true
+  if (sessionStartedAt == null) return totalPnl >= 15
+  const ageSec = Math.max(1, (Date.now() - sessionStartedAt) / 1000)
+  const perMin = (totalPnl / ageSec) * 60
+  return (totalPnl >= 10 && ageSec < 180) || perMin >= 5 || totalPnl >= 25
+}
+
 export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Props) {
   const state = useEngineState()
   const { snapshot: s, fills, cancels } = state
@@ -42,6 +57,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     if (selected) paperMmEngine.onMarketTick(selected)
   }, [selected, selected?.midYes, selected?.yesBid, selected?.yesAsk])
 
+  // Keep draft in sync when engine applies strict/loose presets
+  useEffect(() => {
+    setDraft({ ...s.config })
+  }, [s.config.strictRealism, s.config.baseFillProb, s.config.midCrossFillProb])
+
   const applyConfig = () => {
     paperMmEngine.setConfig(draft)
   }
@@ -51,14 +71,28 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     : 'clear'
 
   const totalPnl = s.realizedSpreadPnl + s.unrealizedInventoryPnl
+  const showSoftWarn = isUnrealisticallyFastPnl(
+    totalPnl,
+    s.sessionStartedAt,
+    s.config.strictRealism,
+    s.config.baseFillProb,
+  )
 
   return (
     <div className="space-y-4 text-left">
       <div className="rounded-xl border border-rose-800/50 bg-rose-950/30 px-4 py-3 text-xs text-rose-100/95">
         <strong>Paper only.</strong> Live MM needs API keys. On 15m, bots cancel faster — this
         teaches whether <em>YOUR</em> params survive. Adverse selection is modeled on purpose; do
-        not pretend fills are always friendly. No live order placement in this build.
+        not pretend fills are always friendly. No live order placement in this build.{' '}
+        <strong>Paper MM green ≠ live edge.</strong>
       </div>
+
+      {showSoftWarn && (
+        <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
+          ⚠ Sim too friendly / check fill rate — not live edge. Session P&amp;L rose unrealistically
+          fast for a harsh paper book (or loose mode is on).
+        </div>
+      )}
 
       <div className="panel p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -67,7 +101,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               15m MM (Paper)
             </p>
             <h2 className="text-sm font-semibold text-slate-100">
-              Spread capture sim · spot guard
+              Spread capture sim · spot guard · settlement risk
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -80,15 +114,43 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                s.config.strictRealism
+                  ? 'bg-slate-900 text-sky-300'
+                  : 'bg-amber-950 text-amber-200'
+              }`}
+            >
+              {s.config.strictRealism ? 'STRICT realism' : 'LOOSE debug'}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                 s.running ? 'bg-violet-950 text-violet-200' : 'bg-slate-800 text-slate-400'
               }`}
             >
-              {s.running ? 'RUNNING' : 'STOPPED'}
+              {s.settled ? 'SETTLED' : s.running ? 'RUNNING' : 'STOPPED'}
             </span>
           </div>
         </div>
 
         <p className="mt-2 text-xs text-slate-400">{s.message}</p>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-600"
+              checked={draft.strictRealism}
+              onChange={(e) => {
+                const strict = e.target.checked
+                setDraft((d) => ({ ...d, strictRealism: strict }))
+                paperMmEngine.setStrictRealism(strict)
+              }}
+            />
+            <span>
+              <strong>Strict realism</strong> (default ON) — rare fills, mid-cross ~20%, fees,
+              settlement
+            </span>
+          </label>
+        </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
           <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-slate-400">
@@ -148,9 +210,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           tone={s.unrealizedInventoryPnl >= 0 ? 'good' : 'bad'}
         />
         <Stat
-          label="Realized (spread)"
+          label="Realized (after fees)"
           value={formatDollars(s.realizedSpreadPnl)}
           tone={s.realizedSpreadPnl >= 0 ? 'good' : 'bad'}
+        />
+        <Stat
+          label="Fees paid"
+          value={formatDollars(s.feesPaid)}
+          tone={s.feesPaid > 0 ? 'warn' : 'neutral'}
         />
         <Stat
           label="Total P&L"
@@ -168,6 +235,16 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         />
         <Stat label="Market mid" value={formatCents(s.midYes)} />
         <Stat label="Spot guard" value={guardLive} tone={s.guardMode ? 'warn' : 'neutral'} />
+        <Stat
+          label="Mid-cross voids"
+          value={String(s.midCrossRejectCount)}
+          sub={`fill p=${s.config.midCrossFillProb}`}
+        />
+        <Stat
+          label="Base fill p"
+          value={s.config.baseFillProb.toFixed(4)}
+          sub={s.config.applyFees ? 'fees ON' : 'fees OFF'}
+        />
       </div>
 
       {/* Live quote */}
@@ -277,11 +354,46 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             max={0.8}
             onChange={(v) => setDraft((d) => ({ ...d, toxicityBias: v }))}
           />
+          <Knob
+            label="Base fill prob / tick"
+            value={draft.baseFillProb}
+            step={0.001}
+            min={0}
+            max={0.5}
+            onChange={(v) => setDraft((d) => ({ ...d, baseFillProb: v }))}
+          />
+          <Knob
+            label="Mid-cross fill prob"
+            value={draft.midCrossFillProb}
+            step={0.05}
+            min={0}
+            max={1}
+            onChange={(v) => setDraft((d) => ({ ...d, midCrossFillProb: v }))}
+          />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-400">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.applyFees}
+              onChange={(e) => setDraft((d) => ({ ...d, applyFees: e.target.checked }))}
+            />
+            Kalshi-style fees on fills
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.settleOnClose}
+              onChange={(e) => setDraft((d) => ({ ...d, settleOnClose: e.target.checked }))}
+            />
+            Settlement risk (mark inv to 0/1 on close)
+          </label>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
           Spot guard: if free public BTC/ETH (etc.) spot moves more than X% <em>or</em> $Y within Z
-          seconds → cancel / widen / skew. Fills: mid-cross + random with toxicity when spot moved
-          against your quote.
+          seconds → cancel / widen / skew. Fills: probabilistic mid-cross (void/reject) + rare
+          random with toxicity. Fees use ceil(0.07·C·P·(1−P)). Open inventory at window end settles
+          to 0 or 1 and can wipe spread gains.
         </p>
       </div>
 
@@ -291,9 +403,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           empty="No fills yet."
           rows={fills.map((f) => ({
             id: f.id,
-            tone: f.toxic ? 'bad' : 'neutral',
-            primary: `${f.side === 'buy_yes' ? 'BUY YES' : 'SELL YES'} ${f.size} @ ${formatCents(f.price)}`,
-            secondary: `${f.reason}${f.toxic ? ' · TOXIC' : ''} · mid ${formatCents(f.midAtFill)} · ${new Date(f.t).toLocaleTimeString()}`,
+            tone: f.reason === 'settlement' ? 'warn' : f.toxic ? 'bad' : 'neutral',
+            primary: `${f.side === 'buy_yes' ? 'BUY YES' : 'SELL YES'} ${f.size} @ ${
+              f.price === 0 || f.price === 1 ? (f.price === 1 ? '1.00' : '0.00') : formatCents(f.price)
+            }`,
+            secondary: `${f.reason}${f.toxic ? ' · TOXIC' : ''} · fee ${formatDollars(f.feeDollars)} · mid ${formatCents(f.midAtFill)} · ${new Date(f.t).toLocaleTimeString()}`,
           }))}
         />
         <LogPanel

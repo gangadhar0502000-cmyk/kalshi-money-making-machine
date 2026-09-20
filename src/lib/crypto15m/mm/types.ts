@@ -21,7 +21,9 @@ export interface MmFill {
   size: number
   midAtFill: number
   toxic: boolean
-  reason: 'mid_cross' | 'random_toxic' | 'random'
+  reason: 'mid_cross' | 'random_toxic' | 'random' | 'settlement'
+  /** Kalshi-style fee deducted on this fill ($). */
+  feeDollars: number
 }
 
 export interface MmCancelEvent {
@@ -46,17 +48,25 @@ export interface MmSnapshot {
   midYes: number
   spotPrice: number | null
   spotSource: string | null
-  /** Realized from round-trips / closed legs (spread capture). */
+  /** Realized from round-trips / closed legs (spread capture), after fees. */
   realizedSpreadPnl: number
+  /** Cumulative Kalshi-style fees paid this session. */
+  feesPaid: number
   /** Mark-to-mid inventory P&L (unrealized). */
   unrealizedInventoryPnl: number
   /** Avg entry of open inventory (YES price). */
   avgEntry: number | null
   fillCount: number
   cancelCount: number
+  /** Mid-cross attempts that voided / rejected (no fill). */
+  midCrossRejectCount: number
   guardActiveUntil: number
   guardMode: MmGuardAction | null
   lastTickAt: number | null
+  /** Epoch ms when current session started (Start / after Reset). */
+  sessionStartedAt: number | null
+  /** True after inventory was forced to settle at 0/1. */
+  settled: boolean
   message: string
 }
 

@@ -60,6 +60,8 @@ Until then: treat every suggestion as an experiment to **falsify**.
 
 **Paper only. Live MM needs API keys. On 15m, bots cancel faster — this teaches whether YOUR params survive.**
 
+> **Paper MM green ≠ live.** A green session P&L is **not** evidence of a live edge. Strict realism (default ON) keeps the sim harsh on purpose.
+
 Open the **15m MM (Paper)** tab (next to Crypto Lab / Backtest). Simulates a two-sided YES bid/ask around mid:
 
 | Knob | Role |
@@ -69,10 +71,19 @@ Open the **15m MM (Paper)** tab (next to Crypto Lab / Backtest). Simulates a two
 | Max inventory | Position limit (suppresses the crowded side) |
 | Spot move % / $ / window | Spot guard thresholds |
 | Quote refresh (ms) | Timer requotes (+ requote when mid moves) |
+| Base fill prob | Random fill chance per tick (strict default **0.004**) |
+| Mid-cross fill prob | Chance to fill when mid walks through quote (strict **~0.20**; else void/reject) |
+| Strict realism | Default **ON** — harsh fills, fees, settlement. Loose = debug only |
 
 **Spot guard (critical):** polls free public BTC/ETH/… spot via Binance (primary) or Coinbase (fallback) — **no API keys**. If spot moves more than X% **or** $Y within Z seconds → cancel simulated quotes / widen / inventory skew (Avellaneda-lite). Events land in the cancel log.
 
-**Fills are not friendly:** mid-cross when market mid walks through your quote, plus random fills with **toxicity bias** when spot moved against your resting side (adverse selection). Dashboard splits **realized spread P&L** vs **unrealized inventory P&L**.
+**Fills are not friendly (strict realism):**
+- Mid-cross is **probabilistic** (~15–25%), not automatic — voids/rejects are modeled
+- Random fills are **rare** (`baseFillProb` ≈ 0.004) with **toxicity bias** when spot moved against your resting side
+- Every fill pays Kalshi-style fees: `ceil(0.07·C·P·(1−P))` (to the cent), subtracted from P&L
+- **Settlement risk:** if the window closes with inventory ≠ 0, inventory is marked to **0 or 1** and P&L is realized (can wipe spread gains)
+
+If session P&L rises unrealistically fast, the UI shows: **“Sim too friendly / check fill rate — not live edge.”**
 
 No live order placement in this build.
 

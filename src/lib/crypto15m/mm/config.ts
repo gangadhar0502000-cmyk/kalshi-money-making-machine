@@ -29,11 +29,26 @@ export interface PaperMmConfig {
   baseFillProb: number
   /** Extra fill bias when spot moved against your resting quote. */
   toxicityBias: number
+  /**
+   * Probability of filling when mid crosses your quote (void/reject otherwise).
+   * Strict realism uses ~0.15–0.25 — never assume 100% mid-cross fills.
+   */
+  midCrossFillProb: number
+  /** Subtract Kalshi-style fees on every paper fill. */
+  applyFees: boolean
+  /** Realize inventory at 0/1 when the market closes / settles. */
+  settleOnClose: boolean
+  /**
+   * Strict realism (default ON): harsh fill rates, fees, settlement risk.
+   * Loose mode is for debugging only — not a live edge claim.
+   */
+  strictRealism: boolean
   /** Starting paper cash ($). */
   startingCash: number
 }
 
-export const DEFAULT_PAPER_MM_CONFIG: PaperMmConfig = {
+/** Harsh defaults — random fills rare; mid-cross probabilistic; fees + settlement on. */
+export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   halfSpreadCents: 2,
   quoteSize: 5,
   maxInventory: 25,
@@ -46,9 +61,39 @@ export const DEFAULT_PAPER_MM_CONFIG: PaperMmConfig = {
   inventorySkewCentsPerUnit: 0.15,
   guardWidenCents: 4,
   guardCancelMs: 4000,
-  baseFillProb: 0.04,
+  baseFillProb: 0.004,
   toxicityBias: 0.18,
+  midCrossFillProb: 0.2,
+  applyFees: true,
+  settleOnClose: true,
+  strictRealism: true,
   startingCash: 100,
+}
+
+/** Soft debug presets — easier fills; do not treat green P&L as live edge. */
+export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
+  ...STRICT_PAPER_MM_CONFIG,
+  baseFillProb: 0.04,
+  midCrossFillProb: 1,
+  applyFees: false,
+  settleOnClose: false,
+  strictRealism: false,
+  toxicityBias: 0.1,
+}
+
+/** @deprecated Prefer STRICT_PAPER_MM_CONFIG — kept as alias for imports. */
+export const DEFAULT_PAPER_MM_CONFIG: PaperMmConfig = { ...STRICT_PAPER_MM_CONFIG }
+
+export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
+  const src = strict ? STRICT_PAPER_MM_CONFIG : LOOSE_PAPER_MM_CONFIG
+  return {
+    strictRealism: strict,
+    baseFillProb: src.baseFillProb,
+    midCrossFillProb: src.midCrossFillProb,
+    applyFees: src.applyFees,
+    settleOnClose: src.settleOnClose,
+    toxicityBias: src.toxicityBias,
+  }
 }
 
 export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
@@ -68,6 +113,10 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     guardCancelMs: Math.round(clamp(c.guardCancelMs, 0, 60_000)),
     baseFillProb: clamp(c.baseFillProb, 0, 0.5),
     toxicityBias: clamp(c.toxicityBias, 0, 0.8),
+    midCrossFillProb: clamp(c.midCrossFillProb, 0, 1),
+    applyFees: Boolean(c.applyFees),
+    settleOnClose: Boolean(c.settleOnClose),
+    strictRealism: Boolean(c.strictRealism),
     startingCash: clamp(c.startingCash, 10, 10_000),
   }
 }
