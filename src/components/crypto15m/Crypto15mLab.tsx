@@ -20,6 +20,7 @@ import { PaperJournalPanel } from './PaperJournalPanel'
 import { RuleExperimentsPanel } from './RuleExperimentsPanel'
 import { BacktestPanel } from './BacktestPanel'
 import { PaperMmPanel } from './PaperMmPanel'
+import { pickBestOpenMarket, pickRollTarget } from '../../lib/crypto15m/mm/marketSelect'
 
 type LabTab = 'lab' | 'backtest' | 'mm'
 
@@ -44,8 +45,17 @@ export function Crypto15mLab() {
       setError(result.error)
       setFetchedAt(result.fetchedAt)
       setSelectedTicker((prev) => {
-        if (prev && result.markets.some((m) => m.ticker === prev)) return prev
-        return result.markets[0]?.ticker ?? null
+        const current = prev ? result.markets.find((m) => m.ticker === prev) ?? null : null
+        // If prev disappeared from feed, treat as closed → pick best open
+        const synthetic = current
+        const roll = pickRollTarget(result.markets, synthetic)
+        if (roll) return roll.ticker
+        if (prev && !current) {
+          // Expired ticker dropped from open feed — roll to best open
+          return pickBestOpenMarket(result.markets)?.ticker ?? null
+        }
+        if (prev && current) return prev
+        return pickBestOpenMarket(result.markets)?.ticker ?? result.markets[0]?.ticker ?? null
       })
     } finally {
       if (!signal?.aborted) setLoading(false)

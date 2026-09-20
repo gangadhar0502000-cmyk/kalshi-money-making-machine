@@ -51,6 +51,17 @@ export interface PaperMmConfig {
   strictRealism: boolean
   /** Starting paper cash ($). */
   startingCash: number
+  /**
+   * Pull YES bid / refuse buy_yes when mid is below this (dollars 0–1).
+   * Stops toxic accumulation when YES is nearly worthless.
+   */
+  toxicMidLow: number
+  /**
+   * Pull YES ask / refuse sell_yes when mid is above this (dollars 0–1).
+   */
+  toxicMidHigh: number
+  /** Auto-roll to next open 15m for same underlying after close/settle. */
+  autoRoll: boolean
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -77,6 +88,9 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   settleOnClose: true,
   strictRealism: true,
   startingCash: 100,
+  toxicMidLow: 0.05,
+  toxicMidHigh: 0.95,
+  autoRoll: true,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -132,6 +146,9 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     settleOnClose: Boolean(c.settleOnClose),
     strictRealism: Boolean(c.strictRealism),
     startingCash: clamp(c.startingCash, 10, 10_000),
+    toxicMidLow: clamp(c.toxicMidLow, 0.01, 0.45),
+    toxicMidHigh: clamp(c.toxicMidHigh, 0.55, 0.99),
+    autoRoll: Boolean(c.autoRoll),
   }
 }
 

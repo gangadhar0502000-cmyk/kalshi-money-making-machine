@@ -69,6 +69,15 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     paperMmEngine.setMarket(selected)
   }, [selected])
 
+  // Auto-roll: when feed updates (close/new 15m), settle+switch and notify parent
+  useEffect(() => {
+    if (markets.length === 0) return
+    const ticker = paperMmEngine.syncMarketUniverse(markets)
+    if (ticker && ticker !== selectedTicker) {
+      onSelect(ticker)
+    }
+  }, [markets, selectedTicker, onSelect])
+
   // Keep engine synced when parent refreshes mid
   useEffect(() => {
     if (selected) paperMmEngine.onMarketTick(selected)
@@ -184,6 +193,23 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
 
         <p className="mt-2 text-xs text-slate-400">{s.message}</p>
+        <p className="mt-1 font-mono text-[11px] text-violet-300/90">
+          Active:{' '}
+          <strong className="text-violet-200">{s.marketTicker ?? selectedTicker ?? '—'}</strong>
+          {s.marketCloseTime && (
+            <>
+              {' '}
+              · closes {new Date(s.marketCloseTime).toLocaleString()}
+            </>
+          )}
+          {selected && (
+            <>
+              {' '}
+              · {selected.minutesRemaining.toFixed(1)}m left · mid{' '}
+              {(selected.midYes * 100).toFixed(0)}¢
+            </>
+          )}
+        </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
@@ -209,7 +235,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             Market
             <select
               className="input"
-              value={selectedTicker ?? ''}
+              value={s.marketTicker ?? selectedTicker ?? ''}
               onChange={(e) => onSelect(e.target.value)}
               disabled={s.running}
             >
@@ -330,6 +356,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             <span className="text-xs text-slate-500">
               half {s.quote.halfSpreadCents.toFixed(1)}¢ · skew {s.quote.skewCents.toFixed(2)}¢ ·{' '}
               {s.quote.active ? 'ACTIVE' : 'CANCELLED'}
+              {s.quote.bidActive === false ? ' · bid OFF' : ''}
+              {s.quote.askActive === false ? ' · ask OFF' : ''}
             </span>
           </div>
         ) : (

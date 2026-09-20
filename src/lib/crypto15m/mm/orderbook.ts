@@ -132,7 +132,14 @@ export const DEFAULT_DETECT_STATE: DetectBookFillsState = {
 export function detectBookFills(
   prev: OrderBookSnapshot | null,
   next: OrderBookSnapshot,
-  quote: { yesBid: number; yesAsk: number; size: number; active: boolean },
+  quote: {
+    yesBid: number
+    yesAsk: number
+    size: number
+    active: boolean
+    bidActive?: boolean
+    askActive?: boolean
+  },
   inventory: number,
   maxInventory: number,
   walkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE },
@@ -142,9 +149,11 @@ export function detectBookFills(
   const bid = asDollarPrice(quote.yesBid, 'quote.bid')
   const ask = asDollarPrice(quote.yesAsk, 'quote.ask')
   const size = Math.max(1, Math.round(quote.size))
+  const bidOn = quote.bidActive !== false
+  const askOn = quote.askActive !== false
 
-  // Immediate cross → taker (single fill, then stop)
-  if (bid >= next.bestAsk - 1e-9 && inventory < maxInventory) {
+  // Immediate cross → taker (single fill, then stop). Per-side must be active.
+  if (bidOn && bid >= next.bestAsk - 1e-9 && inventory < maxInventory) {
     const avail = Math.max(1, Math.floor(depthAskAtOrBelow(next, bid)))
     return [
       {
@@ -156,7 +165,7 @@ export function detectBookFills(
       },
     ]
   }
-  if (ask <= next.bestBid + 1e-9 && inventory > -maxInventory) {
+  if (askOn && ask <= next.bestBid + 1e-9 && inventory > -maxInventory) {
     const avail = Math.max(1, Math.floor(depthBidAtOrAbove(next, ask)))
     return [
       {
@@ -187,6 +196,7 @@ export function detectBookFills(
 
   // Mid walk through resting quotes — only once per crossing (armed)
   if (
+    bidOn &&
     walkState.midWalkBidArmed &&
     prevMid > bid + 1e-9 &&
     nextMid <= bid + 1e-9 &&
@@ -204,6 +214,7 @@ export function detectBookFills(
     ]
   }
   if (
+    askOn &&
     walkState.midWalkAskArmed &&
     prevMid < ask - 1e-9 &&
     nextMid >= ask - 1e-9 &&
@@ -228,7 +239,7 @@ export function detectBookFills(
   const bidDepthPrev = depthBidAtOrAbove(prev, bid)
   const bidDepthNext = depthBidAtOrAbove(next, bid)
   const bidConsumed = bidDepthPrev - bidDepthNext
-  if (bidAtTouch && bidConsumed >= 1 && inventory < maxInventory) {
+  if (bidOn && bidAtTouch && bidConsumed >= 1 && inventory < maxInventory) {
     const fillSz = Math.min(size, Math.floor(bidConsumed))
     if (fillSz >= 1) {
       return [
@@ -249,7 +260,7 @@ export function detectBookFills(
   const askDepthPrev = depthAskAtOrBelow(prev, ask)
   const askDepthNext = depthAskAtOrBelow(next, ask)
   const askConsumed = askDepthPrev - askDepthNext
-  if (askAtTouch && askConsumed >= 1 && inventory > -maxInventory) {
+  if (askOn && askAtTouch && askConsumed >= 1 && inventory > -maxInventory) {
     const fillSz = Math.min(size, Math.floor(askConsumed))
     if (fillSz >= 1) {
       return [

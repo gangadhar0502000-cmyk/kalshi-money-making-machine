@@ -8,6 +8,10 @@ export interface MmQuote {
   yesAsk: number
   size: number
   active: boolean
+  /** Bid side enabled (false when max long or extreme-low mid). */
+  bidActive: boolean
+  /** Ask side enabled (false when max short or extreme-high mid). */
+  askActive: boolean
   /** Inventory skew applied (cents, positive = shift down = favor selling). */
   skewCents: number
   halfSpreadCents: number
@@ -50,6 +54,8 @@ export interface MmCancelEvent {
 export interface MmSnapshot {
   running: boolean
   marketTicker: string | null
+  /** ISO close_time of the active market (for UI). */
+  marketCloseTime: string | null
   asset: string | null
   config: PaperMmConfig
   quote: MmQuote | null

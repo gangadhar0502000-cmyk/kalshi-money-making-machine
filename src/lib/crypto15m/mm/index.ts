@@ -18,3 +18,12 @@ export type {
   MmQuote,
   MmSnapshot,
 } from './types'
+
+export { isMarketOpen, pickBestOpenMarket, pickRollTarget } from './marketSelect'
+export {
+  isToxicExtremeMid,
+  allowBidAtMid,
+  allowAskAtMid,
+  DEFAULT_TOXIC_MID_LOW,
+  DEFAULT_TOXIC_MID_HIGH,
+} from './toxicity'

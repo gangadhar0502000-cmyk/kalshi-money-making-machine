@@ -62,5 +62,5 @@ const proxy = {
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: { proxy },
-  preview: { proxy },
+  preview: { proxy }
 })

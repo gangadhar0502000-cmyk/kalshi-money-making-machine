@@ -26,6 +26,8 @@ import {
 } from './orderbook'
 import { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
 import { asDollarPrice, clampPx } from './prices'
+import { pickRollTarget } from './marketSelect'
+import { allowAskAtMid, allowBidAtMid, isToxicExtremeMid } from './toxicity'
 import type {
   MmCancelEvent,
   MmEngineState,
@@ -175,6 +177,7 @@ export class PaperMmEngine {
     return {
       running: this.running,
       marketTicker: this.market?.ticker ?? null,
+      marketCloseTime: this.market?.closeTime ?? null,
       asset: this.market?.asset ?? null,
       config: { ...this.config },
       quote: this.quote ? { ...this.quote } : null,
@@ -206,7 +209,18 @@ export class PaperMmEngine {
   }
 
   setMarket(market: Crypto15mMarket | null): void {
-    const changed = market?.ticker !== this.market?.ticker
+    const prevTicker = this.market?.ticker ?? null
+    const changed = market?.ticker !== prevTicker
+    // If leaving a live position on a different ticker, settle first
+    if (
+      changed &&
+      this.market &&
+      this.inventory !== 0 &&
+      !this.settled &&
+      market
+    ) {
+      this.settleInventory(this.market, { keepRunning: this.running })
+    }
     this.market = market
     if (changed) {
       this.lastMid = market ? asDollarPrice(market.midYes, 'setMarket.mid') : null
@@ -219,13 +233,66 @@ export class PaperMmEngine {
       this.liveBook = false
       this.midWalkState = { ...DEFAULT_DETECT_STATE }
       this.lastFillAt = 0
-      if (this.running) {
+      // New contract → clear paper inventory/quotes (cash + realized kept)
+      this.inventory = 0
+      this.avgEntry = null
+      this.quote = null
+      this.lastUnrealizedAbs = 0
+      this.unitsWarning = null
+      this.moneyPrinterBug = false
+      this.lastTotalPnl = 0
+      this.lastTotalPnlAt = 0
+      if (prevTicker && market) {
+        this.message =
+          `Rolled to ${market.ticker} (from ${prevTicker}) · close ${market.closeTime} · ` +
+          `inventory/quotes reset. Read-only API · never places trades.`
+      }
+      if (this.running && market) {
         this.rebuildQuote(true)
         void this.pollSpot()
         void this.pollBook()
       }
     } else if (market) {
       this.onMarketTick(market)
+    }
+    this.emit()
+  }
+
+  /**
+   * Given the latest open-market feed, settle+roll when the active contract is
+   * dead or a newer same-asset 15m window appears. Keeps the engine running.
+   * @returns ticker after sync (may be unchanged)
+   */
+  syncMarketUniverse(markets: Crypto15mMarket[]): string | null {
+    const target = pickRollTarget(markets, this.market)
+    if (!target) {
+      // Refresh current mid/status if still in feed
+      if (this.market) {
+        const fresh = markets.find((m) => m.ticker === this.market!.ticker)
+        if (fresh) this.onMarketTick(fresh)
+      }
+      return this.market?.ticker ?? null
+    }
+    if (target.ticker === this.market?.ticker) {
+      this.onMarketTick(target)
+      return target.ticker
+    }
+    this.rollToMarket(target)
+    return target.ticker
+  }
+
+  /** Settle open inventory if needed, switch ticker, reset quotes, keep running. */
+  rollToMarket(market: Crypto15mMarket): void {
+    const wasRunning = this.running
+    this.setMarket(market)
+    this.settled = false
+    if (wasRunning) {
+      this.running = true
+      this.sessionStartedAt = this.sessionStartedAt ?? Date.now()
+      this.rebuildQuote(true)
+      this.armTimers()
+      void this.pollSpot()
+      void this.pollBook()
     }
     this.emit()
   }
@@ -260,7 +327,9 @@ export class PaperMmEngine {
   stop(): void {
     this.running = false
     this.clearTimers()
-    if (this.quote) this.quote = { ...this.quote, active: false }
+    if (this.quote) {
+      this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+    }
     this.guardMode = null
     this.guardActiveUntil = 0
     this.message = 'Stopped. Quotes cancelled (paper). Read-only API · never places trades.'
@@ -408,13 +477,27 @@ export class PaperMmEngine {
         // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
         const sig = signals[0]
         if (sig) {
-          const stats = this.spotHist.stats(this.config.spotWindowSec)
-          const toxic =
-            (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
-            (sig.side === 'sell_yes' && stats.signedPct > 0.02)
-          this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
-          this.lastFillAt = now
-          this.rebuildQuote(true)
+          if (
+            isToxicExtremeMid(
+              sig.side,
+              mid,
+              this.config.toxicMidLow,
+              this.config.toxicMidHigh,
+            )
+          ) {
+            this.midCrossRejectCount += 1
+            this.message =
+              `TOXIC SKIP ${sig.reason} ${sig.side} @ mid $${mid.toFixed(4)} — adverse side pulled.`
+            this.rebuildQuote(true)
+          } else {
+            const stats = this.spotHist.stats(this.config.spotWindowSec)
+            const toxic =
+              (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
+              (sig.side === 'sell_yes' && stats.signedPct > 0.02)
+            this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
+            this.lastFillAt = now
+            this.rebuildQuote(true)
+          }
         }
       } else {
         // Keep mid-walk arming fresh while cooling; do not detect fills
@@ -547,13 +630,21 @@ export class PaperMmEngine {
     this.emit()
   }
 
-  private settleInventory(market: Crypto15mMarket): void {
+  private settleInventory(
+    market: Crypto15mMarket,
+    opts: { keepRunning?: boolean } = {},
+  ): void {
     if (this.settled) return
     this.settled = true
-    if (this.quote) this.quote = { ...this.quote, active: false }
+    if (this.quote) {
+      this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+    }
 
     const settlePx = settlementYesPrice(market)
     const inv = this.inventory
+    // Keep session alive for auto-roll only if we were already running
+    const awaitRoll =
+      this.config.autoRoll && (opts.keepRunning === true || this.running)
 
     if (inv !== 0 && this.avgEntry != null) {
       const size = Math.abs(inv)
@@ -583,13 +674,23 @@ export class PaperMmEngine {
 
       this.message =
         `SETTLEMENT: inventory ${inv > 0 ? '+' : ''}${inv} marked to ${settlePx === 1 ? 'YES=1' : 'YES=0'} ` +
-        `(P&L ${pnlPer * size >= 0 ? '+' : ''}${(pnlPer * size).toFixed(2)}). Spread gains can wipe.`
+        `(P&L ${pnlPer * size >= 0 ? '+' : ''}${(pnlPer * size).toFixed(2)}). Spread gains can wipe.` +
+        (awaitRoll ? ' Waiting to auto-roll…' : '')
     } else {
-      this.message = 'Market closed/settled with flat inventory.'
+      this.message =
+        'Market closed/settled with flat inventory.' +
+        (awaitRoll ? ' Waiting to auto-roll…' : '')
     }
 
     this.inventory = 0
     this.avgEntry = null
+
+    if (awaitRoll) {
+      // Stay running (timers up) so syncMarketUniverse can roll without Start.
+      this.running = true
+      return
+    }
+
     this.running = false
     this.clearTimers()
   }
@@ -601,12 +702,16 @@ export class PaperMmEngine {
     }
     const now = Date.now()
     if (this.moneyPrinterBug) {
-      if (this.quote) this.quote = { ...this.quote, active: false }
+      if (this.quote) {
+        this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+      }
       return
     }
     const guardCancel = this.guardMode === 'cancel' && now < this.guardActiveUntil
     if (guardCancel) {
-      if (this.quote) this.quote = { ...this.quote, active: false }
+      if (this.quote) {
+        this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+      }
       return
     }
 
@@ -624,24 +729,30 @@ export class PaperMmEngine {
 
     const atMaxLong = this.inventory >= this.config.maxInventory
     const atMaxShort = this.inventory <= -this.config.maxInventory
+    const midOkBid = allowBidAtMid(mid, this.config.toxicMidLow)
+    const midOkAsk = allowAskAtMid(mid, this.config.toxicMidHigh)
 
-    let activeBid = !atMaxLong
-    let activeAsk = !atMaxShort
+    let activeBid = !atMaxLong && midOkBid
+    let activeAsk = !atMaxShort && midOkAsk
     if (!this.running || this.settled) {
       activeBid = false
       activeAsk = false
     }
 
+    // Park inactive sides away from the touch so taker_cross cannot fire on them
+    const qBid = activeBid ? bid : 0.01
+    const qAsk = activeAsk ? ask : 0.99
+
     this.quote = {
-      yesBid: bid,
-      yesAsk: ask,
+      yesBid: qBid,
+      yesAsk: qAsk,
       size: this.config.quoteSize,
       active: this.running && !this.settled && (activeBid || activeAsk) && !guardCancel,
+      bidActive: activeBid && !guardCancel,
+      askActive: activeAsk && !guardCancel,
       skewCents,
       halfSpreadCents: half,
     }
-    if (atMaxLong) this.quote.yesBid = 0.01
-    if (atMaxShort) this.quote.yesAsk = 0.99
 
     this.lastQuoteAt = now
     if (force) {
@@ -662,7 +773,12 @@ export class PaperMmEngine {
     const spotUp = stats.signedPct > 0.02
     const spotDown = stats.signedPct < -0.02
 
-    if (mid <= q.yesBid && this.inventory < this.config.maxInventory) {
+    if (
+      q.bidActive !== false &&
+      mid <= q.yesBid &&
+      this.inventory < this.config.maxInventory &&
+      !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+    ) {
       if (Math.random() < this.config.midCrossFillProb) {
         if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
         this.applyFill('buy_yes', q.yesBid, q.size, mid, spotDown, 'mid_cross', false)
@@ -674,7 +790,12 @@ export class PaperMmEngine {
       }
       return
     }
-    if (mid >= q.yesAsk && this.inventory > -this.config.maxInventory) {
+    if (
+      q.askActive !== false &&
+      mid >= q.yesAsk &&
+      this.inventory > -this.config.maxInventory &&
+      !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+    ) {
       if (Math.random() < this.config.midCrossFillProb) {
         if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
         this.applyFill('sell_yes', q.yesAsk, q.size, mid, spotUp, 'mid_cross', false)
@@ -699,7 +820,15 @@ export class PaperMmEngine {
 
     if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
     const r = Math.random()
-    if (r < buyProb && this.inventory < this.config.maxInventory) {
+    const canBuy =
+      q.bidActive !== false &&
+      this.inventory < this.config.maxInventory &&
+      !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+    const canSell =
+      q.askActive !== false &&
+      this.inventory > -this.config.maxInventory &&
+      !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+    if (r < buyProb && canBuy) {
       this.applyFill(
         'buy_yes',
         q.yesBid,
@@ -711,7 +840,7 @@ export class PaperMmEngine {
       )
       this.lastFillAt = Date.now()
       this.rebuildQuote(true)
-    } else if (r < buyProb + sellProb && this.inventory > -this.config.maxInventory) {
+    } else if (r < buyProb + sellProb && canSell) {
       this.applyFill(
         'sell_yes',
         q.yesAsk,
@@ -740,6 +869,21 @@ export class PaperMmEngine {
     if (price > 1.01 || mid > 1.01) {
       console.warn(`[paper-mm] reject fill with non-dollar price price=${priceRaw} mid=${midRaw}`)
       this.unitsWarning = `Rejected fill with cents-like price (price=${priceRaw}, mid=${midRaw})`
+      return
+    }
+
+    // Hard refuse: do not accumulate into near-certain settlement loss at extreme mids
+    if (
+      reason !== 'settlement' &&
+      isToxicExtremeMid(side, mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+    ) {
+      this.midCrossRejectCount += 1
+      this.message =
+        `TOXIC SKIP ${side} @ mid $${mid.toFixed(4)} (extreme mid guard ` +
+        `${this.config.toxicMidLow}–${this.config.toxicMidHigh}). ` +
+        `Pulled adverse side. Read-only · never places trades.`
+      // Force requote with adverse side off
+      this.rebuildQuote(true)
       return
     }
 
@@ -821,7 +965,9 @@ export class PaperMmEngine {
       const dPnl = Math.abs(total - this.lastTotalPnl)
       if (dt < 2000 && dPnl > 1) {
         this.moneyPrinterBug = true
-        if (this.quote) this.quote = { ...this.quote, active: false }
+        if (this.quote) {
+          this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+        }
         this.message =
           'MONEY PRINTER BUG — paused. |Δ Total P&L| > $1 in under 2s. Reset session. Read-only · never places trades.'
         console.error(
