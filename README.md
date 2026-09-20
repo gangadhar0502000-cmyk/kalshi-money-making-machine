@@ -1,8 +1,15 @@
-# Kalshi Money Making Machine
+# Kalshi Money Making Machine — Edge Finder
 
-Zero-cost **research + opportunity scanner** for [Kalshi](https://kalshi.com) prediction markets. Runs entirely on your machine with `npm` — no paid APIs, no paid hosting, no real-money auto-trading.
+A **serious, local research tool** for finding **tradeable edge** on [Kalshi](https://kalshi.com) — not a toy “99¢ sure thing” scanner.
 
-> **Disclaimer:** This is an educational research tool. Edge scores are transparent heuristics for scanning markets — **not** financial advice, **not** guaranteed profit, and **not** proof of mispricing. Prediction markets can lose money. Do your own research.
+> **Disclaimer:** Educational research only. Estimated fair values and edges are **not** financial advice, **not** proof of mispricing, and **never** guaranteed profit. You can lose money in prediction markets. Do your own research.
+
+## Thesis
+
+1. **Liquidity first** — Hard-exclude illiquid / locked books (near 1¢ or 99¢ with no depth, tiny volume, empty books, absurd spreads). Prefer mid-priced markets (default **15–85¢**) with real volume and tight spreads.
+2. **Fair value** — Estimate P(YES) from free signals when possible; otherwise honest **structure / cross-market** heuristics labeled weak.
+3. **Edge = fair − Kalshi mid** (percentage points). Surface only above a minimum |edge| threshold. Tag confidence (**HIGH** only when an external fair source was used **and** liquidity passed).
+4. **Trade cards** — Market, Kalshi mid, fair estimate, edge %, liquidity score, suggested side, Kelly-lite stake %, and **why** (sources). Paper-trade locally; never auto-routes real orders.
 
 ## Quick start
 
@@ -14,67 +21,68 @@ npm run dev
 
 Open the URL Vite prints (usually `http://localhost:5173`).
 
-Production build:
-
 ```bash
 npm run build
 npm run preview
 ```
 
-## What you get
+Optional sports odds (free tier key — app works without it):
 
-1. **Live market scanner** — fetches open markets from Kalshi’s free public Trade API (`/trade-api/v2/markets`) via a Vite dev proxy (avoids browser CORS). If live fetch fails (rate limit, network, etc.), the app **falls back to bundled demo fixtures** and shows a banner.
-2. **Edge scoring** — composite 0–100 score from liquidity/volume, bid–ask spread, distance from 50¢, time-to-expiry, and recent volume momentum. Each card shows a short rationale + score breakdown.
-3. **Trade ideas board** — ranked opportunities with YES/NO quotes, volume, suggested side, suggested stake % of paper bankroll, and a link toward the Kalshi market page.
-4. **Paper bankroll** — `localStorage` portfolio: configurable starting cash, open/close paper trades, mark-to-market P&L. **No real orders.**
-5. **Dashboard UI** — dark theme, filters (category, min volume, min score, search), refresh, last-updated.
+```bash
+cp .env.example .env
+# edit VITE_ODDS_API_KEY=...
+```
 
-## Free / zero-cost notes
+## Edge methodology (specific)
 
-| Piece | Cost |
+| Step | What happens |
 | --- | --- |
-| Kalshi public market endpoints | Free, no API key for market list |
-| This app (Vite static SPA) | Free to run locally |
-| Hosting | Optional — any static host; not required |
-| Paid data / LLM APIs | **Not used** |
+| Liquidity gate | Fail if no bid/ask, volume &lt; 2k, OI &lt; 500, spread &gt; 8¢, or near-locked mid with thin depth |
+| Structure fair | Same-event peer blend, nested threshold monotone fixes, complement mids (`1 − peer`), mild 50¢ shrink — **documented weak** when alone |
+| External fair | **NOAA/NWS** (`api.weather.gov`, no key) for detectable weather/temp markets; optional **The Odds API** if `VITE_ODDS_API_KEY` set |
+| Edge | `edge_pp = (fair_prob − kalshi_mid) × 100`; suggest YES if positive, NO if negative |
+| Confidence | **HIGH** = external source (live NOAA/odds or demo-external fixture) + liquidity OK + |edge| ≥ ~3pp; else MEDIUM/LOW |
+| Stake | Quarter-Kelly on estimated edge, capped at **5%** of paper bankroll |
 
-No secrets are required. There is no `.env` by default. If you add private keys later for authenticated trading, keep them in `.env` (gitignored) — this MVP does **not** place real trades.
+Demo fixtures intentionally include **liquid mid-priced edge examples** and **illiquid junk** so you can prove the filter works offline.
 
-## How scoring works
+## External sources
 
-Weights (approximate):
-
-| Signal | Weight | Idea |
+| Source | Key required? | Behavior |
 | --- | --- | --- |
-| Liquidity (log volume + open interest) | 28% | Can you actually trade size? |
-| Bid–ask spread | 27% | Tight books waste less edge |
-| Distance from 50¢ | 15% | Less “coin-flip” noise for scanning |
-| Time to expiry | 15% | Prefer days–weeks over minutes or years |
-| 24h volume momentum | 15% | Recent activity vs stale books |
+| Kalshi public Trade API | No | Market list / mids (Vite proxy) |
+| Cross-market / structure | No | Always on; weak when sole signal |
+| NOAA / NWS forecast | No | Weather-tagged markets via `/api/noaa` proxy |
+| The Odds API | Optional | Sports; skipped if no `VITE_ODDS_API_KEY` |
 
-**Suggested side** leans toward the cheaper side when the mid is skewed (heuristic scan cue only).
+No paid APIs are required. Do not commit secrets (`.env` is gitignored).
 
-**Suggested stake** uses a *tiny* assumed edge inside a **quarter-Kelly**-style formula, capped at **5%** of bankroll — deliberately conservative so the UI never implies huge bets. You can switch the paper panel to a flat % instead.
+## UI filters (defaults hide junk)
 
-## API details
+- Min liquidity score
+- Min |edge| %
+- Mid-price band (¢)
+- Category + search
+- “Hide illiquid / failed gate” (on by default)
 
-Dev proxy (see `vite.config.ts`):
+## Interpreting a HIGH edge card
 
-- `/api/kalshi/*` → `https://api.elections.kalshi.com/trade-api/v2/*`
-- `/api/kalshi-ext/*` → `https://external-api.kalshi.com/trade-api/v2/*`
-
-Docs: [Kalshi market data quick start](https://docs.kalshi.com/getting_started/quick_start_market_data).
+**HIGH** means: the book passed the liquidity gate **and** at least one external fair source contributed (NOAA, Odds API, or an explicit demo-external fixture offline). It does **not** mean the trade is safe, arb’d, or profitable. Always read the source details on the card and size with Kelly-lite / flat % paper rules.
 
 ## Project layout
 
 ```
 src/
-  components/     UI (board, filters, paper bankroll, banner)
-  fixtures/       Demo markets for offline / rate-limit fallback
-  lib/            API client, scoring, paper portfolio, formatters
+  components/     Edge filters, trade cards, paper bankroll
+  fixtures/       Demo markets (edges + junk)
+  lib/
+    liquidity.ts  Hard liquidity gate
+    fairValue.ts  Fair blend + prefetch
+    scoring.ts    Edge, confidence, Kelly-lite
+    external/     NOAA + optional Odds API
   types/          Shared TypeScript types
 ```
 
 ## License
 
-Built as a local MVP for personal research. Kalshi is a trademark of its owners; this project is unaffiliated.
+Local MVP for personal research. Kalshi is a trademark of its owners; this project is unaffiliated.

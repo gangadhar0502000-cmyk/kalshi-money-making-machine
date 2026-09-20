@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// Proxy Kalshi public API through Vite so the browser avoids CORS.
+// Proxy Kalshi + free public data so the browser avoids CORS.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
@@ -17,6 +17,24 @@ export default defineConfig({
         target: 'https://external-api.kalshi.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/kalshi-ext/, '/trade-api/v2'),
+        secure: true,
+      },
+      // NOAA / NWS — free, no key; requires User-Agent
+      '/api/noaa': {
+        target: 'https://api.weather.gov',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/noaa/, ''),
+        secure: true,
+        headers: {
+          'User-Agent': 'KalshiMoneyMakingMachine/1.0 (edge-finder research; local dev)',
+          Accept: 'application/geo+json',
+        },
+      },
+      // Optional The Odds API (key passed as query param from client when set)
+      '/api/odds': {
+        target: 'https://api.the-odds-api.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/odds/, ''),
         secure: true,
       },
     },

@@ -6,9 +6,17 @@ interface Props {
   lastUpdated?: string
   loading: boolean
   onRefresh: () => void
+  junkHidden?: number
 }
 
-export function StatusBanner({ source, error, lastUpdated, loading, onRefresh }: Props) {
+export function StatusBanner({
+  source,
+  error,
+  lastUpdated,
+  loading,
+  onRefresh,
+  junkHidden = 0,
+}: Props) {
   const isDemo = source === 'demo'
 
   return (
@@ -21,16 +29,19 @@ export function StatusBanner({ source, error, lastUpdated, loading, onRefresh }:
     >
       <div className="text-left text-sm">
         <div className="font-semibold text-slate-100">
-          {isDemo ? 'Demo data mode' : 'Live Kalshi markets'}
+          {isDemo ? 'Demo edge fixtures' : 'Live Kalshi + external signals'}
           {loading ? ' · refreshing…' : ''}
         </div>
         <p className="mt-0.5 text-slate-300/90">
           {isDemo
-            ? `Live fetch unavailable${error ? ` (${error.slice(0, 120)})` : ''}. Showing bundled fixtures so you can explore scoring & paper trading.`
-            : 'Pulled from Kalshi public Trade API (unauthenticated). Heuristics only — not financial advice.'}
+            ? `Live fetch unavailable${error ? ` (${error.slice(0, 100)})` : ''}. Demo set includes liquid mid-priced edges and illiquid junk so you can verify the filter offline.`
+            : 'Kalshi public markets + free NOAA (weather) / optional Odds API. Edge = fair − mid.'}
+          {junkHidden > 0 ? ` · ${junkHidden} failed liquidity gate.` : ''}
         </p>
         {lastUpdated && (
-          <p className="mt-1 text-xs text-slate-400">Last updated: {new Date(lastUpdated).toLocaleString()}</p>
+          <p className="mt-1 text-xs text-slate-400">
+            Last updated: {new Date(lastUpdated).toLocaleString()}
+          </p>
         )}
       </div>
       <button type="button" className="btn btn-ghost shrink-0" onClick={onRefresh} disabled={loading}>

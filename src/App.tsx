@@ -6,7 +6,7 @@ import { TradeIdeasBoard } from './components/TradeIdeasBoard'
 import { DEMO_CATEGORIES } from './fixtures/demoMarkets'
 import { fetchOpenMarkets } from './lib/api'
 import { loadPortfolio, openPaperTrade, savePortfolio } from './lib/bankroll'
-import { scoreAndRank } from './lib/scoring'
+import { scoreAndRankAsync } from './lib/scoring'
 import type {
   DataSource,
   FilterState,
@@ -14,11 +14,15 @@ import type {
   ScoredOpportunity,
 } from './types/kalshi'
 
+/** Defaults hide junk: mid 15–85¢, min liquidity, min edge. */
 const INITIAL_FILTERS: FilterState = {
   category: 'All',
-  minVolume: 0,
-  minScore: 0,
+  minLiquidity: 40,
+  minEdgePct: 3,
+  midMin: 15,
+  midMax: 85,
   search: '',
+  hideIlliquid: true,
 }
 
 export default function App() {
@@ -38,7 +42,9 @@ export default function App() {
       setSource(result.source)
       setError(result.error)
       setFetchedAt(result.fetchedAt)
-      setOpportunities(scoreAndRank(result.markets))
+      const scored = await scoreAndRankAsync(result.markets, signal)
+      if (signal?.aborted) return
+      setOpportunities(scored)
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
@@ -59,9 +65,12 @@ export default function App() {
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase()
     return opportunities.filter((o) => {
+      if (filters.hideIlliquid && !o.passedLiquidityGate) return false
       if (filters.category !== 'All' && o.category !== filters.category) return false
-      if (o.volume < filters.minVolume) return false
-      if (o.edgeScore < filters.minScore) return false
+      if (o.liquidityScore < filters.minLiquidity) return false
+      if (o.absEdgePct < filters.minEdgePct) return false
+      const midCents = o.midYes * 100
+      if (midCents < filters.midMin || midCents > filters.midMax) return false
       if (q) {
         const hay = `${o.title} ${o.ticker} ${o.eventTicker}`.toLowerCase()
         if (!hay.includes(q)) return false
@@ -92,8 +101,9 @@ export default function App() {
 
     const ok = confirm(
       `Paper ${opp.suggestedSide} on "${opp.title}"?\n\n` +
-        `Entry ~${(entry * 100).toFixed(0)}¢ · Stake $${stakeDollars.toFixed(2)} (${stakePct}% of cash)\n\n` +
-        `This is a local simulation only — no real Kalshi order.`,
+        `Entry ~${(entry * 100).toFixed(0)}¢ · Fair ${(opp.fairProb * 100).toFixed(1)}% · Edge ${opp.edgePct >= 0 ? '+' : ''}${opp.edgePct.toFixed(1)}pp\n` +
+        `Stake $${stakeDollars.toFixed(2)} (${stakePct}% of cash) · Confidence ${opp.confidence}\n\n` +
+        `Local simulation only — not a real Kalshi order, not guaranteed profit.`,
     )
     if (!ok) return
 
@@ -103,10 +113,12 @@ export default function App() {
       side: opp.suggestedSide,
       entryPrice: entry,
       stakeDollars,
-      note: `edge=${opp.edgeScore}`,
+      note: `edge=${opp.edgePct.toFixed(1)}pp conf=${opp.confidence}`,
     })
     setPortfolio(next)
   }
+
+  const junkHidden = opportunities.filter((o) => !o.passedLiquidityGate).length
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -114,15 +126,15 @@ export default function App() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400/90">
-              Zero-cost research scanner
+              Edge Finder · liquidity first
             </p>
             <h1 className="bg-gradient-to-r from-emerald-300 via-slate-100 to-amber-300 bg-clip-text text-3xl font-extrabold tracking-tight text-transparent sm:text-4xl">
               Kalshi Money Making Machine
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Rank open Kalshi markets with transparent liquidity / spread / timing heuristics.
-              Paper-trade ideas locally. Never auto-trades real money — and never claims guaranteed
-              profit.
+              Find <strong className="font-medium text-slate-300">tradeable edge</strong> — hard-filter
+              illiquid junk, estimate fair probability from free external / cross-market signals, and
+              show edge vs Kalshi mid. Research tool only; never claims guaranteed profit.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -148,13 +160,15 @@ export default function App() {
           lastUpdated={fetchedAt}
           loading={loading}
           onRefresh={() => void refresh()}
+          junkHidden={junkHidden}
         />
       </div>
 
       <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-left text-xs text-slate-400">
-        <strong className="text-slate-300">Disclaimer:</strong> This is a free research / education
-        tool. Edge scores are heuristic signals for scanning — not mispricing detection, not
-        investment advice, and not a promise of returns. Prediction markets involve risk of loss.
+        <strong className="text-slate-300">Disclaimer:</strong> Educational research scanner. Fair
+        values and edges are estimates — not mispricing proof, not investment advice, and{' '}
+        <em>not</em> guaranteed profit. HIGH confidence means an external signal was used on a liquid
+        book; it still can be wrong. Prediction markets involve risk of loss.
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -180,8 +194,8 @@ export default function App() {
       </div>
 
       <footer className="mt-10 border-t border-slate-800/80 pt-6 text-center text-xs text-slate-500">
-        Kalshi Money Making Machine · Vite + React · Public market data only ·{' '}
-        {source === 'live' ? 'Live API' : 'Demo fixtures'} · Built for local{' '}
+        Kalshi Money Making Machine · Edge Finder · Vite + React ·{' '}
+        {source === 'live' ? 'Live API' : 'Demo fixtures'} ·{' '}
         <code className="text-slate-400">npm run dev</code>
       </footer>
     </div>

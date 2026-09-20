@@ -1,45 +1,28 @@
-import type { KalshiMarketRaw, ScoredOpportunity, Side } from '../types/kalshi'
+import type {
+  ConfidenceLevel,
+  KalshiMarketRaw,
+  ScoredOpportunity,
+  Side,
+} from '../types/kalshi'
+import {
+  buildUniverse,
+  estimateFairValue,
+  prefetchExternals,
+  type ExternalContext,
+} from './fairValue'
 import {
   formatCents,
   hoursUntil,
   inferCategory,
   kalshiMarketUrl,
-  parseCount,
-  parseDollars,
 } from './format'
+import { assessLiquidity } from './liquidity'
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n))
 }
 
-function scoreLiquidity(volume: number, openInterest: number): number {
-  // Log-scaled: ~1k contracts ≈ mid, 100k+ ≈ high
-  const v = Math.log10(Math.max(volume, 1))
-  const oi = Math.log10(Math.max(openInterest, 1))
-  const raw = (v / 5) * 55 + (oi / 5) * 45
-  return clamp(raw, 0, 100)
-}
-
-function scoreSpread(spreadCents: number): number {
-  // Tighter spreads score higher (0¢ perfect, 10¢+ poor)
-  if (spreadCents <= 1) return 100
-  if (spreadCents <= 2) return 90
-  if (spreadCents <= 3) return 75
-  if (spreadCents <= 5) return 55
-  if (spreadCents <= 8) return 35
-  return clamp(20 - (spreadCents - 8) * 2, 0, 20)
-}
-
-function scoreDistanceFrom50(midYes: number): number {
-  // Markets far from 50¢ often have clearer directional lean / less "coin flip" noise
-  // for research scanning — NOT a claim of mispricing.
-  const dist = Math.abs(midYes - 0.5)
-  return clamp(dist * 200, 0, 100) // 0 at 50¢, 100 at 0¢ or 100¢
-}
-
 function scoreTime(hours: number): number {
-  // Prefer markets that aren't expiring in minutes (illiquid chaos)
-  // nor years away (capital lockup). Sweet spot ~1–30 days.
   if (hours <= 0) return 10
   if (hours < 6) return 25
   if (hours < 24) return 55
@@ -53,7 +36,6 @@ function scoreTime(hours: number): number {
 function scoreVolumeMomentum(volume: number, volume24h: number): number {
   if (volume <= 0) return 20
   const ratio = volume24h / Math.max(volume, 1)
-  // Healthy recent activity without assuming "pump"
   if (ratio >= 0.15) return 95
   if (ratio >= 0.08) return 80
   if (ratio >= 0.03) return 60
@@ -61,30 +43,50 @@ function scoreVolumeMomentum(volume: number, volume24h: number): number {
   return 25
 }
 
-/**
- * Heuristic edge score (0–100). Transparent research signal only —
- * never a guarantee of profit or true mispricing.
- */
-export function scoreMarket(raw: KalshiMarketRaw): ScoredOpportunity {
-  const yesBid = parseDollars(raw.yes_bid_dollars ?? raw.yes_bid)
-  const yesAsk = parseDollars(raw.yes_ask_dollars ?? raw.yes_ask)
-  const noBid = parseDollars(raw.no_bid_dollars)
-  const noAsk = parseDollars(raw.no_ask_dollars)
-  const last = parseDollars(raw.last_price_dollars ?? raw.last_price)
+function scoreSpread(spreadCents: number): number {
+  if (spreadCents <= 1) return 100
+  if (spreadCents <= 2) return 90
+  if (spreadCents <= 3) return 75
+  if (spreadCents <= 5) return 55
+  if (spreadCents <= 8) return 35
+  return clamp(20 - (spreadCents - 8) * 2, 0, 20)
+}
 
-  const midYes =
-    yesBid > 0 && yesAsk > 0
-      ? (yesBid + yesAsk) / 2
-      : last > 0
-        ? last
-        : 0.5
+/** Minimum |edge| in percentage points to surface as a trade card by default ranking boost */
+export const MIN_EDGE_PP = 3
 
-  const spreadCents =
-    yesBid > 0 && yesAsk > 0 ? Math.max(0, (yesAsk - yesBid) * 100) : 5
+function confidenceFor(
+  usedExternal: boolean,
+  liquidityOk: boolean,
+  absEdgePct: number,
+  sources: { kind: string }[],
+): ConfidenceLevel {
+  const hasExternal = sources.some(
+    (s) => s.kind === 'noaa' || s.kind === 'odds_api' || s.kind === 'demo_external',
+  )
+  // HIGH only when external fair source used + liquidity ok + meaningful edge
+  if (liquidityOk && absEdgePct >= MIN_EDGE_PP && (hasExternal || usedExternal)) return 'HIGH'
+  if (liquidityOk && absEdgePct >= 2) return 'MEDIUM'
+  return 'LOW'
+}
 
-  const volume = parseCount(raw.volume_fp ?? raw.volume)
-  const volume24h = parseCount(raw.volume_24h_fp)
-  const openInterest = parseCount(raw.open_interest_fp)
+function kellyLiteStake(entry: number, fairProb: number, side: Side): number {
+  // fair for the side we buy
+  const p = side === 'YES' ? fairProb : 1 - fairProb
+  const price = clamp(entry, 0.01, 0.99)
+  const b = (1 - price) / price
+  const q = 1 - p
+  const kelly = Math.max(0, (b * p - q) / b)
+  const quarter = kelly * 0.25
+  return clamp(Number((quarter * 100).toFixed(2)), 0.25, 5)
+}
+
+export function scoreMarket(
+  raw: KalshiMarketRaw,
+  universeMids: ReturnType<typeof buildUniverse>,
+  externals: ExternalContext,
+): ScoredOpportunity {
+  const liq = assessLiquidity(raw)
   const closeTime =
     raw.close_time ||
     raw.expected_expiration_time ||
@@ -92,85 +94,81 @@ export function scoreMarket(raw: KalshiMarketRaw): ScoredOpportunity {
     new Date(Date.now() + 30 * 86400000).toISOString()
   const hours = hoursUntil(closeTime)
 
-  const liquidity = scoreLiquidity(volume, openInterest)
-  const spread = scoreSpread(spreadCents)
-  const distanceFromFair = scoreDistanceFrom50(midYes)
-  const time = scoreTime(hours)
-  const volumeMomentum = scoreVolumeMomentum(volume, volume24h)
+  const fair = estimateFairValue(raw, universeMids, externals)
+  const edgeFrac = fair.fairProb - liq.midYes
+  const edgePct = edgeFrac * 100
+  const absEdgePct = Math.abs(edgePct)
 
-  // Weighted composite — liquidity & tight spread dominate for tradeability
-  const edgeScore = Math.round(
-    liquidity * 0.28 +
-      spread * 0.27 +
-      distanceFromFair * 0.15 +
-      time * 0.15 +
-      volumeMomentum * 0.15,
-  )
-
-  // Suggested side: lean toward the cheaper side when mid is skewed,
-  // otherwise YES if mid < 50 (buying "underdog" for research), else NO.
-  // This is a scanning heuristic, not an edge claim.
-  let suggestedSide: Side
-  if (midYes < 0.45) suggestedSide = 'YES'
-  else if (midYes > 0.55) suggestedSide = 'NO'
-  else suggestedSide = midYes <= 0.5 ? 'YES' : 'NO'
+  let suggestedSide: Side = edgePct >= 0 ? 'YES' : 'NO'
+  // Require minimum edge to lean; otherwise cheaper-side scan cue only
+  if (absEdgePct < 1.5) {
+    suggestedSide = liq.midYes <= 0.5 ? 'YES' : 'NO'
+  }
 
   const entry =
     suggestedSide === 'YES'
-      ? yesAsk > 0
-        ? yesAsk
-        : midYes
-      : noAsk > 0
-        ? noAsk
-        : 1 - midYes
+      ? liq.yesAsk > 0
+        ? liq.yesAsk
+        : liq.midYes
+      : liq.noAsk > 0
+        ? liq.noAsk
+        : 1 - liq.midYes
 
-  // Fractional Kelly-ish stake suggestion using a *tiny* assumed edge
-  // (1–3¢) so we never suggest huge bets. Caps at 5%.
-  const assumedEdge = clamp(0.01 + (edgeScore / 100) * 0.02, 0.01, 0.03)
-  const p = clamp(entry + assumedEdge, 0.01, 0.99)
-  const b = (1 - entry) / Math.max(entry, 0.01)
-  const q = 1 - p
-  const kelly = Math.max(0, (b * p - q) / b)
-  const fractionalKelly = kelly * 0.25 // quarter-Kelly
-  const suggestedStakePct = clamp(
-    Number((fractionalKelly * 100).toFixed(2)),
-    0.25,
-    5,
+  const suggestedStakePct = kellyLiteStake(entry, fair.fairProb, suggestedSide)
+
+  const conf = confidenceFor(
+    fair.usedExternal,
+    liq.passed,
+    absEdgePct,
+    fair.sources,
   )
 
-  const title =
-    raw.title?.trim() ||
-    raw.yes_sub_title?.trim() ||
-    raw.ticker
+  const spread = scoreSpread(liq.spreadCents)
+  const time = scoreTime(hours)
+  const volumeMomentum = scoreVolumeMomentum(liq.volume, liq.volume24h)
+  const fairConfidence =
+    conf === 'HIGH' ? 90 : conf === 'MEDIUM' ? 60 : 30
 
+  // Rank score: tradeable |edge| dominates, gated by liquidity
+  const edgeScore = Math.round(
+    clamp(
+      (liq.passed ? 1 : 0.25) *
+        (absEdgePct * 6 + liq.liquidityScore * 0.35 + fairConfidence * 0.25 + spread * 0.15),
+      0,
+      100,
+    ),
+  )
+
+  const title = raw.title?.trim() || raw.yes_sub_title?.trim() || raw.ticker
   const category = inferCategory(raw)
   const rationale: string[] = []
 
-  if (liquidity >= 70) rationale.push(`Solid liquidity (vol ${Math.round(volume).toLocaleString()})`)
-  else if (liquidity >= 40) rationale.push('Moderate liquidity — size carefully')
-  else rationale.push('Thin book — high slippage risk')
-
-  if (spreadCents <= 2) rationale.push(`Tight spread (${spreadCents.toFixed(1)}¢)`)
-  else if (spreadCents <= 5) rationale.push(`Usable spread (${spreadCents.toFixed(1)}¢)`)
-  else rationale.push(`Wide spread (${spreadCents.toFixed(1)}¢) eats edge`)
-
-  rationale.push(
-    `Mid YES ${formatCents(midYes)} — ${
-      Math.abs(midYes - 0.5) < 0.05
-        ? 'near coin-flip'
-        : midYes < 0.5
-          ? 'leans NO in market'
-          : 'leans YES in market'
-    }`,
-  )
-
-  if (hours < 24) rationale.push('Expires within 24h — watch settlement risk')
-  else if (hours < 24 * 14) rationale.push('Near-term expiry (good for capital velocity)')
-  else rationale.push('Longer-dated — opportunity cost of capital')
+  if (!liq.passed) {
+    rationale.push(`Filtered / weak liquidity: ${liq.failReasons[0] ?? 'failed gate'}`)
+  } else {
+    rationale.push(
+      `Liquidity OK (score ${liq.liquidityScore}, vol ${Math.round(liq.volume).toLocaleString()}, spread ${liq.spreadCents.toFixed(1)}¢)`,
+    )
+  }
 
   rationale.push(
-    `Heuristic suggests ${suggestedSide} @ ~${formatCents(entry)} with ~${suggestedStakePct}% bankroll (¼-Kelly style; not advice)`,
+    `Fair YES ${(fair.fairProb * 100).toFixed(1)}% vs Kalshi mid ${formatCents(liq.midYes)} → edge ${edgePct >= 0 ? '+' : ''}${edgePct.toFixed(1)} pp`,
   )
+
+  const sourceLabels = fair.sources
+    .filter((s) => s.kind !== 'weak_prior' && s.kind !== 'structure')
+    .slice(0, 3)
+    .map((s) => s.label)
+  if (sourceLabels.length) {
+    rationale.push(`Sources: ${sourceLabels.join(', ')}`)
+  } else {
+    rationale.push('Sources: structure / weak prior only (not HIGH confidence)')
+  }
+
+  rationale.push(
+    `Suggest ${suggestedSide} @ ~${formatCents(entry)} · Kelly-lite ~${suggestedStakePct}% bankroll · confidence ${conf}`,
+  )
+  rationale.push('Research signal only — not guaranteed profit or financial advice.')
 
   return {
     ticker: raw.ticker,
@@ -178,38 +176,65 @@ export function scoreMarket(raw: KalshiMarketRaw): ScoredOpportunity {
     title,
     category,
     status: raw.status,
-    yesBid,
-    yesAsk,
-    noBid,
-    noAsk,
-    midYes,
-    spreadCents,
-    volume,
-    volume24h,
-    openInterest,
+    yesBid: liq.yesBid,
+    yesAsk: liq.yesAsk,
+    noBid: liq.noBid,
+    noAsk: liq.noAsk,
+    midYes: liq.midYes,
+    spreadCents: liq.spreadCents,
+    volume: liq.volume,
+    volume24h: liq.volume24h,
+    openInterest: liq.openInterest,
     closeTime,
     hoursToExpiry: hours,
-    edgeScore: clamp(edgeScore, 0, 100),
+    liquidityScore: liq.liquidityScore,
+    fairProb: fair.fairProb,
+    edgePct,
+    absEdgePct,
+    edgeScore,
+    confidence: conf,
+    fairSources: fair.sources,
     suggestedSide,
     suggestedStakePct,
     rationale,
     kalshiUrl: kalshiMarketUrl(raw.ticker, raw.event_ticker),
+    passedLiquidityGate: liq.passed,
+    liquidityFailReasons: liq.failReasons,
     scoreBreakdown: {
-      liquidity: Math.round(liquidity),
+      liquidity: liq.liquidityScore,
       spread: Math.round(spread),
-      distanceFromFair: Math.round(distanceFromFair),
+      fairConfidence: Math.round(fairConfidence),
       time: Math.round(time),
       volumeMomentum: Math.round(volumeMomentum),
     },
   }
 }
 
-export function scoreAndRank(markets: KalshiMarketRaw[]): ScoredOpportunity[] {
+export function scoreAndRank(
+  markets: KalshiMarketRaw[],
+  externals: ExternalContext = { noaaByTicker: {}, oddsByTicker: {} },
+): ScoredOpportunity[] {
+  const universe = buildUniverse(markets)
   return markets
     .filter((m) => {
       const s = (m.status || '').toLowerCase()
       return !s || s === 'open' || s === 'active'
     })
-    .map(scoreMarket)
-    .sort((a, b) => b.edgeScore - a.edgeScore)
+    .map((m) => scoreMarket(m, universe, externals))
+    .sort((a, b) => {
+      // Tradeable edges first
+      if (a.passedLiquidityGate !== b.passedLiquidityGate) {
+        return a.passedLiquidityGate ? -1 : 1
+      }
+      return b.absEdgePct - a.absEdgePct || b.edgeScore - a.edgeScore
+    })
+}
+
+/** Async path: prefetch externals then score. */
+export async function scoreAndRankAsync(
+  markets: KalshiMarketRaw[],
+  signal?: AbortSignal,
+): Promise<ScoredOpportunity[]> {
+  const externals = await prefetchExternals(markets, signal)
+  return scoreAndRank(markets, externals)
 }

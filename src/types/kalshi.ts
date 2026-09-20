@@ -26,6 +26,9 @@ export interface KalshiMarketRaw {
   yes_bid?: number
   yes_ask?: number
   last_price?: number
+  /** Optional demo-only fair override used when external APIs are offline */
+  demo_fair_prob?: number
+  demo_fair_source?: string
 }
 
 export interface KalshiMarketsResponse {
@@ -34,6 +37,24 @@ export interface KalshiMarketsResponse {
 }
 
 export type Side = 'YES' | 'NO'
+
+export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW'
+
+export type FairSourceKind =
+  | 'noaa'
+  | 'odds_api'
+  | 'cross_market'
+  | 'structure'
+  | 'demo_external'
+  | 'weak_prior'
+
+export interface FairSource {
+  kind: FairSourceKind
+  label: string
+  detail: string
+  /** Weight 0–1 used when blending sources */
+  weight: number
+}
 
 export interface ScoredOpportunity {
   ticker: string
@@ -52,15 +73,28 @@ export interface ScoredOpportunity {
   openInterest: number
   closeTime: string
   hoursToExpiry: number
+  /** Liquidity score 0–100 (tradeability) */
+  liquidityScore: number
+  /** Estimated fair P(YES) from external + structure signals */
+  fairProb: number
+  /** fairProb − midYes, in percentage points (e.g. 5.2 = +5.2pp) */
+  edgePct: number
+  /** Absolute edge used for ranking / filters */
+  absEdgePct: number
+  /** Legacy display score: blends |edge| with liquidity for sorting */
   edgeScore: number
+  confidence: ConfidenceLevel
+  fairSources: FairSource[]
   suggestedSide: Side
   suggestedStakePct: number
   rationale: string[]
   kalshiUrl: string
+  passedLiquidityGate: boolean
+  liquidityFailReasons: string[]
   scoreBreakdown: {
     liquidity: number
     spread: number
-    distanceFromFair: number
+    fairConfidence: number
     time: number
     volumeMomentum: number
   }
@@ -82,7 +116,6 @@ export interface PaperTrade {
   side: Side
   contracts: number
   entryPrice: number
-  /** Mark-to-market mid at entry for reference */
   stakeDollars: number
   openedAt: string
   closedAt?: string
@@ -103,7 +136,11 @@ export interface PaperPortfolio {
 
 export interface FilterState {
   category: string
-  minVolume: number
-  minScore: number
+  minLiquidity: number
+  minEdgePct: number
+  midMin: number
+  midMax: number
   search: string
+  /** When true (default), hide markets that fail the hard liquidity gate */
+  hideIlliquid: boolean
 }
