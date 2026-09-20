@@ -11,6 +11,7 @@ Default landing UI = **Crypto 15m Lab**. The older **Edge Finder** (ESPN / Polym
 | Source | Role |
 | --- | --- |
 | Kalshi public Trade API (proxied) | Open crypto 15m markets, bids/asks, volume |
+| Binance / Coinbase public tickers (proxied) | Spot guard for paper MM — no keys |
 | Bundled demo fixtures | Offline / rate-limit fallback |
 
 No Odds API, no paid keys, no account required for market data.
@@ -54,6 +55,27 @@ Every taken paper suggestion is logged locally (browser `localStorage`):
 Until then: treat every suggestion as an experiment to **falsify**.
 
 
+
+## 15m MM (Paper) — spread capture sim
+
+**Paper only. Live MM needs API keys. On 15m, bots cancel faster — this teaches whether YOUR params survive.**
+
+Open the **15m MM (Paper)** tab (next to Crypto Lab / Backtest). Simulates a two-sided YES bid/ask around mid:
+
+| Knob | Role |
+| --- | --- |
+| Half-spread (¢) | Distance from mid for bid & ask |
+| Size | Contracts per side |
+| Max inventory | Position limit (suppresses the crowded side) |
+| Spot move % / $ / window | Spot guard thresholds |
+| Quote refresh (ms) | Timer requotes (+ requote when mid moves) |
+
+**Spot guard (critical):** polls free public BTC/ETH/… spot via Binance (primary) or Coinbase (fallback) — **no API keys**. If spot moves more than X% **or** $Y within Z seconds → cancel simulated quotes / widen / inventory skew (Avellaneda-lite). Events land in the cancel log.
+
+**Fills are not friendly:** mid-cross when market mid walks through your quote, plus random fills with **toxicity bias** when spot moved against your resting side (adverse selection). Dashboard splits **realized spread P&L** vs **unrealized inventory P&L**.
+
+No live order placement in this build.
+
 ## Backtest (settled history)
 
 **Past ≠ future. Kill losers.**
@@ -94,6 +116,7 @@ Open the URL Vite prints (usually `http://localhost:5173`).
 - Read **EXPERIMENTS** panel — usually **NO TRADE**
 - When a paper suggestion appears, log it → resolve later → inspect per-rule stats
 - Open **Backtest** → Run backtest (Auto / Live / Bundled / Demo)
+- Open **15m MM (Paper)** → pick a market → Start paper MM → watch spot guard + toxic fills
 - Edit constants in `src/lib/crypto15m/ruleConfig.ts`, restart/refresh, re-test
 
 ```bash
@@ -106,7 +129,8 @@ npm run preview
 ```
 src/
   App.tsx                 Tabs: Crypto 15m Lab (default) | Edge Finder
-  components/crypto15m/   Lab UI (feed, context, experiments, journal)
+                         Lab sub-tabs: Crypto Lab | Backtest | 15m MM (Paper)
+  components/crypto15m/   Lab UI (feed, context, experiments, journal, paper MM)
   lib/crypto15m/
     detect.ts             Series / market detection
     ruleConfig.ts         ALL experiment knobs
@@ -114,6 +138,8 @@ src/
     fees.ts               Kalshi-style fee estimate
     api.ts                Public API fetch + demo fallback
     journal.ts            Paper journal + per-rule stats
+    spot.ts               Free public Binance/Coinbase spot (MM guard)
+    mm/                   Paper market maker engine + config
     backtest/             Settled-history rule replay engine
   fixtures/demoCrypto15m.ts
   fixtures/liveSettledCrypto15m.json  Bundled real settled+candles snapshot

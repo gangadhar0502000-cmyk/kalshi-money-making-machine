@@ -19,8 +19,12 @@ import { LiveContextPanel } from './LiveContextPanel'
 import { PaperJournalPanel } from './PaperJournalPanel'
 import { RuleExperimentsPanel } from './RuleExperimentsPanel'
 import { BacktestPanel } from './BacktestPanel'
+import { PaperMmPanel } from './PaperMmPanel'
+
+type LabTab = 'lab' | 'backtest' | 'mm'
 
 export function Crypto15mLab() {
+  const [tab, setTab] = useState<LabTab>('lab')
   const [loading, setLoading] = useState(true)
   const [markets, setMarkets] = useState<Crypto15mMarket[]>([])
   const [source, setSource] = useState<'live' | 'demo'>('demo')
@@ -106,6 +110,20 @@ export function Crypto15mLab() {
     setEntries(loadJournal())
   }
 
+  const tabBtn = (id: LabTab, label: string, activeClass: string) => (
+    <button
+      type="button"
+      className={`rounded-xl px-3.5 py-2 text-sm font-semibold transition ${
+        tab === id
+          ? activeClass
+          : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-500'
+      }`}
+      onClick={() => setTab(id)}
+    >
+      {label}
+    </button>
+  )
+
   return (
     <div className="space-y-4">
       <header className="text-left">
@@ -118,7 +136,8 @@ export function Crypto15mLab() {
         <p className="mt-2 max-w-3xl text-sm text-slate-400">
           Niche: Kalshi crypto 15m up/down (BTC, ETH, SOL, …). You have{' '}
           <strong className="text-slate-300">no proven rules yet</strong>. This lab ships
-          experiment candidates and a paper journal —{' '}
+          experiment candidates, a paper journal, and a{' '}
+          <strong className="text-slate-300">paper market maker</strong> —{' '}
           <strong className="text-slate-300">not</strong> money-printing signals.{' '}
           <em className="text-slate-300">No edge until a rule survives paper.</em>
         </p>
@@ -127,7 +146,13 @@ export function Crypto15mLab() {
       <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-left text-xs text-amber-100/90">
         <strong>Brutal honesty:</strong> These are hypotheses. Default is NO TRADE. Do not promote a
         rule until sample size is large and net-after-fees is still positive out of sample. Printing
-        money is not on the menu.
+        money is not on the menu. Paper MM will get adversely selected — that is the lesson.
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {tabBtn('lab', 'Crypto Lab', 'bg-amber-500 text-slate-950')}
+        {tabBtn('backtest', 'Backtest', 'bg-rose-500 text-slate-950')}
+        {tabBtn('mm', '15m MM (Paper)', 'bg-violet-500 text-slate-950')}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -152,29 +177,41 @@ export function Crypto15mLab() {
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-4">
-          <CryptoMarketFeed
-            markets={markets}
-            selectedTicker={selectedTicker}
-            onSelect={setSelectedTicker}
-          />
-          <RuleExperimentsPanel market={selected} onTakePaper={handleTake} />
-          <BacktestPanel />
-          <PaperJournalPanel
-            entries={entries}
-            stats={stats}
-            onMark={(id, outcome) => setEntries(markOutcome(id, outcome))}
-            onClear={() => {
-              if (confirm('Clear entire paper journal?')) {
-                clearJournal()
-                setEntries([])
-              }
-            }}
-          />
+      {tab === 'lab' && (
+        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            <CryptoMarketFeed
+              markets={markets}
+              selectedTicker={selectedTicker}
+              onSelect={setSelectedTicker}
+            />
+            <RuleExperimentsPanel market={selected} onTakePaper={handleTake} />
+            <PaperJournalPanel
+              entries={entries}
+              stats={stats}
+              onMark={(id, outcome) => setEntries(markOutcome(id, outcome))}
+              onClear={() => {
+                if (confirm('Clear entire paper journal?')) {
+                  clearJournal()
+                  setEntries([])
+                }
+              }}
+            />
+          </div>
+          <LiveContextPanel market={selected} />
         </div>
-        <LiveContextPanel market={selected} />
-      </div>
+      )}
+
+      {tab === 'backtest' && <BacktestPanel />}
+
+      {tab === 'mm' && (
+        <PaperMmPanel
+          markets={markets}
+          selectedTicker={selectedTicker}
+          onSelect={setSelectedTicker}
+          source={source}
+        />
+      )}
     </div>
   )
 }
