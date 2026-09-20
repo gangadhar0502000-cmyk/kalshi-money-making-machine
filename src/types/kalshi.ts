@@ -20,6 +20,10 @@ export interface KalshiMarketRaw {
   volume_fp?: string
   volume_24h_fp?: string
   open_interest_fp?: string
+  yes_bid_size_fp?: string
+  yes_ask_size_fp?: string
+  floor_strike?: number
+  result?: string
   rules_primary?: string
   /** Legacy / demo-friendly aliases */
   volume?: number

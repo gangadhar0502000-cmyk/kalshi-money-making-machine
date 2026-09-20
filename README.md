@@ -1,94 +1,105 @@
-# Kalshi Money Making Machine — Edge Finder v3
+# Kalshi Crypto 15‑Minute Research Lab
 
-A **serious, local research tool** for finding **tradeable edge** on [Kalshi](https://kalshi.com) — not a toy “99¢ sure thing” scanner, and not structure-only vibes dressed up as trades.
+A **private research lab** for discovering, paper-testing, and **killing** trading-rule hypotheses on Kalshi **crypto 15‑minute up/down** markets (BTC, ETH, SOL, …).
 
-> **Disclaimer:** Educational research only. Estimated fair values and edges are **not** financial advice, **not** proof of mispricing, and **never** guaranteed profit. **Printing money is not guaranteed.** You can lose money in prediction markets. Do your own research.
+> **Brutal honesty:** You have **no proven rules yet**. This app does **not** ship money-printing signals. **No edge until a rule survives paper.** These are hypotheses. Printing money is not guaranteed. You can lose money in prediction markets.
+
+Default landing UI = **Crypto 15m Lab**. The older **Edge Finder** (ESPN / Polymarket / NOAA) remains behind a secondary tab.
 
 ## Fully free — no API keys
 
-Edge Finder v3 uses **only keyless public feeds**:
+| Source | Role |
+| --- | --- |
+| Kalshi public Trade API (proxied) | Open crypto 15m markets, bids/asks, volume |
+| Bundled demo fixtures | Offline / rate-limit fallback |
 
-| Source | Role | Notes |
+No Odds API, no paid keys, no account required for market data.
+
+## How crypto 15m markets are detected
+
+1. Prefer known series tickers: `KXBTC15M`, `KXETH15M`, `KXSOL15M`, `KXDOGE15M`, `KXADA15M`, `KXBNB15M`, `KXXRP15M`, `KXBCH15M`, `KXTON15M`, `KXNEAR15M`, `KXZEC15M`, `KXHYPE15M`, `KXCRYPTOCOMP15M`, `KXCRYPTOLEAD15M`, …
+2. Heuristic: series ends with `15M` **and** looks crypto (asset token / `CRYPTO*`); non-crypto 15m (gold, NDQ, FX, rates) are excluded.
+3. Fallback: scan open markets and keep titles like “price up in next 15 mins?” with crypto assets.
+
+Live example titles: “BTC price up in next 15 mins?”
+
+## Experiment rules (candidates — not advice)
+
+All knobs live in **`src/lib/crypto15m/ruleConfig.ts`**. Default stance: **many situations = NO TRADE**.
+
+| Id | Type | Hypothesis (short) |
 | --- | --- | --- |
-| **ESPN** public scoreboard/odds | Sports fair (MLB / NFL / NBA / NCAAF, NHL when present) | Match by team/title; moneylines, spreads, totals when ESPN embeds book odds. Coverage can be incomplete. |
-| **Polymarket** Gamma API | Event-style fair when titles overlap | Politics / macro / crypto-style markets; title-similarity match. Not every Kalshi market has a twin. |
-| **NOAA / NWS** | Weather fair | Already keyless via `api.weather.gov`. |
-| Kalshi **cross-market structure** | Research-only | Peer blend / ladder / complements stay **UNRANKED** unless combined with a free external above. |
+| `wide_spread_block` | veto | Spread wider than X¢ → NO TRADE |
+| `thin_book_block` | veto | Tiny size / locked mid → NO TRADE |
+| `extreme_late_block` | veto | Little time left + mid extreme → NO TRADE |
+| `late_fade` | signal | Last N minutes, fade a sharp mid move (UNPROVEN) |
+| `early_momentum` | signal | First N minutes, continue a sharp move (UNPROVEN) |
 
-**Honest limits:** Free ESPN and Polymarket feeds can be incomplete, delayed, or rate-limited. Matched titles can be wrong. This remains a **research tool**, not a guaranteed profit machine.
+Paper suggestions only appear when a signal matches **and** no veto fires. Fee estimate uses Kalshi-style `ceil(0.07·C·P·(1−P))` (to the cent).
 
-## Strict Mode thesis (default ON)
+## Paper journal — kill losing rules
 
-1. **Liquidity first** — Hard-exclude illiquid / locked books. **Sports** need higher bars: volume ≥ **5,000** *or* (OI ≥ 2,000 + spread ≤ 4¢ + mid 20–80¢).
-2. **Free external fair required** — TRADE cards need ESPN, Polymarket, NOAA, or demo external fixtures — not Kalshi-mid structure heuristics alone. Structure-only → **UNRANKED / research-only**, hidden in Strict Mode, never a trade CTA.
-3. **Edge pp is the hero metric** — `edge_pp = (fair_prob − kalshi_mid) × 100`. “Rank score” is sorting-only and labeled as such.
-4. **Min |edge| ≥ 5pp** in Strict Mode defaults.
+Every taken paper suggestion is logged locally (browser `localStorage`):
 
-Turn Strict Mode off only to inspect UNRANKED research cards.
+- rule id, market, side, entry, time left, estimated fees
+- resolve via market result poll when detectable, or **manual** mark (YES/NO/win/loss/void)
+- per-rule stats: **n, win rate, net after estimated fees**
 
-## Quick start
+**Do not promote a rule** until:
+
+1. Sample size ≥ **50** resolved paper trades (see `PAPER.minSampleToDiscuss` in `ruleConfig.ts`)
+2. Net after fees is still positive
+3. You have held out / out-of-sample checks (this lab does not do that for you)
+
+Until then: treat every suggestion as an experiment to **falsify**.
+
+## How to use the lab (Mac)
 
 ```bash
-git pull origin main
-# if your remote default is still master:
-# git pull origin master
+git clone https://github.com/gangadhar0502000-cmyk/kalshi-money-making-machine.git
+cd kalshi-money-making-machine
+git pull origin main   # or: git pull origin master
 
-cd kalshi-money-making-machine   # if needed
 npm install
-
-# No paid keys. Optional empty .env:
-cp .env.example .env
+cp .env.example .env   # optional; no keys required
 
 npm run dev
 ```
 
 Open the URL Vite prints (usually `http://localhost:5173`).
 
+- Land on **Crypto 15m Lab**
+- Watch the feed (title, ticker, time left, YES bid/ask, mid, spread, volume, fee≈1)
+- Select a market → live context (countdown, mid trail, thin-book warning)
+- Read **EXPERIMENTS** panel — usually **NO TRADE**
+- When a paper suggestion appears, log it → resolve later → inspect per-rule stats
+- Edit constants in `src/lib/crypto15m/ruleConfig.ts`, restart/refresh, re-test
+
 ```bash
 npm run build
 npm run preview
 ```
 
-## How free sports matching works
-
-1. Parse each Kalshi sports market (league, moneyline / spread / total, team hints from title/ticker).
-2. Prefetch ESPN scoreboards for leagues present (MLB, NCAAF, NFL, NBA, …) via the Vite proxy (`/api/espn` → `site.api.espn.com`).
-3. Match games by team name / abbreviation / title tokens.
-4. Convert embedded American odds (moneyline, point spread, total) to implied probabilities → Edge pp vs Kalshi mid.
-5. If ESPN has no match, sports stay research-only unless a demo fixture supplies external fair.
-
-Polymarket matching is separate: prefetch active Gamma markets, score title token overlap, and use YES outcome price when similarity is high (skips single-game sports tickets that belong on ESPN).
-
-## Edge methodology
-
-| Step | What happens |
-| --- | --- |
-| Liquidity gate | Fail illiquid / locked / wide books; **sports** use higher volume / tight-spread rules |
-| Structure fair | Peer blend, ladder monotone, complements — **UNRANKED** when alone |
-| External fair | **NOAA/NWS** (weather); **ESPN** (sports); **Polymarket** (overlapping events); demo fixtures offline |
-| Edge | `edge_pp = (fair − mid) × 100`; TRADE lean YES if positive, NO if negative |
-| Confidence | **HIGH** = free external + liquid + \|edge\| ≥ 5pp; structure-only = **UNRANKED** |
-| Stake | Quarter-Kelly on TRADE cards only, capped at **5%** paper bankroll |
-
-Demo fixtures still show **HIGH** free-external edges offline. The UI banner appears only when free fetches fail (e.g. rate limit) — never “buy a paid key”.
-
-## Card layout
-
-Each TRADE card shows: **Fair % · Kalshi mid % · Edge pp · Confidence · Sources**. Paper trade is disabled on UNRANKED cards.
-
 ## Project layout
 
 ```
 src/
-  components/     Filters (Strict Mode), trade cards, paper bankroll
-  fixtures/       Demo HIGH-edge + junk
-  lib/
-    liquidity.ts  Hard gate (sports-aware)
-    fairValue.ts  Fair blend + prefetch
-    scoring.ts    Edge pp, TRADE vs RESEARCH
-    external/     NOAA + ESPN + Polymarket (all keyless)
-  types/          Shared TypeScript types
+  App.tsx                 Tabs: Crypto 15m Lab (default) | Edge Finder
+  components/crypto15m/   Lab UI (feed, context, experiments, journal)
+  lib/crypto15m/
+    detect.ts             Series / market detection
+    ruleConfig.ts         ALL experiment knobs
+    rules.ts              Rule evaluators (hypotheses)
+    fees.ts               Kalshi-style fee estimate
+    api.ts                Public API fetch + demo fallback
+    journal.ts            Paper journal + per-rule stats
+  fixtures/demoCrypto15m.ts
+  components/EdgeFinderApp.tsx   Secondary general edge finder
 ```
+
+## Edge Finder (secondary)
+
+Still available for sports/politics/weather research via free ESPN / Polymarket / NOAA. Same disclaimer: research only, not guaranteed profit.
 
 ## License
 
