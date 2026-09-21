@@ -89,6 +89,65 @@ export function estimateYesFairValue(input: FairValueInput): FairValueEstimate |
   }
 }
 
+
+
+/**
+ * Resolve a strike for FV when API floor_strike may be missing.
+ *
+ * Preference:
+ * 1) market.floorStrike from Kalshi
+ * 2) If rules/title look like crypto 15m up/down AND spot is known: use spot as
+ *    ATM reference strike (K ≈ S). Documented assumption — real Kalshi strike is
+ *    usually the window-open RTI; until that arrives FV ≈ Φ(0) ≈ 0.5.
+ * 3) else null (engine falls back to mid-centered quoting).
+ */
+export function looksLikeUpDownCrypto15m(meta: {
+  title?: string
+  rulesPrimary?: string
+}): boolean {
+  const t = `${meta.title ?? ''} ${meta.rulesPrimary ?? ''}`.toLowerCase()
+  if (!t.trim()) return true // crypto 15m lab context default
+  return (
+    /price up|up in next|up\/down|up or down|higher than|above the|rti|floor_strike|floor strike/.test(
+      t,
+    ) || /15\s*min/.test(t)
+  )
+}
+
+export type StrikeResolveSource = 'floor_strike' | 'spot_reference' | 'none'
+
+export interface ResolvedStrike {
+  strike: number | null
+  source: StrikeResolveSource
+  /** Human-readable assumption when deriving from spot. */
+  assumption?: string
+}
+
+export function resolveStrike(
+  floorStrike: number | null | undefined,
+  spot: number | null | undefined,
+  meta?: { title?: string; rulesPrimary?: string },
+): ResolvedStrike {
+  if (
+    floorStrike != null &&
+    Number.isFinite(floorStrike) &&
+    floorStrike > 0
+  ) {
+    return { strike: floorStrike, source: 'floor_strike' }
+  }
+  if (spot != null && Number.isFinite(spot) && spot > 0) {
+    if (!meta || looksLikeUpDownCrypto15m(meta)) {
+      return {
+        strike: spot,
+        source: 'spot_reference',
+        assumption:
+          'Missing floor_strike on up/down 15m → K≈spot (ATM reference). FV near 0.5 until API strike arrives.',
+      }
+    }
+  }
+  return { strike: null, source: 'none' }
+}
+
 /** Edge of FV vs market mid, in cents (positive = FV above mid). */
 export function edgeVsMidCents(fairProb: number, mid: number): number {
   return (fairProb - mid) * 100

@@ -206,6 +206,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
       )}
 
+      {source === 'demo' && (
+        <div className="rounded-xl border-2 border-amber-500/70 bg-amber-950/45 px-4 py-3 text-sm font-semibold text-amber-100">
+          ⚠ DEMO market universe — not live Kalshi. Fixtures include floor_strike for FV testing.
+          Auto-recovers to LIVE when proxy/public succeeds. L2 badge (if shown) is independent of
+          this market-source badge.
+        </div>
+      )}
+
       {!multiBook && s.unitsWarning && (
         <div className="rounded-xl border border-rose-500/60 bg-rose-950/50 px-4 py-3 text-sm font-medium text-rose-100">
           ⚠ Units guard: {s.unitsWarning}
@@ -229,16 +237,20 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               Read-only API · never places trades
             </span>
             {(s.liveBook || proxyOk || portfolioState.books.some((b) => b.snapshot.liveBook)) && (
-              <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                LIVE BOOK (read-only)
+              <span
+                className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"
+                title="L2 order book via local proxy — not the market-universe source"
+              >
+                L2 LIVE (proxy book)
               </span>
             )}
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                source === 'live' ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-800 text-amber-300'
+                source === 'live' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-200'
               }`}
+              title="Market universe source (proxy → public → demo fallback)"
             >
-              {source === 'live' ? 'LIVE markets' : 'DEMO markets'}
+              {source === 'live' ? 'LIVE markets (Kalshi)' : 'DEMO markets (offline)'}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -422,36 +434,44 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               value={`${portfolioState.aggregate.activeBooks} / ${cfg.maxActiveMarkets}`}
               sub="cap = maxActiveMarkets"
             />
-            <Stat label="Σ Cash" value={formatDollars(portfolioState.aggregate.cash)} />
             <Stat
-              label="Σ Inventory"
-              value={`${portfolioState.aggregate.inventoryNet > 0 ? '+' : ''}${portfolioState.aggregate.inventoryNet}`}
+              label="SESSION Σ Cash"
+              value={formatDollars(portfolioState.aggregate.cash)}
+              sub="active books only (cash resets on new book)"
             />
             <Stat
-              label="Σ Unrealized"
+              label="SESSION Σ Inventory"
+              value={`${portfolioState.aggregate.inventoryNet > 0 ? '+' : ''}${portfolioState.aggregate.inventoryNet}`}
+              sub="sum of live books"
+            />
+            <Stat
+              label="SESSION Σ Unrealized"
               value={formatDollars(portfolioState.aggregate.unrealizedInventoryPnl)}
               tone={portfolioState.aggregate.unrealizedInventoryPnl >= 0 ? 'good' : 'bad'}
+              sub="live books only"
             />
             <Stat
-              label="Σ Realized (after fees)"
+              label="SESSION Σ Realized"
               value={formatDollars(portfolioState.aggregate.realizedSpreadPnl)}
               tone={portfolioState.aggregate.realizedSpreadPnl >= 0 ? 'good' : 'bad'}
+              sub="ledger + live books (survives rolls)"
             />
             <Stat
-              label="Σ Fees"
+              label="SESSION Σ Fees"
               value={formatDollars(portfolioState.aggregate.feesPaid)}
               tone={portfolioState.aggregate.feesPaid > 0 ? 'warn' : 'neutral'}
+              sub="ledger + live books"
             />
             <Stat
-              label="Σ Total P&L"
+              label="SESSION Σ Total P&L"
               value={formatPnlDual(totalPnl).dollars}
-              sub={formatPnlDual(totalPnl).centsLabel}
+              sub={`${formatPnlDual(totalPnl).centsLabel} · not a single live-book card`}
               tone={totalPnl >= 0 ? 'good' : 'bad'}
             />
             <Stat
-              label="Σ Fills"
+              label="SESSION Σ Fills"
               value={String(portfolioState.aggregate.fillCount)}
-              sub={`${portfolioState.aggregate.cancelCount} cancels`}
+              sub={`${portfolioState.aggregate.cancelCount} cancels · session ledger`}
             />
           </div>
 
@@ -506,7 +526,28 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                           {row.ticker}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-slate-300">
-                          {row.fairValue != null ? formatCents(row.fairValue) : '—'}
+                          {row.fairValue != null ? (
+                            formatCents(row.fairValue)
+                          ) : (
+                            <span
+                              className="text-slate-500"
+                              title={
+                                row.fvMissingReason === 'no_spot'
+                                  ? 'no spot'
+                                  : row.fvMissingReason === 'no_strike'
+                                    ? 'no strike'
+                                    : row.fvMissingReason === 'estimate_failed'
+                                      ? 'FV estimate failed'
+                                      : 'FV unavailable'
+                              }
+                            >
+                              {row.fvMissingReason === 'no_spot'
+                                ? 'no spot'
+                                : row.fvMissingReason === 'no_strike'
+                                  ? 'no strike'
+                                  : '—'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-slate-300">
                           {formatCents(row.mid)}
@@ -522,7 +563,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                         >
                           {row.edgeCents != null
                             ? `${row.edgeCents >= 0 ? '+' : ''}${row.edgeCents.toFixed(1)}`
-                            : '—'}
+                            : row.fvMissingReason === 'no_spot'
+                              ? 'no spot'
+                              : row.fvMissingReason === 'no_strike'
+                                ? 'no strike'
+                                : '—'}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-slate-400">
                           {row.spot != null
@@ -535,8 +580,19 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                               Y
                             </span>
                           ) : inSlot ? (
-                            <span className="rounded-full bg-amber-950 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
-                              slot · gated
+                            <span
+                              className="rounded-full bg-amber-950 px-2 py-0.5 text-[10px] font-semibold text-amber-200"
+                              title={`${book?.snapshot.quote?.bidReason ?? ''} / ${book?.snapshot.quote?.askReason ?? ''}`}
+                            >
+                              {book?.snapshot.quote?.centerMode === 'mid'
+                                ? 'mid fb'
+                                : book?.snapshot.quote?.bidReason?.includes('no edge') ||
+                                    book?.snapshot.quote?.askReason?.includes('no edge')
+                                  ? 'no edge'
+                                  : book?.snapshot.quote?.bidReason?.includes('toxic') ||
+                                      book?.snapshot.quote?.askReason?.includes('toxic')
+                                    ? 'toxic'
+                                    : 'idle'}
                             </span>
                           ) : (
                             <span className="text-slate-600">N</span>
@@ -588,12 +644,13 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                         </p>
                       </div>
                       <div>
-                        <p className="text-slate-500">P&amp;L</p>
+                        <p className="text-slate-500">LIVE book P&amp;L</p>
                         <p
                           className={`font-mono ${bookPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}
                         >
                           {formatDollars(bookPnl)}
                         </p>
+                        <p className="text-[9px] text-slate-600">≠ SESSION Σ</p>
                       </div>
                     </div>
                     {snap.quote && (
@@ -920,7 +977,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         (portfolioState.books.some((b) => b.fills.length > 0) ||
           portfolioState.sessionFills.length > 0) && (
         <LogPanel
-          title="Multi-book fills (session + active books)"
+          title="SESSION fills log (ledger + live books)"
           empty="No fills yet."
           rows={[
             ...portfolioState.sessionFills.slice(0, 12).map((f) => ({

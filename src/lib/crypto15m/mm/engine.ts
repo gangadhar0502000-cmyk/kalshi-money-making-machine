@@ -28,7 +28,7 @@ import { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
 import { asDollarPrice, clampPx } from './prices'
 import { pickRollTarget } from './marketSelect'
 import { allowAskAtMid, allowBidAtMid, isToxicExtremeMid } from './toxicity'
-import { edgeVsMidCents, estimateYesFairValue } from './fairValue'
+import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
 import type {
   MmCancelEvent,
   MmEngineState,
@@ -754,8 +754,12 @@ export class PaperMmEngine {
 
     const mid = this.midDollars()
     const spot = this.lastSpot?.price
-    const strike = this.market.floorStrike
     const mins = this.market.minutesRemaining
+    const resolved = resolveStrike(this.market.floorStrike, spot, {
+      title: this.market.title,
+      rulesPrimary: this.market.rulesPrimary,
+    })
+    const strike = resolved.strike
     let fair: number | null = null
     let edgeCents: number | null = null
     if (
@@ -806,23 +810,27 @@ export class PaperMmEngine {
     let edgeAskReason: string | null = null
     if (this.config.fvQuoting) {
       if (fair == null || edgeCents == null) {
-        edgeOkBid = false
-        edgeOkAsk = false
-        edgeBidReason = 'bid off: FV unavailable'
-        edgeAskReason = 'ask off: FV unavailable'
+        // Mid-centered fallback — do NOT park both sides forever with no explanation.
+        // Inventory + toxic-mid guards still apply below.
+        edgeOkBid = true
+        edgeOkAsk = true
+        edgeBidReason = null
+        edgeAskReason = null
       } else {
         // Primary gate: edge vs mid (FV ≫ mid → bid; FV ≪ mid → ask)
         edgeOkBid = edgeCents >= minEdge
         edgeOkAsk = -edgeCents >= minEdge
-                if (!edgeOkBid) edgeBidReason = 'bid off: no edge'
+        if (!edgeOkBid) edgeBidReason = 'bid off: no edge'
         if (!edgeOkAsk) edgeAskReason = 'ask off: no edge'
         // Quote half-spread is the maker buffer around FV; activation is gated
         // by edge-vs-mid above (not by half ≥ minEdge, which would never fire).
       }
     }
 
-    let bidReason = 'ok'
-    let askReason = 'ok'
+    const midFallback =
+      this.config.fvQuoting && (fair == null || edgeCents == null)
+    let bidReason = midFallback ? 'ok · mid fallback (no FV)' : 'ok'
+    let askReason = midFallback ? 'ok · mid fallback (no FV)' : 'ok'
     let activeBid = true
     let activeAsk = true
 

@@ -56,10 +56,13 @@ export function normalizeCrypto15m(raw: KalshiMarketRaw, now = Date.now()): Cryp
     midYes >= THIN_BOOK_BLOCK.lockedHigh
 
   const floorStrikeRaw = raw.floor_strike
-  const floorStrike =
-    typeof floorStrikeRaw === 'number' && Number.isFinite(floorStrikeRaw)
-      ? floorStrikeRaw
-      : null
+  let floorStrike: number | null = null
+  if (typeof floorStrikeRaw === 'number' && Number.isFinite(floorStrikeRaw) && floorStrikeRaw > 0) {
+    floorStrike = floorStrikeRaw
+  } else if (typeof floorStrikeRaw === 'string') {
+    const n = Number.parseFloat(floorStrikeRaw)
+    if (Number.isFinite(n) && n > 0) floorStrike = n
+  }
 
   return {
     ticker: raw.ticker,

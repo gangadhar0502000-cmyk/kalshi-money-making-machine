@@ -1,6 +1,6 @@
 import type { KalshiMarketRaw, KalshiMarketsResponse } from '../../types/kalshi'
 import type { Crypto15mMarket, FetchCrypto15mResult } from '../../types/crypto15m'
-import { DEMO_CRYPTO_15M } from '../../fixtures/demoCrypto15m'
+import { getDemoCrypto15m } from '../../fixtures/demoCrypto15m'
 import { CRYPTO_15M_SERIES, isCrypto15mMarket } from './detect'
 import { normalizeCrypto15m } from './normalize'
 import { recordMid } from './midHistory'
@@ -158,7 +158,7 @@ export async function fetchCrypto15mMarkets(
     }
 
     // 3) Demo fixtures (offline / all sources empty)
-    const markets = DEMO_CRYPTO_15M.map((m) => {
+    const markets = getDemoCrypto15m().map((m) => {
       const n = normalizeCrypto15m(m)
       recordMid(n.ticker, n.midYes)
       return n

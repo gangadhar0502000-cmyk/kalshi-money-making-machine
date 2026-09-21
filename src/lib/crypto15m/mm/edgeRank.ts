@@ -5,9 +5,11 @@
 
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import { asDollarPrice } from './prices'
-import { edgeVsMidCents, estimateYesFairValue } from './fairValue'
+import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
 import { isMarketOpen } from './marketSelect'
 import { normalizeSpotAsset } from '../spot'
+
+export type FvMissingReason = 'no_spot' | 'no_strike' | 'estimate_failed' | null
 
 export interface RankedMarket {
   market: Crypto15mMarket
@@ -19,46 +21,68 @@ export interface RankedMarket {
   edgeCents: number | null
   absEdgeCents: number
   spot: number | null
+  /** Effective strike used (API or spot-derived). */
+  strike: number | null
+  strikeSource: 'floor_strike' | 'spot_reference' | 'none'
+  /** Why FV is blank when inputs incomplete. */
+  fvMissingReason: FvMissingReason
   /** True when FV exists and |edge| ≥ minEdgeCents (at least one side could quote). */
   quoteEligible: boolean
+  /**
+   * True when FV/edge path is unavailable but mid is non-toxic —
+   * multi-book may still fill the slot via mid-centered quoting.
+   */
+  midFallbackEligible: boolean
 }
 
 /**
  * Score one market given its asset spot. Missing spot/strike → null FV, absEdge 0.
+ * When floorStrike missing but up/down rules + spot exist, derive K≈spot (documented).
  */
 export function scoreMarketEdge(
   market: Crypto15mMarket,
   spot: number | null | undefined,
   annualVol: number,
   minEdgeCents: number,
+  toxicMidLow = 0.05,
+  toxicMidHigh = 0.95,
 ): RankedMarket {
   const mid = asDollarPrice(market.midYes, 'rank.mid')
   const asset = normalizeSpotAsset(market.asset)
+  const spotOk = spot != null && Number.isFinite(spot) && spot > 0 ? spot : null
+
+  const resolved = resolveStrike(market.floorStrike, spotOk, {
+    title: market.title,
+    rulesPrimary: market.rulesPrimary,
+  })
+
   let fairValue: number | null = null
   let edgeCents: number | null = null
+  let fvMissingReason: FvMissingReason = null
 
-  if (
-    spot != null &&
-    Number.isFinite(spot) &&
-    spot > 0 &&
-    market.floorStrike != null &&
-    Number.isFinite(market.floorStrike) &&
-    market.floorStrike > 0
-  ) {
+  if (!spotOk) {
+    fvMissingReason = 'no_spot'
+  } else if (resolved.strike == null) {
+    fvMissingReason = 'no_strike'
+  } else {
     const est = estimateYesFairValue({
-      spot,
-      strike: market.floorStrike,
+      spot: spotOk,
+      strike: resolved.strike,
       minutesRemaining: market.minutesRemaining,
       annualVol,
     })
     if (est) {
       fairValue = est.fairProb
       edgeCents = edgeVsMidCents(est.fairProb, mid)
+    } else {
+      fvMissingReason = 'estimate_failed'
     }
   }
 
   const absEdgeCents = edgeCents != null ? Math.abs(edgeCents) : 0
   const quoteEligible = edgeCents != null && absEdgeCents >= minEdgeCents
+  const midFallbackEligible =
+    fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
 
   return {
     market,
@@ -68,8 +92,12 @@ export function scoreMarketEdge(
     fairValue,
     edgeCents,
     absEdgeCents,
-    spot: spot != null && Number.isFinite(spot) ? spot : null,
+    spot: spotOk,
+    strike: resolved.strike,
+    strikeSource: resolved.source,
+    fvMissingReason,
     quoteEligible,
+    midFallbackEligible,
   }
 }
 
@@ -92,7 +120,8 @@ export function rankMarketsByAbsEdge(
   })
   scored.sort((a, b) => {
     if (b.absEdgeCents !== a.absEdgeCents) return b.absEdgeCents - a.absEdgeCents
-    // Tie-break: sooner close first (more urgent), then ticker
+    // Prefer quoteEligible over mid-fallback when abs edge ties at 0
+    if (a.quoteEligible !== b.quoteEligible) return a.quoteEligible ? -1 : 1
     const ac = Date.parse(a.market.closeTime)
     const bc = Date.parse(b.market.closeTime)
     if (Number.isFinite(ac) && Number.isFinite(bc) && ac !== bc) return ac - bc
@@ -108,12 +137,19 @@ export interface PickActiveOptions {
   stickyTickers?: readonly string[]
   /** At most one open market per asset (default true). */
   onePerAsset?: boolean
-  /** Only fill new slots with quoteEligible markets (default true). */
+  /**
+   * Prefer quoteEligible (edge) markets for *new* slots (default true).
+   * When under-filled, remaining slots fill via midFallbackEligible so we never
+   * leave empty slots while open markets remain.
+   */
   requireEdge?: boolean
+  /** Fill remaining slots with mid-fallback markets (default true). */
+  fillMidFallback?: boolean
 }
 
 /**
- * Pick up to maxActive markets: sticky first (if still present), then highest |edge|.
+ * Pick up to maxActive markets: sticky first (if still present), then highest |edge|,
+ * then mid-fallback fills so target is min(open, maxActive) whenever possible.
  * Cap is hard — never returns more than maxActive.
  */
 export function pickActiveMarkets(
@@ -125,6 +161,7 @@ export function pickActiveMarkets(
 
   const onePerAsset = opts.onePerAsset !== false
   const requireEdge = opts.requireEdge !== false
+  const fillMidFallback = opts.fillMidFallback !== false
   const sticky = new Set(opts.stickyTickers ?? [])
   const byTicker = new Map(ranked.map((r) => [r.ticker, r]))
 
@@ -132,11 +169,18 @@ export function pickActiveMarkets(
   const usedAssets = new Set<string>()
   const usedTickers = new Set<string>()
 
-  const tryAdd = (r: RankedMarket, forceSticky: boolean): boolean => {
+  const tryAdd = (
+    r: RankedMarket,
+    mode: 'sticky' | 'edge' | 'mid_fallback',
+  ): boolean => {
     if (chosen.length >= maxActive) return false
     if (usedTickers.has(r.ticker)) return false
     if (onePerAsset && usedAssets.has(r.asset)) return false
-    if (!forceSticky && requireEdge && !r.quoteEligible) return false
+    if (mode === 'edge' && requireEdge && !r.quoteEligible) return false
+    if (mode === 'mid_fallback' && !r.midFallbackEligible && !r.quoteEligible) {
+      // Still allow any open ranked market as last resort fill
+      if (!Number.isFinite(r.mid)) return false
+    }
     chosen.push(r.market)
     usedTickers.add(r.ticker)
     usedAssets.add(r.asset)
@@ -146,13 +190,21 @@ export function pickActiveMarkets(
   // Sticky: keep currently active tickers that are still in the open ranked set
   for (const t of sticky) {
     const r = byTicker.get(t)
-    if (r) tryAdd(r, true)
+    if (r) tryAdd(r, 'sticky')
   }
 
-  // Fill remaining from rank order
+  // Fill remaining from rank order (edge-eligible)
   for (const r of ranked) {
     if (chosen.length >= maxActive) break
-    tryAdd(r, false)
+    tryAdd(r, 'edge')
+  }
+
+  // Mid-fallback / open-set fill — never leave empty slots while open markets remain
+  if (fillMidFallback && chosen.length < maxActive) {
+    for (const r of ranked) {
+      if (chosen.length >= maxActive) break
+      tryAdd(r, 'mid_fallback')
+    }
   }
 
   return chosen

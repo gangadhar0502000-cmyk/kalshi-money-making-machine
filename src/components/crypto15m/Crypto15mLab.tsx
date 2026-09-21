@@ -28,7 +28,7 @@ export function Crypto15mLab() {
   const [tab, setTab] = useState<LabTab>('lab')
   const [loading, setLoading] = useState(true)
   const [markets, setMarkets] = useState<Crypto15mMarket[]>([])
-  const [source, setSource] = useState<'live' | 'demo'>('demo')
+  const [source, setSource] = useState<'live' | 'demo' | null>(null)
   const [error, setError] = useState<string | undefined>()
   const [fetchedAt, setFetchedAt] = useState<string | undefined>()
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null)
@@ -186,10 +186,16 @@ export function Crypto15mLab() {
           className={`rounded-full px-2 py-0.5 font-semibold ${
             source === 'live'
               ? 'bg-emerald-950 text-emerald-300'
-              : 'bg-slate-800 text-amber-300'
+              : source === 'demo'
+                ? 'bg-amber-950 text-amber-200'
+                : 'bg-slate-800 text-slate-400'
           }`}
         >
-          {source === 'live' ? 'LIVE Kalshi public API' : 'DEMO fixtures (offline)'}
+          {source === 'live'
+            ? 'LIVE Kalshi (proxy → public)'
+            : source === 'demo'
+              ? 'DEMO fixtures (offline fallback)'
+              : 'Fetching markets…'}
         </span>
         {fetchedAt && <span>Updated {formatRelativeTime(fetchedAt)}</span>}
         {loading && <span className="text-slate-500">Refreshing…</span>}
@@ -202,6 +208,19 @@ export function Crypto15mLab() {
           </span>
         )}
       </div>
+
+      {source === 'demo' && (
+        <div className="rounded-xl border-2 border-amber-500/70 bg-amber-950/50 px-4 py-3 text-sm font-semibold text-amber-100 shadow-lg shadow-amber-950/40">
+          ⚠ DEMO MARKET UNIVERSE — live proxy (/local-api/crypto15m) and public Kalshi API both
+          failed. Paper MM is using offline fixtures with synthetic floor_strike. Will auto-switch
+          back to LIVE on the next successful refresh — do not treat demo P&amp;L as live edge.
+          {error ? (
+            <p className="mt-1 text-xs font-normal text-amber-200/80" title={error}>
+              {error}
+            </p>
+          ) : null}
+        </div>
+      )}
 
       {tab === 'lab' && (
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -235,7 +254,7 @@ export function Crypto15mLab() {
           markets={markets}
           selectedTicker={selectedTicker}
           onSelect={setSelectedTicker}
-          source={source}
+          source={source ?? 'demo'}
         />
       )}
     </div>

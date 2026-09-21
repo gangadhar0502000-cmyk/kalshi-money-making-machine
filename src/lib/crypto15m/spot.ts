@@ -47,7 +47,7 @@ export function normalizeSpotAsset(asset: string): string {
   return 'BTC'
 }
 
-const DEMO_BASE: Record<string, number> = {
+export const DEMO_SPOT_BASE: Record<string, number> = {
   BTC: 95_000,
   ETH: 3_400,
   SOL: 180,
@@ -60,7 +60,7 @@ const DEMO_BASE: Record<string, number> = {
 
 /** Deterministic-ish demo walk so offline mode still exercises the guard. */
 function demoSpot(asset: string): SpotTick {
-  const base = DEMO_BASE[asset] ?? 100
+  const base = DEMO_SPOT_BASE[asset] ?? 100
   const t = Date.now()
   // ~0.05% wobble + occasional larger jumps so guard can fire in demo
   const wobble = Math.sin(t / 4000) * 0.0004 + Math.sin(t / 17000) * 0.0008

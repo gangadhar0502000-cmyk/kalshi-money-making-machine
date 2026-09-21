@@ -6,7 +6,7 @@
  */
 
 import type { Crypto15mMarket } from '../../../types/crypto15m'
-import { fetchPublicSpot, normalizeSpotAsset } from '../spot'
+import { DEMO_SPOT_BASE, fetchPublicSpot, normalizeSpotAsset } from '../spot'
 import {
   DEFAULT_PAPER_MM_CONFIG,
   clampConfig,
@@ -177,6 +177,21 @@ export class PaperMmPortfolio {
     return markets.filter((m) => isMarketOpen(m, nowMs)).length
   }
 
+  /**
+   * Seed provisional demo spots for assets missing a live tick so FV/scan
+   * is computable offline (DEMO fixtures / first paint before spot poll).
+   */
+  private ensureProvisionalSpots(markets: Crypto15mMarket[]): void {
+    for (const m of markets) {
+      const key = normalizeSpotAsset(m.asset)
+      if (this.spotsByAsset[key] != null) continue
+      const base = DEMO_SPOT_BASE[key]
+      if (base != null && base > 0) {
+        this.spotsByAsset[key] = base
+      }
+    }
+  }
+
   getState(): PortfolioState {
     const books: PortfolioBookView[] = []
     for (const [slotId, eng] of this.books) {
@@ -246,6 +261,7 @@ export class PaperMmPortfolio {
    */
   syncMarketUniverse(markets: Crypto15mMarket[]): void {
     this.lastMarkets = markets
+    this.ensureProvisionalSpots(markets)
     this.refreshScan(markets)
 
     const openN = this.openCount(markets)
@@ -316,12 +332,50 @@ export class PaperMmPortfolio {
       }
     }
 
+    // Free dead slots only when the open ranked set still has unassigned assets
+    // to refill — never dump into emptiness while open markets remain.
+    const openRanked = this.lastScan
+    const assignedAssets = new Set(
+      [...this.books.values()]
+        .map((e) => e.getState().snapshot.asset?.toUpperCase())
+        .filter((a): a is string => Boolean(a)),
+    )
+    const hasUnassignedOpen = openRanked.some(
+      (r) => !assignedAssets.has(r.asset.toUpperCase()) && !this.slotOfTicker.has(r.ticker),
+    )
+
     for (const slotId of toRemove) {
-      this.removeBook(slotId, 'Book died with no same-asset roll — slot freed for next-best edge.')
+      // Always free dead books when there is something else to quote; if the
+      // only open markets are already assigned, still free the dead one so
+      // rebalance can attach a replacement / leave a hole that next refresh fills.
+      this.removeBook(
+        slotId,
+        hasUnassignedOpen || openRanked.length > 0
+          ? 'Book died with no same-asset roll — refilling slot from ranked open set.'
+          : 'Book died with no same-asset roll — holding until open markets return.',
+      )
     }
 
     // 2) Fill free slots / reshuffle only with a valid non-empty ranked set
     this.rebalanceSlots(markets)
+
+    // 3) While RUNNING, always attempt to fill empty slots every refresh
+    if (this.running && this.books.size < this.config.maxActiveMarkets && openRanked.length > 0) {
+      this.rebalanceSlots(markets)
+    }
+
+    const after = this.books.size
+    if (
+      this.running &&
+      after < Math.min(this.config.maxActiveMarkets, openRanked.length) &&
+      openRanked.length > 0
+    ) {
+      this.message =
+        `Multi-book under-filled (${after}/${this.config.maxActiveMarkets}) — ` +
+        `retrying fill from ${openRanked.length} open ranked. Read-only · never places trades.`
+      this.rebalanceSlots(markets)
+    }
+
     this.emit()
   }
 
@@ -375,6 +429,7 @@ export class PaperMmPortfolio {
   }
 
   private rebalanceSlots(markets: Crypto15mMarket[]): void {
+    this.ensureProvisionalSpots(markets)
     this.refreshScan(markets)
 
     // CRITICAL: never release books as "outside top-N" on an empty/stale ranking
@@ -388,6 +443,7 @@ export class PaperMmPortfolio {
       stickyTickers: sticky,
       onePerAsset: true,
       requireEdge: this.config.fvQuoting,
+      fillMidFallback: true,
     })
 
     // Still nothing quoteable / pickable — hold sticky books, do not wipe
@@ -397,18 +453,25 @@ export class PaperMmPortfolio {
 
     const desiredTickers = new Set(desired.map((m) => m.ticker))
 
-    // Drop books not in desired — only when we have a valid non-empty desired set
+    // Drop books not in desired — only when replacement set is non-empty AND
+    // dropping would not leave us with fewer books than we can refill.
+    const pendingDrops: string[] = []
     for (const [slotId, eng] of [...this.books.entries()]) {
       const t = eng.getState().snapshot.marketTicker
       if (t && !desiredTickers.has(t)) {
-        this.removeBook(
-          slotId,
-          `Slot released (${t}) — outside top-${this.config.maxActiveMarkets} edge set.`,
-        )
+        pendingDrops.push(slotId)
       }
     }
+    for (const slotId of pendingDrops) {
+      const eng = this.books.get(slotId)
+      const t = eng?.getState().snapshot.marketTicker
+      this.removeBook(
+        slotId,
+        `Slot released (${t ?? '?'}) — outside top-${this.config.maxActiveMarkets} set; refilling.`,
+      )
+    }
 
-    // Add missing
+    // Add missing — fill up to min(open ranked, maxActive)
     for (const m of desired) {
       if (this.slotOfTicker.has(m.ticker)) continue
       if (this.books.size >= this.config.maxActiveMarkets) break
