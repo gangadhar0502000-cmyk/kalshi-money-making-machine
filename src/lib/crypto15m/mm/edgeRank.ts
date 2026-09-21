@@ -9,6 +9,24 @@ import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue
 import { isMarketOpen } from './marketSelect'
 import { normalizeSpotAsset } from '../spot'
 
+/**
+ * Multi-book universe: real KXBTC15M/KXETH15M/… up-down with a usable floorStrike.
+ * Excludes CRYPTOLEAD / CRYPTOCOMP (no strike / leads-style) from ranking & slots.
+ */
+export function isMmQuoteUniverseMarket(market: {
+  ticker?: string
+  seriesTicker?: string
+  floorStrike?: number | null
+}): boolean {
+  const series = (market.seriesTicker ?? '').toUpperCase()
+  const ticker = (market.ticker ?? '').toUpperCase()
+  if (series.includes('CRYPTOLEAD') || series.includes('CRYPTOCOMP')) return false
+  if (ticker.includes('CRYPTOLEAD') || ticker.includes('CRYPTOCOMP')) return false
+  const k = market.floorStrike
+  if (k == null || !Number.isFinite(k) || k <= 0) return false
+  return true
+}
+
 export type FvMissingReason = 'no_spot' | 'no_strike' | 'estimate_failed' | null
 
 export interface RankedMarket {
@@ -119,7 +137,9 @@ export function rankMarketsByAbsEdge(
   minEdgeCents: number,
   nowMs = Date.now(),
 ): RankedMarket[] {
-  const open = markets.filter((m) => isMarketOpen(m, nowMs))
+  const open = markets.filter(
+    (m) => isMarketOpen(m, nowMs) && isMmQuoteUniverseMarket(m),
+  )
   const scored = open.map((m) => {
     const key = normalizeSpotAsset(m.asset)
     const spot = spotsByAsset[key] ?? spotsByAsset[m.asset.toUpperCase()]
@@ -160,10 +180,12 @@ export interface PickActiveOptions {
  * Cap is hard — never returns more than maxActive.
  */
 export function pickActiveMarkets(
-  ranked: RankedMarket[],
+  rankedIn: RankedMarket[],
   opts: PickActiveOptions,
 ): Crypto15mMarket[] {
   const maxActive = Math.max(0, Math.floor(opts.maxActive))
+  // Drop any non-universe rows that slipped in (sticky leftovers, etc.)
+  const ranked = rankedIn.filter((r) => isMmQuoteUniverseMarket(r.market))
   if (maxActive === 0 || ranked.length === 0) return []
 
   const onePerAsset = opts.onePerAsset !== false

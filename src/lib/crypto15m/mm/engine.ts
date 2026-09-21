@@ -30,6 +30,7 @@ import { pickRollTarget } from './marketSelect'
 import { isToxicExtremeMid } from './toxicity'
 import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
 import {
+  canAcceptInventoryIncreasingFill,
   decideQuoteSides,
   DEFAULT_DECISION_POLICY,
   type DecisionPolicyConfig,
@@ -789,6 +790,8 @@ export class PaperMmEngine {
       fvQuoting: this.config.fvQuoting,
       sizeDownEdgeMult: DEFAULT_DECISION_POLICY.sizeDownEdgeMult,
       sizeUpEdgeMult: DEFAULT_DECISION_POLICY.sizeUpEdgeMult,
+      unwindThreshold: this.config.unwindThreshold,
+      maxSaneEdgeCents: this.config.maxSaneEdgeCents,
     }
 
     const decision = decideQuoteSides({
@@ -848,7 +851,12 @@ export class PaperMmEngine {
     if (
       q.bidActive !== false &&
       mid <= q.yesBid &&
-      this.inventory < this.config.maxInventory &&
+      canAcceptInventoryIncreasingFill(
+        'buy_yes',
+        this.inventory,
+        this.config.maxInventory,
+        this.config.unwindThreshold,
+      ) &&
       !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
     ) {
       if (Math.random() < this.config.midCrossFillProb) {
@@ -865,7 +873,12 @@ export class PaperMmEngine {
     if (
       q.askActive !== false &&
       mid >= q.yesAsk &&
-      this.inventory > -this.config.maxInventory &&
+      canAcceptInventoryIncreasingFill(
+        'sell_yes',
+        this.inventory,
+        this.config.maxInventory,
+        this.config.unwindThreshold,
+      ) &&
       !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
     ) {
       if (Math.random() < this.config.midCrossFillProb) {
@@ -894,11 +907,21 @@ export class PaperMmEngine {
     const r = Math.random()
     const canBuy =
       q.bidActive !== false &&
-      this.inventory < this.config.maxInventory &&
+      canAcceptInventoryIncreasingFill(
+        'buy_yes',
+        this.inventory,
+        this.config.maxInventory,
+        this.config.unwindThreshold,
+      ) &&
       !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
     const canSell =
       q.askActive !== false &&
-      this.inventory > -this.config.maxInventory &&
+      canAcceptInventoryIncreasingFill(
+        'sell_yes',
+        this.inventory,
+        this.config.maxInventory,
+        this.config.unwindThreshold,
+      ) &&
       !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
     if (r < buyProb && canBuy) {
       this.applyFill(
@@ -957,6 +980,31 @@ export class PaperMmEngine {
       // Force requote with adverse side off
       this.rebuildQuote(true)
       return
+    }
+
+    // Fill discipline: never add inventory when already at/over unwindThreshold
+    // (or past maxInventory). Unwind / reducing fills remain allowed.
+    if (reason !== 'settlement') {
+      const increasing =
+        (side === 'buy_yes' && this.inventory >= 0) ||
+        (side === 'sell_yes' && this.inventory <= 0)
+      if (
+        increasing &&
+        !canAcceptInventoryIncreasingFill(
+          side,
+          this.inventory,
+          this.config.maxInventory,
+          this.config.unwindThreshold,
+        )
+      ) {
+        this.midCrossRejectCount += 1
+        this.message =
+          `INV BLOCK ${side} — inventory ${this.inventory} at/over unwind ` +
+          `(thresh=${this.config.unwindThreshold}, max=${this.config.maxInventory}). ` +
+          `Refuse adds; unwind only. Read-only · never places trades.`
+        this.rebuildQuote(true)
+        return
+      }
     }
 
     const signed = side === 'buy_yes' ? size : -size
@@ -1022,9 +1070,12 @@ export class PaperMmEngine {
       const pullMs = this.config.toxicFillPullMs
       if (pullMs > 0) {
         if (side === 'buy_yes') {
+          // Pull bid (stop digging); inventory unwind will force ask ON on next rebuild
           this.toxicBidPullUntil = Math.max(this.toxicBidPullUntil, Date.now() + pullMs)
+          this.message += ' Bid pulled · ask unwind enabled if long.'
         } else {
           this.toxicAskPullUntil = Math.max(this.toxicAskPullUntil, Date.now() + pullMs)
+          this.message += ' Ask pulled · bid unwind enabled if short.'
         }
       }
     }
@@ -1076,6 +1127,17 @@ export class PaperMmEngine {
     const asset = this.market?.asset ?? 'BTC'
     this.lastSpot = { asset, price, source: 'demo', t: Date.now() }
     this.spotHist.push(price, Date.now())
+    this.rebuildQuote(true)
+    this.emit()
+  }
+
+  /**
+   * Test helper — seed net YES inventory + optional avg entry (paper only).
+   */
+  seedInventory(inventory: number, avgEntry: number | null = 0.5): void {
+    this.inventory = Math.trunc(inventory)
+    this.avgEntry =
+      this.inventory === 0 ? null : avgEntry != null ? asDollarPrice(avgEntry, 'seed.avg') : 0.5
     this.rebuildQuote(true)
     this.emit()
   }

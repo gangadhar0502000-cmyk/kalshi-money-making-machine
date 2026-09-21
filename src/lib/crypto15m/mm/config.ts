@@ -97,6 +97,16 @@ export interface PaperMmConfig {
    * After an adverse (toxic) fill, temporarily pull that side for this many ms.
    */
   toxicFillPullMs: number
+  /**
+   * Absolute |inventory| at/above which unwind quotes beat the edge gate.
+   * Default 1 — any stuck long/short must be able to reduce risk.
+   */
+  unwindThreshold: number
+  /**
+   * Park edge mode (except unwind) when |FV−mid| cents exceeds this.
+   * Gates absurd edges from near-zero mid vs FV≈1.
+   */
+  maxSaneEdgeCents: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -133,6 +143,8 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   multiBook: true,
   expiryPullMinutes: 0.5,
   toxicFillPullMs: 8000,
+  unwindThreshold: 1,
+  maxSaneEdgeCents: 25,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -198,6 +210,8 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     multiBook: Boolean(c.multiBook),
     expiryPullMinutes: clamp(c.expiryPullMinutes, 0, 5),
     toxicFillPullMs: Math.round(clamp(c.toxicFillPullMs, 0, 120_000)),
+    unwindThreshold: Math.round(clamp(c.unwindThreshold, 1, 500)),
+    maxSaneEdgeCents: clamp(c.maxSaneEdgeCents, 5, 100),
   }
 }
 

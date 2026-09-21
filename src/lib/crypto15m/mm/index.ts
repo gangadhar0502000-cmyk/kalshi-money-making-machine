@@ -40,6 +40,7 @@ export {
   scoreMarketEdge,
   rankMarketsByAbsEdge,
   pickActiveMarkets,
+  isMmQuoteUniverseMarket,
   type RankedMarket,
   type PickActiveOptions,
 } from './edgeRank'
@@ -66,6 +67,7 @@ export {
 
 export {
   decideQuoteSides,
+  canAcceptInventoryIncreasingFill,
   DEFAULT_DECISION_POLICY,
   type DecisionPolicyInput,
   type DecisionPolicyResult,

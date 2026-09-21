@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import {
+  isMmQuoteUniverseMarket,
   pickActiveMarkets,
   rankMarketsByAbsEdge,
   scoreMarketEdge,
@@ -135,5 +136,57 @@ describe('edgeRank', () => {
     })
     expect(picked).toHaveLength(2)
     expect(picked.some((m) => m.ticker === 'C')).toBe(true)
+  })
+
+  it('excludes CRYPTOLEAD / CRYPTOCOMP and no-strike from ranking & pickActiveMarkets', () => {
+    const lead = mk({
+      ticker: 'KXCRYPTOLEAD15M-BTC',
+      asset: 'CRYPTO',
+      seriesTicker: 'KXCRYPTOLEAD15M',
+      midYes: 0.4,
+      floorStrike: null,
+      title: 'BTC leads in next 15 mins?',
+      minutesRemaining: 2,
+    })
+    const comp = mk({
+      ticker: 'KXCRYPTOCOMP15M-1',
+      asset: 'CRYPTO',
+      seriesTicker: 'KXCRYPTOCOMP15M',
+      midYes: 0.4,
+      floorStrike: 100,
+      minutesRemaining: 2,
+    })
+    const noStrike = mk({
+      ticker: 'KXBTC15M-NOK',
+      asset: 'BTC',
+      seriesTicker: 'KXBTC15M',
+      midYes: 0.4,
+      floorStrike: null,
+      minutesRemaining: 2,
+    })
+    const real = mk({
+      ticker: 'KXBTC15M-OK',
+      asset: 'BTC',
+      seriesTicker: 'KXBTC15M',
+      midYes: 0.4,
+      floorStrike: 100_000,
+      minutesRemaining: 2,
+    })
+    expect(isMmQuoteUniverseMarket(lead)).toBe(false)
+    expect(isMmQuoteUniverseMarket(comp)).toBe(false)
+    expect(isMmQuoteUniverseMarket(noStrike)).toBe(false)
+    expect(isMmQuoteUniverseMarket(real)).toBe(true)
+
+    const ranked = rankMarketsByAbsEdge(
+      [lead, comp, noStrike, real],
+      { BTC: 102_000, CRYPTO: 1 },
+      0.7,
+      2,
+      now,
+    )
+    expect(ranked.every((r) => r.ticker === 'KXBTC15M-OK')).toBe(true)
+    expect(ranked).toHaveLength(1)
+    const picked = pickActiveMarkets(ranked, { maxActive: 5 })
+    expect(picked.map((m) => m.ticker)).toEqual(['KXBTC15M-OK'])
   })
 })

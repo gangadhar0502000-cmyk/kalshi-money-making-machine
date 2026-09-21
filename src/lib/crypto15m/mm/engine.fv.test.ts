@@ -42,6 +42,20 @@ function mkMarket(partial: Partial<Crypto15mMarket> & { ticker: string }): Crypt
   }
 }
 
+/** Wide BBO so FV-centered quotes never taker-cross during gate tests. */
+function wideBook(ticker: string, mid = 0.5): OrderBookSnapshot {
+  return {
+    ticker,
+    t: Date.now(),
+    yesBids: [{ price: 0.01, size: 50 }],
+    yesAsks: [{ price: 0.99, size: 50 }],
+    bestBid: 0.01,
+    bestAsk: 0.99,
+    mid,
+    authenticated: false,
+  }
+}
+
 function book(ticker: string, mid = 0.5): OrderBookSnapshot {
   return {
     ticker,
@@ -65,8 +79,9 @@ describe('FV quoting + edge gates', () => {
     })
     engine = new PaperMmEngine()
     engine.setConfig({
-      fillCooldownMs: 0,
+      fillCooldownMs: 60_000,
       maxInventory: 10,
+      unwindThreshold: 1,
       quoteSize: 1,
       halfSpreadCents: 2,
       useLiveBook: true,
@@ -77,6 +92,7 @@ describe('FV quoting + edge gates', () => {
       settleOnClose: true,
       fvQuoting: true,
       minEdgeCents: 3,
+      maxSaneEdgeCents: 25,
       annualVol: 0.7,
     })
   })
@@ -89,21 +105,25 @@ describe('FV quoting + edge gates', () => {
   it('when FV ≫ mid, bid may be ON and ask is gated off', () => {
     const market = mkMarket({
       ticker: 'KXBTC15M-FVHI',
-      midYes: 0.4,
-      yesBid: 0.38,
-      yesAsk: 0.42,
+      midYes: 0.48,
+      yesBid: 0.46,
+      yesAsk: 0.5,
       floorStrike: 100_000,
-      minutesRemaining: 2,
+      minutesRemaining: 12,
     })
     engine.setMarket(market)
     engine.start()
-    engine.seedSpot(102_000)
-    engine.onBook(book(market.ticker, 0.4))
+    engine.seedSpot(100_150)
+    engine.onBook(wideBook(market.ticker, 0.48))
+    // Ensure flat — no accidental inventory from prior fill paths
+    engine.seedInventory(0)
 
     const s = engine.getState().snapshot
     expect(s.fairValue).not.toBeNull()
-    expect(s.fairValue!).toBeGreaterThan(0.55)
+    expect(s.fairValue!).toBeGreaterThan(0.5)
     expect(s.edgeVsMidCents!).toBeGreaterThanOrEqual(3)
+    expect(s.edgeVsMidCents!).toBeLessThanOrEqual(25)
+    expect(s.inventory).toBe(0)
     expect(s.quote?.bidActive).toBe(true)
     expect(s.quote?.askActive).toBe(false)
     expect(s.quote?.askReason.toLowerCase()).toMatch(/no edge/)
@@ -113,21 +133,24 @@ describe('FV quoting + edge gates', () => {
   it('when FV ≪ mid, ask may be ON and bid is gated off', () => {
     const market = mkMarket({
       ticker: 'KXBTC15M-FVLO',
-      midYes: 0.6,
-      yesBid: 0.58,
-      yesAsk: 0.62,
+      midYes: 0.52,
+      yesBid: 0.5,
+      yesAsk: 0.54,
       floorStrike: 100_000,
-      minutesRemaining: 2,
+      minutesRemaining: 12,
     })
     engine.setMarket(market)
     engine.start()
-    engine.seedSpot(98_000)
-    engine.onBook(book(market.ticker, 0.6))
+    engine.seedSpot(99_900)
+    engine.onBook(wideBook(market.ticker, 0.52))
+    engine.seedInventory(0)
 
     const s = engine.getState().snapshot
     expect(s.fairValue).not.toBeNull()
-    expect(s.fairValue!).toBeLessThan(0.45)
+    expect(s.fairValue!).toBeLessThan(0.5)
     expect(s.edgeVsMidCents!).toBeLessThanOrEqual(-3)
+    expect(s.edgeVsMidCents!).toBeGreaterThanOrEqual(-25)
+    expect(s.inventory).toBe(0)
     expect(s.quote?.askActive).toBe(true)
     expect(s.quote?.bidActive).toBe(false)
     expect(s.quote?.bidReason.toLowerCase()).toMatch(/no edge/)
@@ -143,7 +166,8 @@ describe('FV quoting + edge gates', () => {
     engine.setMarket(market)
     engine.start()
     engine.seedSpot(100_000)
-    engine.onBook(book(market.ticker, 0.5))
+    engine.onBook(wideBook(market.ticker, 0.5))
+    engine.seedInventory(0)
 
     const s = engine.getState().snapshot
     expect(s.fairValue).not.toBeNull()
@@ -163,6 +187,7 @@ describe('FV quoting + edge gates', () => {
       floorStrike: 100_000,
       minutesRemaining: 10,
     })
+    engine.setConfig({ fillCooldownMs: 0 })
     engine.setMarket(market)
     engine.start()
     engine.seedSpot(100_000)
@@ -174,8 +199,8 @@ describe('FV quoting + edge gates', () => {
     const state = engine.getState()
     expect(state.snapshot.inventory).toBe(0)
     expect(state.snapshot.quote?.bidActive).toBe(false)
-    // toxic mid OR no-edge both valid; must not be buy-spamable
-    expect(state.snapshot.quote?.bidReason.toLowerCase()).toMatch(/toxic|no edge/)
+    // toxic mid, no-edge, or edge sanity — must not be buy-spamable
+    expect(state.snapshot.quote?.bidReason.toLowerCase()).toMatch(/toxic|no edge|edge sanity/)
   })
 
   it('auto-roll still works when market closes + new open 15m in feed', () => {

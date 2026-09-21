@@ -592,26 +592,45 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                         </td>
                         <td className="px-2 py-1.5">
                           {quoting ? (
-                            <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                              Y
+                            <span
+                              className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"
+                              title={`${book?.snapshot.quote?.bidReason ?? ''} / ${book?.snapshot.quote?.askReason ?? ''}`}
+                            >
+                              {book?.snapshot.quote?.askReason?.includes('inventory unwind')
+                                ? 'Y unwind'
+                                : book?.snapshot.quote?.bidReason?.includes('inventory unwind')
+                                  ? 'Y unwind'
+                                  : 'Y'}
                             </span>
                           ) : inSlot ? (
                             <span
                               className="rounded-full bg-amber-950 px-2 py-0.5 text-[10px] font-semibold text-amber-200"
                               title={`${book?.snapshot.quote?.bidReason ?? ''} / ${book?.snapshot.quote?.askReason ?? ''}`}
                             >
-                              {book?.snapshot.quote?.centerMode === 'mid'
-                                ? 'mid fb'
-                                : book?.snapshot.quote?.bidReason?.includes('no edge') ||
-                                    book?.snapshot.quote?.askReason?.includes('no edge')
-                                  ? 'no edge'
-                                  : book?.snapshot.quote?.bidReason?.includes('toxic') ||
-                                      book?.snapshot.quote?.askReason?.includes('toxic')
-                                    ? 'toxic'
-                                    : 'idle'}
+                              {(() => {
+                                const br = book?.snapshot.quote?.bidReason ?? ''
+                                const ar = book?.snapshot.quote?.askReason ?? ''
+                                const both = `${br} ${ar}`.toLowerCase()
+                                if (both.includes('edge sanity')) return 'sanity'
+                                if (both.includes('max inventory')) return 'max inv'
+                                if (both.includes('unwind-only')) return 'unwind hold'
+                                if (both.includes('no edge')) return 'no edge'
+                                if (both.includes('toxic')) return 'toxic'
+                                if (both.includes('expiry')) return 'expiry'
+                                if (book?.snapshot.quote?.centerMode === 'mid') return 'mid fb'
+                                if (both.includes('no fv')) return 'no FV'
+                                // Never opaque — surface first non-ok reason fragment
+                                const frag =
+                                  (!br.toLowerCase().includes('on:') && br) ||
+                                  (!ar.toLowerCase().includes('on:') && ar) ||
+                                  'parked'
+                                return frag.length > 18 ? frag.slice(0, 16) + '…' : frag
+                              })()}
                             </span>
                           ) : (
-                            <span className="text-slate-600">N</span>
+                            <span className="text-slate-600" title="Not in active multi-book slot">
+                              N
+                            </span>
                           )}
                         </td>
                       </tr>
