@@ -507,6 +507,8 @@ export class PaperMmEngine {
           this.inventory,
           this.config.maxInventory,
           this.midWalkState,
+          // Strict realism (default): maker-only — never emit taker_cross fee bleed.
+          { allowTakerCross: !this.config.strictRealism },
         )
         // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
         const sig = signals[0]
@@ -1009,10 +1011,30 @@ export class PaperMmEngine {
 
     const signed = side === 'buy_yes' ? size : -size
 
+    // Belt-and-suspenders: refuse taker fills under strict realism
+    if (taker && this.config.strictRealism) {
+      this.midCrossRejectCount += 1
+      this.message =
+        `TAKER REFUSED ${side} @ $${price.toFixed(4)} — strict maker-only (no taker_cross).`
+      this.rebuildQuote(true)
+      return
+    }
+
     const fee = estimateFillFeeDollars(size, price, {
       taker,
       applyFees: this.config.applyFees,
     })
+    // Skip fill when fee would exceed expected edge on this size
+    if (fee > 0 && this.lastEdgeVsMidCents != null && Number.isFinite(this.lastEdgeVsMidCents)) {
+      const edgeDollars = (Math.abs(this.lastEdgeVsMidCents) / 100) * size
+      if (fee > edgeDollars + 1e-9) {
+        this.midCrossRejectCount += 1
+        this.message =
+          `FEE SKIP ${side} — fee $${fee.toFixed(2)} > edge $${edgeDollars.toFixed(2)} ` +
+          `(|FV−mid|=${Math.abs(this.lastEdgeVsMidCents).toFixed(1)}¢ × ${size}).`
+        return
+      }
+    }
     if (fee > 0) {
       this.cash -= fee
       this.feesPaid += fee

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { shouldApplyLabRefresh } from './labRefresh'
+import { isAbortOnlyError, shouldApplyLabRefresh } from './labRefresh'
 
 function liveMarket(ticker = 'KXBTC15M-26SEP211600') {
   return {
@@ -91,8 +91,9 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     expect(result.error).toMatch(/proxy:\s*HTTP 502/i)
   })
 
-  it('proxy abort surfaces aborted reason', async () => {
+  it('proxy+public abort-only → soft transient (NOT LIVE-ONLY, no console.error)', async () => {
     const { fetchCrypto15mMarkets } = await import('./api')
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     vi.stubGlobal(
       'fetch',
@@ -110,7 +111,17 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
             s?.addEventListener('abort', fail, { once: true })
           })
         }
-        throw new Error('public also down')
+        // Public also times out / aborts — abort-only path, not HTTP failure
+        await new Promise<never>((_resolve, reject) => {
+          const s = init?.signal
+          const fail = () => {
+            const err = new Error('The operation was aborted')
+            err.name = 'AbortError'
+            reject(err)
+          }
+          if (s?.aborted) return fail()
+          s?.addEventListener('abort', fail, { once: true })
+        })
       }),
     )
 
@@ -120,8 +131,9 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     })
     expect(result.source).toBe('live')
     expect(result.markets).toEqual([])
-    expect(result.error ?? '').toMatch(/LIVE-ONLY FAILURE/i)
-    expect(result.error ?? '').toMatch(/proxy:\s*aborted/i)
+    expect(result.error ?? '').not.toMatch(/LIVE-ONLY FAILURE/i)
+    expect(result.error ?? '').toMatch(/Transient abort|aborted/i)
+    expect(errSpy).not.toHaveBeenCalled()
   })
 
   it('caller AbortSignal abort → no LIVE-ONLY FAILURE / no demo / no console.error', async () => {
@@ -218,5 +230,62 @@ describe('Lab live-only refresh', () => {
         lastMarketsLen: 5,
       }),
     ).toBe('apply')
+  })
+
+  it('overlapping refresh / abort-only empty keeps last markets (not LIVE-ONLY apply)', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: 'live',
+        next: {
+          source: 'live',
+          markets: [],
+          error: 'Transient abort (retrying): proxy: aborted | /api/kalshi/KXBTC15M: aborted',
+        },
+        lastMarketsLen: 14,
+      }),
+    ).toBe('keep-last')
+  })
+
+  it('abort-only errors ≠ LIVE-ONLY FAILURE decision on cold start (ignore)', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: null,
+        next: {
+          source: 'live',
+          markets: [],
+          error: 'proxy: aborted | /api/kalshi/KXBTC15M: aborted',
+        },
+        lastMarketsLen: 0,
+      }),
+    ).toBe('ignore')
+  })
+
+  it('quiet abortedFetchResult (no error) is ignore on cold start', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: null,
+        next: { source: 'live', markets: [] },
+        lastMarketsLen: 0,
+      }),
+    ).toBe('ignore')
+  })
+})
+
+
+describe('isAbortOnlyError', () => {
+  it('treats aborted-only strings as abort-only (not LIVE-ONLY)', () => {
+    expect(isAbortOnlyError('proxy: aborted | /api/kalshi/KXBTC15M: aborted')).toBe(true)
+    expect(isAbortOnlyError('Transient abort (retrying): proxy: aborted')).toBe(true)
+    expect(isAbortOnlyError(undefined)).toBe(true)
+    expect(isAbortOnlyError('')).toBe(true)
+  })
+
+  it('real HTTP/network failures are not abort-only', () => {
+    expect(isAbortOnlyError('proxy: HTTP 502 | network down')).toBe(false)
+    expect(
+      isAbortOnlyError(
+        'LIVE-ONLY FAILURE: no crypto 15m markets (online sources only — demo removed). proxy: HTTP 502',
+      ),
+    ).toBe(false)
   })
 })

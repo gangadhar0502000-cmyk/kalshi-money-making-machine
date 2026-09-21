@@ -217,11 +217,24 @@ export async function fetchCrypto15mMarkets(
   // Caller abort / Strict Mode cleanup — never treat as live outage
   if (signal?.aborted) return abortedFetchResult(seriesList)
 
-  // 3) LIVE-ONLY failure — never fall back to demo fixtures
-  // Only when the request completed (or timed out for real) with no markets.
+  // 3) Empty result — distinguish abort-only noise from real completed outages.
+  // Timeout AbortErrors are labeled "aborted"; overlapping poll / Strict Mode races
+  // must NOT sticky LIVE-ONLY FAILURE or console.error.
   const detail =
     errors.join(' | ') ||
     'proxy and public both returned no markets'
+  if (errorsAreAbortOnly(errors)) {
+    return {
+      markets: [],
+      source: 'live',
+      fetchedAt: new Date().toISOString(),
+      // Soft — Lab keeps last universe; UI must not treat as LIVE-ONLY FAILURE.
+      error: `Transient abort (retrying): ${detail}`,
+      seriesTried: [...seriesList],
+    }
+  }
+
+  // Real completed failure (HTTP/network/empty) — loud LIVE-ONLY, no demo.
   const loud =
     `LIVE-ONLY FAILURE: no crypto 15m markets (online sources only — demo removed). ${detail}`
   console.error(`[crypto15m] ${loud}`)
@@ -232,6 +245,17 @@ export async function fetchCrypto15mMarkets(
     error: loud,
     seriesTried: [...seriesList],
   }
+}
+
+/** True when every collected error is only an AbortError/"aborted" label. */
+function errorsAreAbortOnly(errors: string[]): boolean {
+  if (errors.length === 0) return false
+  return errors.every(
+    (e) =>
+      /^aborted$/i.test(e.trim()) ||
+      /:\s*aborted\b/i.test(e) ||
+      /^The operation was aborted$/i.test(e.trim()),
+  )
 }
 
 function byRemaining(a: Crypto15mMarket, b: Crypto15mMarket): number {

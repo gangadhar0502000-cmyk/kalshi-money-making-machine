@@ -169,7 +169,48 @@ function edgeFailsSanity(
 }
 
 /**
- * Price an unwind ask around mid±half, optionally join BBO without taking.
+ * Maker-only clamp: bid ≤ bestBid (join touch), ask ≥ bestAsk.
+ * Never cross the live BBO — prevents taker_cross fee bleed when FV is far from mid.
+ */
+export function clampQuotesMakerOnly(
+  bid: number,
+  ask: number,
+  bookBestBid: number | null,
+  bookBestAsk: number | null,
+): { bid: number; ask: number } {
+  let b = clampPx(bid)
+  let a = clampPx(ask)
+  const hasBid = bookBestBid != null && Number.isFinite(bookBestBid) && bookBestBid > 0
+  const hasAsk = bookBestAsk != null && Number.isFinite(bookBestAsk) && bookBestAsk > 0
+
+  if (hasBid) {
+    // Join touch or sit behind — never bid through bestAsk / above bestBid
+    b = clampPx(Math.min(b, bookBestBid!))
+  }
+  if (hasAsk) {
+    a = clampPx(Math.max(a, bookBestAsk!))
+  }
+  // Belt: still must not cross the opposite BBO side
+  if (hasAsk && !(b < bookBestAsk!)) {
+    b = clampPx(bookBestAsk! - 0.01)
+  }
+  if (hasBid && !(a > bookBestBid!)) {
+    a = clampPx(bookBestBid! + 0.01)
+  }
+  if (!(a > b)) {
+    // Keep a coherent one-tick spread after clamp
+    if (hasBid && hasAsk && bookBestAsk! > bookBestBid!) {
+      b = clampPx(bookBestBid!)
+      a = clampPx(bookBestAsk!)
+    } else {
+      a = clampPx(b + 0.01)
+    }
+  }
+  return { bid: b, ask: a }
+}
+
+/**
+ * Unwind ask: join live best ask (maker) — never cross to take bids.
  */
 function priceUnwindAsk(
   mid: number,
@@ -179,8 +220,8 @@ function priceUnwindAsk(
 ): number {
   let ask = clampPx(mid + half / 100)
   if (bookBestAsk != null && Number.isFinite(bookBestAsk) && bookBestAsk > 0) {
-    // Join or sit at BBO ask — never cross through best bid
-    ask = clampPx(Math.min(ask, Math.max(bookBestAsk, mid)))
+    // Prefer join touch as maker when long
+    ask = clampPx(bookBestAsk)
   }
   if (bookBestBid != null && Number.isFinite(bookBestBid) && !(ask > bookBestBid)) {
     ask = clampPx(bookBestBid + 0.01)
@@ -188,6 +229,9 @@ function priceUnwindAsk(
   return ask
 }
 
+/**
+ * Unwind bid: join live best bid (maker) — never cross to take asks.
+ */
 function priceUnwindBid(
   mid: number,
   half: number,
@@ -196,7 +240,8 @@ function priceUnwindBid(
 ): number {
   let bid = clampPx(mid - half / 100)
   if (bookBestBid != null && Number.isFinite(bookBestBid) && bookBestBid > 0) {
-    bid = clampPx(Math.max(bid, Math.min(bookBestBid, mid)))
+    // Prefer join touch as maker when short
+    bid = clampPx(bookBestBid)
   }
   if (bookBestAsk != null && Number.isFinite(bookBestAsk) && !(bid < bookBestAsk)) {
     bid = clampPx(bookBestAsk - 0.01)
@@ -474,6 +519,23 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
 
   // After toxic buy: inventory may be long — unwind ask already forced above.
   // Ensure toxic bid pull does not also kill the unwind ask (it doesn't).
+
+  // Maker-only: clamp any live quote to never cross BBO (FV/unwind safe)
+  if (bidActive || askActive) {
+    const clamped = clampQuotesMakerOnly(bid, ask, input.bookBestBid, input.bookBestAsk)
+    bid = clamped.bid
+    ask = clamped.ask
+    if (!(ask > bid)) {
+      return parkBoth('incoherent quote after maker clamp', {
+        yesBid: 0.01,
+        yesAsk: 0.99,
+        size,
+        skewCents,
+        halfSpreadCents: half,
+        centerMode,
+      })
+    }
+  }
 
   // Park inactive sides away from the touch
   const yesBid = bidActive ? bid : 0.01

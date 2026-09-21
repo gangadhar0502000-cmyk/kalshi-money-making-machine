@@ -21,7 +21,7 @@ import { RuleExperimentsPanel } from './RuleExperimentsPanel'
 import { BacktestPanel } from './BacktestPanel'
 import { PaperMmPanel } from './PaperMmPanel'
 import { pickBestOpenMarket, pickRollTarget } from '../../lib/crypto15m/mm/marketSelect'
-import { shouldApplyLabRefresh } from '../../lib/crypto15m/labRefresh'
+import { isAbortOnlyError, shouldApplyLabRefresh } from '../../lib/crypto15m/labRefresh'
 
 type LabTab = 'lab' | 'backtest' | 'mm'
 
@@ -37,13 +37,23 @@ export function Crypto15mLab() {
   const [nowTick, setNowTick] = useState(0)
   const lastMarketsRef = useRef<Crypto15mMarket[]>([])
   const sourceRef = useRef<'live' | 'demo' | null>(null)
+  /** Single-flight: overlapping polls must not abort a healthy in-flight live fetch. */
+  const inFlightRef = useRef(false)
+  const pollGenRef = useRef(0)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    // Mutex / coalesce: if a fetch is already in flight, skip this poll tick.
+    // Never abort a healthy in-flight live fetch just because pollIntervalMs fired.
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    const gen = ++pollGenRef.current
     setLoading(true)
     try {
       const result = await fetchCrypto15mMarkets(signal)
       // Strict Mode / effect cleanup abort — never LIVE-ONLY, never wipe live universe.
       if (signal?.aborted) return
+      // Stale completion after a newer refresh started (should not happen with mutex).
+      if (gen !== pollGenRef.current) return
 
       // Never wipe a good LIVE universe with a transient empty refresh (rollover gap).
       // LIVE-ONLY: demo fixtures are never applied.
@@ -52,13 +62,25 @@ export function Crypto15mLab() {
         next: result,
         lastMarketsLen: lastMarketsRef.current.length,
       })
-      let marketsForPick = result.markets
+      let marketsForPick = lastMarketsRef.current
+      if (decision === 'ignore') {
+        // Abort-only cold start / quiet empty — leave universe untouched.
+        if (result.error && !isAbortOnlyError(result.error)) {
+          setError(result.error)
+        }
+        return
+      }
       if (decision === 'keep-last') {
         marketsForPick = lastMarketsRef.current
-        setError(
-          (result.error ? result.error + ' · ' : '') +
-            'Empty feed — keeping last markets; retrying…',
-        )
+        // Never paint LIVE-ONLY FAILURE for abort-only empties while keeping last.
+        if (isAbortOnlyError(result.error)) {
+          setError('Empty feed — keeping last markets; retrying…')
+        } else {
+          setError(
+            (result.error ? result.error + ' · ' : '') +
+              'Empty feed — keeping last markets; retrying…',
+          )
+        }
       } else {
         lastMarketsRef.current = result.markets
         setMarkets(result.markets)
@@ -66,6 +88,7 @@ export function Crypto15mLab() {
         sourceRef.current = result.source
         setError(result.error)
         setFetchedAt(result.fetchedAt)
+        marketsForPick = result.markets
       }
 
       setSelectedTicker((prev) => {
@@ -84,6 +107,7 @@ export function Crypto15mLab() {
         `Refresh failed: ${e instanceof Error ? e.message : String(e)} — retrying…`,
       )
     } finally {
+      if (gen === pollGenRef.current) inFlightRef.current = false
       if (!signal?.aborted) setLoading(false)
     }
   }, [])
@@ -94,10 +118,10 @@ export function Crypto15mLab() {
     return () => ac.abort()
   }, [refresh])
 
-  // Poll for mid history + countdown freshness
+  // Poll for mid history + countdown freshness — never aborts an in-flight fetch.
   useEffect(() => {
     const id = window.setInterval(() => {
-      void refresh()
+      void refresh() // single-flight skip if busy
       setNowTick((n) => n + 1)
     }, LAB.pollIntervalMs)
     return () => window.clearInterval(id)

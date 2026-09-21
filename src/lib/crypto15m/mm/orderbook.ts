@@ -140,6 +140,14 @@ export const DEFAULT_DETECT_STATE: DetectBookFillsState = {
  * Infer fills for resting (or crossing) simulated quotes from consecutive L2 snapshots.
  * Returns at most ONE signal — never buy and sell in the same poll.
  */
+export type DetectBookFillsOpts = {
+  /**
+   * When false (strict realism default), never emit taker_cross fills.
+   * Crossing quotes are ignored so paper MM cannot fee-bleed as a taker.
+   */
+  allowTakerCross?: boolean
+}
+
 export function detectBookFills(
   prev: OrderBookSnapshot | null,
   next: OrderBookSnapshot,
@@ -154,6 +162,7 @@ export function detectBookFills(
   inventory: number,
   maxInventory: number,
   walkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE },
+  opts: DetectBookFillsOpts = {},
 ): BookFillSignal[] {
   if (!quote.active) return []
 
@@ -162,9 +171,11 @@ export function detectBookFills(
   const size = Math.max(1, Math.round(quote.size))
   const bidOn = quote.bidActive !== false
   const askOn = quote.askActive !== false
+  const allowTaker = opts.allowTakerCross === true
 
-  // Immediate cross → taker (single fill, then stop). Per-side must be active.
-  if (bidOn && bid >= next.bestAsk - 1e-9 && inventory < maxInventory) {
+  // Immediate cross → taker. Under strict realism this path is refused entirely
+  // (maker-only: book_depth / mid_walk). Per-side must be active.
+  if (allowTaker && bidOn && bid >= next.bestAsk - 1e-9 && inventory < maxInventory) {
     const avail = Math.max(1, Math.floor(depthAskAtOrBelow(next, bid)))
     return [
       {
@@ -176,7 +187,7 @@ export function detectBookFills(
       },
     ]
   }
-  if (askOn && ask <= next.bestBid + 1e-9 && inventory > -maxInventory) {
+  if (allowTaker && askOn && ask <= next.bestBid + 1e-9 && inventory > -maxInventory) {
     const avail = Math.max(1, Math.floor(depthBidAtOrAbove(next, ask)))
     return [
       {

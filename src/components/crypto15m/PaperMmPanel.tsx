@@ -156,6 +156,12 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     ? portfolioState.aggregate.realizedSpreadPnl +
       portfolioState.aggregate.unrealizedInventoryPnl
     : s.realizedSpreadPnl + s.unrealizedInventoryPnl
+  const sessionFees = multiBook ? portfolioState.aggregate.feesPaid : s.feesPaid
+  const sessionRealized = multiBook
+    ? portfolioState.aggregate.realizedSpreadPnl
+    : s.realizedSpreadPnl
+  const feesDominatePnl =
+    sessionFees > 0.01 && Math.abs(totalPnl) > 0 && sessionFees >= Math.abs(totalPnl) * 0.5
   const sessionStartedAt = multiBook ? portfolioState.sessionStartedAt : s.sessionStartedAt
   const cfg = multiBook ? portfolioState.config : s.config
   const showSoftWarn = isUnrealisticallyFastPnl(
@@ -467,13 +473,23 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             <Stat
               label="SESSION Σ Fees"
               value={formatDollars(portfolioState.aggregate.feesPaid)}
-              tone={portfolioState.aggregate.feesPaid > 0 ? 'warn' : 'neutral'}
-              sub="ledger + live books"
+              tone={
+                feesDominatePnl
+                  ? 'bad'
+                  : portfolioState.aggregate.feesPaid > 0
+                    ? 'warn'
+                    : 'neutral'
+              }
+              sub={
+                feesDominatePnl
+                  ? `⚠ fees dominate |P&L| (realized ${formatDollars(sessionRealized)})`
+                  : `vs realized ${formatDollars(sessionRealized)} · ledger + live`
+              }
             />
             <Stat
               label="SESSION Σ Total P&L"
               value={formatPnlDual(totalPnl).dollars}
-              sub={`${formatPnlDual(totalPnl).centsLabel} · not a single live-book card`}
+              sub={`${formatPnlDual(totalPnl).centsLabel} · fees ${formatDollars(sessionFees)} already in realized`}
               tone={totalPnl >= 0 ? 'good' : 'bad'}
             />
             <Stat
@@ -482,6 +498,16 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               sub={`${portfolioState.aggregate.cancelCount} cancels · session ledger`}
             />
           </div>
+
+          {feesDominatePnl && (
+            <div className="rounded-xl border border-amber-600/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+              <strong>Fee bleed warning:</strong> SESSION fees{' '}
+              {formatDollars(sessionFees)} are ≥ 50% of |Total P&L|{' '}
+              {formatDollars(Math.abs(totalPnl))}. Realized after fees:{' '}
+              {formatDollars(sessionRealized)}. Likely crossing quotes / taker fees —
+              maker-only mode should keep fees near $0. Paper only; not live edge.
+            </div>
+          )}
 
           <div className="panel p-4">
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -731,12 +757,17 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             <Stat
               label="Fees paid"
               value={formatDollars(s.feesPaid)}
-              tone={s.feesPaid > 0 ? 'warn' : 'neutral'}
+              tone={feesDominatePnl ? 'bad' : s.feesPaid > 0 ? 'warn' : 'neutral'}
+              sub={
+                feesDominatePnl
+                  ? '⚠ fees dominate |P&L|'
+                  : `vs realized ${formatDollars(s.realizedSpreadPnl)}`
+              }
             />
             <Stat
               label="Total P&L"
               value={formatPnlDual(totalPnl).dollars}
-              sub={formatPnlDual(totalPnl).centsLabel}
+              sub={`${formatPnlDual(totalPnl).centsLabel} · fees ${formatDollars(s.feesPaid)}`}
               tone={totalPnl >= 0 ? 'good' : 'bad'}
             />
             <Stat
