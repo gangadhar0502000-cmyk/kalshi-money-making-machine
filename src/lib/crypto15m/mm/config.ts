@@ -78,6 +78,16 @@ export interface PaperMmConfig {
    * Free research prior — not implied vol from a paid feed.
    */
   annualVol: number
+  /**
+   * Multi-book: max concurrent paper MM markets (default 5).
+   * More markets = more shots at the same edge game — not independent lottery wins.
+   */
+  maxActiveMarkets: number
+  /**
+   * When true, portfolio scans all open crypto 15m and quotes up to maxActiveMarkets.
+   * When false, classic single-ticker paper MM.
+   */
+  multiBook: boolean
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -110,6 +120,8 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   fvQuoting: true,
   minEdgeCents: 2,
   annualVol: 0.7,
+  maxActiveMarkets: 5,
+  multiBook: true,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -171,6 +183,8 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     fvQuoting: Boolean(c.fvQuoting),
     minEdgeCents: clamp(c.minEdgeCents, 0, 20),
     annualVol: clamp(c.annualVol, 0.05, 3),
+    maxActiveMarkets: Math.round(clamp(c.maxActiveMarkets, 1, 12)),
+    multiBook: Boolean(c.multiBook),
   }
 }
 

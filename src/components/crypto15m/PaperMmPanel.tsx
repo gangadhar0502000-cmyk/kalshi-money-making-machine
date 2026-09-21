@@ -6,9 +6,11 @@ import {
   type PaperMmConfig,
 } from '../../lib/crypto15m/mm/config'
 import { paperMmEngine } from '../../lib/crypto15m/mm/engine'
+import { paperMmPortfolio } from '../../lib/crypto15m/mm/portfolio'
 import { formatPnlDual } from '../../lib/crypto15m/mm/prices'
 import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
+import type { PortfolioState } from '../../lib/crypto15m/mm/portfolio'
 
 interface Props {
   markets: Crypto15mMarket[]
@@ -20,6 +22,15 @@ interface Props {
 function useEngineState(): MmEngineState {
   const [state, setState] = useState(() => paperMmEngine.getState())
   useEffect(() => paperMmEngine.subscribe(() => setState(paperMmEngine.getState())), [])
+  return state
+}
+
+function usePortfolioState(): PortfolioState {
+  const [state, setState] = useState(() => paperMmPortfolio.getState())
+  useEffect(
+    () => paperMmPortfolio.subscribe(() => setState(paperMmPortfolio.getState())),
+    [],
+  )
   return state
 }
 
@@ -39,12 +50,17 @@ function isUnrealisticallyFastPnl(
 }
 
 export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Props) {
-  const state = useEngineState()
-  const { snapshot: s, fills, cancels } = state
+  const singleState = useEngineState()
+  const portfolioState = usePortfolioState()
   const [draft, setDraft] = useState<PaperMmConfig>(() => ({
     ...DEFAULT_PAPER_MM_CONFIG,
   }))
   const [proxyOk, setProxyOk] = useState(false)
+
+  const multiBook = draft.multiBook
+  const s = singleState.snapshot
+  const fills = singleState.fills
+  const cancels = singleState.cancels
 
   useEffect(() => {
     let alive = true
@@ -65,44 +81,96 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     [markets, selectedTicker],
   )
 
+  // Single-mode market sync
   useEffect(() => {
+    if (multiBook) return
     paperMmEngine.setMarket(selected)
-  }, [selected])
+  }, [selected, multiBook])
 
-  // Auto-roll: when feed updates (close/new 15m), settle+switch and notify parent
   useEffect(() => {
+    if (multiBook) return
     if (markets.length === 0) return
     const ticker = paperMmEngine.syncMarketUniverse(markets)
     if (ticker && ticker !== selectedTicker) {
       onSelect(ticker)
     }
-  }, [markets, selectedTicker, onSelect])
+  }, [markets, selectedTicker, onSelect, multiBook])
 
-  // Keep engine synced when parent refreshes mid
   useEffect(() => {
+    if (multiBook) return
     if (selected) paperMmEngine.onMarketTick(selected)
-  }, [selected, selected?.midYes, selected?.yesBid, selected?.yesAsk])
+  }, [selected, selected?.midYes, selected?.yesBid, selected?.yesAsk, multiBook])
 
-  // Keep draft in sync when engine applies strict/loose presets
+  // Multi-mode universe sync
   useEffect(() => {
-    setDraft({ ...s.config })
-  }, [s.config.strictRealism, s.config.baseFillProb, s.config.midCrossFillProb, s.config.fvQuoting])
+    if (!multiBook) return
+    paperMmPortfolio.syncMarketUniverse(markets)
+  }, [markets, multiBook])
+
+  // Keep draft in sync when engine/portfolio applies presets
+  useEffect(() => {
+    const cfg = multiBook ? portfolioState.config : s.config
+    setDraft({ ...cfg })
+  }, [
+    multiBook,
+    s.config.strictRealism,
+    s.config.baseFillProb,
+    s.config.midCrossFillProb,
+    s.config.fvQuoting,
+    s.config.multiBook,
+    s.config.maxActiveMarkets,
+    portfolioState.config.strictRealism,
+    portfolioState.config.fvQuoting,
+    portfolioState.config.multiBook,
+    portfolioState.config.maxActiveMarkets,
+  ])
 
   const applyConfig = () => {
-    paperMmEngine.setConfig(draft)
+    if (multiBook) paperMmPortfolio.setConfig(draft)
+    else paperMmEngine.setConfig(draft)
   }
+
+  const setMultiBook = (on: boolean) => {
+    setDraft((d) => ({ ...d, multiBook: on }))
+    if (on) {
+      paperMmEngine.stop()
+      paperMmPortfolio.setConfig({ ...draft, multiBook: true })
+      paperMmPortfolio.syncMarketUniverse(markets)
+    } else {
+      paperMmPortfolio.stop()
+      paperMmEngine.setConfig({ ...draft, multiBook: false })
+      if (selected) paperMmEngine.setMarket(selected)
+    }
+  }
+
+  const running = multiBook ? portfolioState.running : s.running
+  const moneyPrinterBug = multiBook
+    ? portfolioState.aggregate.moneyPrinterBug
+    : s.moneyPrinterBug
+  const totalPnl = multiBook
+    ? portfolioState.aggregate.realizedSpreadPnl +
+      portfolioState.aggregate.unrealizedInventoryPnl
+    : s.realizedSpreadPnl + s.unrealizedInventoryPnl
+  const sessionStartedAt = multiBook ? portfolioState.sessionStartedAt : s.sessionStartedAt
+  const cfg = multiBook ? portfolioState.config : s.config
+  const showSoftWarn = isUnrealisticallyFastPnl(
+    totalPnl,
+    sessionStartedAt,
+    cfg.strictRealism,
+    cfg.baseFillProb,
+  )
+  const message = multiBook ? portfolioState.message : s.message
+  const activeTickers = multiBook
+    ? new Set(
+        portfolioState.books
+          .map((b) => b.snapshot.marketTicker)
+          .filter((t): t is string => Boolean(t)),
+      )
+    : new Set(s.marketTicker ? [s.marketTicker] : [])
 
   const guardLive = s.guardMode
     ? `${s.guardMode.toUpperCase()} · until ${new Date(s.guardActiveUntil).toLocaleTimeString()}`
     : 'clear'
-
-  const totalPnl = s.realizedSpreadPnl + s.unrealizedInventoryPnl
-  const showSoftWarn = isUnrealisticallyFastPnl(
-    totalPnl,
-    s.sessionStartedAt,
-    s.config.strictRealism,
-    s.config.baseFillProb,
-  )
 
   return (
     <div className="space-y-4 text-left">
@@ -114,7 +182,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         edge.</strong>
       </div>
 
-      {s.moneyPrinterBug && (
+      <div className="rounded-xl border border-violet-800/40 bg-violet-950/25 px-4 py-3 text-xs text-violet-100/90">
+        <strong>Multi-asset ≠ guaranteed profit.</strong> Quoting several crypto 15m books is more{' '}
+        <em>shots at the same edge game</em> (FV vs mid), not independent lottery wins. Spots and
+        mids are correlated across BTC/ETH/SOL/… — inventory risk stacks. Keep quoteSize /
+        maxInventory small per book.
+      </div>
+
+      {moneyPrinterBug && (
         <div className="rounded-xl border-2 border-rose-500 bg-rose-600 px-4 py-4 text-base font-bold text-white shadow-lg shadow-rose-900/50">
           🛑 MONEY PRINTER BUG — paused
           <p className="mt-1 text-sm font-medium text-rose-100">
@@ -124,14 +199,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
       )}
 
-      {showSoftWarn && !s.moneyPrinterBug && (
+      {showSoftWarn && !moneyPrinterBug && (
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
           ⚠ Sim too friendly / check fill rate — not live edge. Session P&amp;L rose unrealistically
           fast for a harsh paper book (or loose mode is on).
         </div>
       )}
 
-      {s.unitsWarning && (
+      {!multiBook && s.unitsWarning && (
         <div className="rounded-xl border border-rose-500/60 bg-rose-950/50 px-4 py-3 text-sm font-medium text-rose-100">
           ⚠ Units guard: {s.unitsWarning}
         </div>
@@ -144,14 +219,16 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               15m MM (Paper)
             </p>
             <h2 className="text-sm font-semibold text-slate-100">
-              Spread capture sim · spot guard · settlement risk
+              {multiBook
+                ? 'Multi-book · scan all crypto 15m by |FV−mid|'
+                : 'Spread capture sim · spot guard · settlement risk'}
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
               Read-only API · never places trades
             </span>
-            {(s.liveBook || proxyOk) && (
+            {(s.liveBook || proxyOk || portfolioState.books.some((b) => b.snapshot.liveBook)) && (
               <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
                 LIVE BOOK (read-only)
               </span>
@@ -165,53 +242,70 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                s.config.strictRealism
-                  ? 'bg-slate-900 text-sky-300'
-                  : 'bg-amber-950 text-amber-200'
+                multiBook ? 'bg-violet-950 text-violet-200' : 'bg-slate-800 text-slate-300'
               }`}
             >
-              {s.config.strictRealism ? 'STRICT realism' : 'LOOSE debug'}
+              {multiBook
+                ? `MULTI · ${portfolioState.aggregate.activeBooks}/${cfg.maxActiveMarkets}`
+                : 'SINGLE'}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                s.moneyPrinterBug
+                cfg.strictRealism ? 'bg-slate-900 text-sky-300' : 'bg-amber-950 text-amber-200'
+              }`}
+            >
+              {cfg.strictRealism ? 'STRICT realism' : 'LOOSE debug'}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                moneyPrinterBug
                   ? 'bg-rose-600 text-white'
-                  : s.running
+                  : running
                     ? 'bg-violet-950 text-violet-200'
                     : 'bg-slate-800 text-slate-400'
               }`}
             >
-              {s.moneyPrinterBug
-                ? 'MONEY PRINTER BUG'
-                : s.settled
-                  ? 'SETTLED'
-                  : s.running
-                    ? 'RUNNING'
-                    : 'STOPPED'}
+              {moneyPrinterBug ? 'MONEY PRINTER BUG' : running ? 'RUNNING' : 'STOPPED'}
             </span>
           </div>
         </div>
 
-        <p className="mt-2 text-xs text-slate-400">{s.message}</p>
-        <p className="mt-1 font-mono text-[11px] text-violet-300/90">
-          Active:{' '}
-          <strong className="text-violet-200">{s.marketTicker ?? selectedTicker ?? '—'}</strong>
-          {s.marketCloseTime && (
-            <>
-              {' '}
-              · closes {new Date(s.marketCloseTime).toLocaleString()}
-            </>
-          )}
-          {selected && (
-            <>
-              {' '}
-              · {selected.minutesRemaining.toFixed(1)}m left · mid{' '}
-              {(selected.midYes * 100).toFixed(0)}¢
-            </>
-          )}
-        </p>
+        <p className="mt-2 text-xs text-slate-400">{message}</p>
+        {!multiBook && (
+          <p className="mt-1 font-mono text-[11px] text-violet-300/90">
+            Active:{' '}
+            <strong className="text-violet-200">{s.marketTicker ?? selectedTicker ?? '—'}</strong>
+            {s.marketCloseTime && (
+              <>
+                {' '}
+                · closes {new Date(s.marketCloseTime).toLocaleString()}
+              </>
+            )}
+            {selected && (
+              <>
+                {' '}
+                · {selected.minutesRemaining.toFixed(1)}m left · mid{' '}
+                {(selected.midYes * 100).toFixed(0)}¢
+              </>
+            )}
+          </p>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-600"
+              checked={multiBook}
+              disabled={running}
+              onChange={(e) => setMultiBook(e.target.checked)}
+            />
+            <span>
+              <strong>Multi-book</strong> (default ON) — scan all open crypto 15m, quote up to
+              maxActiveMarkets in parallel
+            </span>
+          </label>
+
           <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
             <input
               type="checkbox"
@@ -220,7 +314,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               onChange={(e) => {
                 const strict = e.target.checked
                 setDraft((d) => ({ ...d, strictRealism: strict }))
-                paperMmEngine.setStrictRealism(strict)
+                if (multiBook) paperMmPortfolio.setStrictRealism(strict)
+                else paperMmEngine.setStrictRealism(strict)
               }}
             />
             <span>
@@ -237,7 +332,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               onChange={(e) => {
                 const fvQuoting = e.target.checked
                 setDraft((d) => ({ ...d, fvQuoting }))
-                paperMmEngine.setConfig({ fvQuoting })
+                if (multiBook) paperMmPortfolio.setConfig({ fvQuoting })
+                else paperMmEngine.setConfig({ fvQuoting })
               }}
             />
             <span>
@@ -245,34 +341,54 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               gate (vs mid-centered)
             </span>
           </label>
-        
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-slate-400">
-            Market
-            <select
-              className="input"
-              value={s.marketTicker ?? selectedTicker ?? ''}
-              onChange={(e) => onSelect(e.target.value)}
-              disabled={s.running}
-            >
-              {markets.length === 0 && <option value="">No markets</option>}
-              {markets.map((m) => (
-                <option key={m.ticker} value={m.ticker}>
-                  {m.asset} · {m.ticker} · mid {(m.midYes * 100).toFixed(0)}¢ ·{' '}
-                  {m.minutesRemaining.toFixed(1)}m left
-                </option>
-              ))}
-            </select>
-          </label>
+          {!multiBook && (
+            <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-slate-400">
+              Market
+              <select
+                className="input"
+                value={s.marketTicker ?? selectedTicker ?? ''}
+                onChange={(e) => onSelect(e.target.value)}
+                disabled={s.running}
+              >
+                {markets.length === 0 && <option value="">No markets</option>}
+                {markets.map((m) => (
+                  <option key={m.ticker} value={m.ticker}>
+                    {m.asset} · {m.ticker} · mid {(m.midYes * 100).toFixed(0)}¢ ·{' '}
+                    {m.minutesRemaining.toFixed(1)}m left
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="flex items-end gap-2">
-            {!s.running ? (
-              <button type="button" className="btn btn-primary" onClick={() => paperMmEngine.start()}>
+            {!running ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (multiBook) {
+                    paperMmPortfolio.setConfig(draft)
+                    paperMmPortfolio.syncMarketUniverse(markets)
+                    paperMmPortfolio.start()
+                  } else {
+                    paperMmEngine.start()
+                  }
+                }}
+              >
                 Start paper MM
               </button>
             ) : (
-              <button type="button" className="btn btn-ghost" onClick={() => paperMmEngine.stop()}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  if (multiBook) paperMmPortfolio.stop()
+                  else paperMmEngine.stop()
+                }}
+              >
                 Stop
               </button>
             )}
@@ -281,8 +397,13 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               className="btn btn-ghost"
               onClick={() => {
                 if (confirm('Reset paper session (cash, inventory, logs)?')) {
-                  paperMmEngine.resetSession()
-                  setDraft({ ...paperMmEngine.getConfig() })
+                  if (multiBook) {
+                    paperMmPortfolio.resetSession()
+                    setDraft({ ...paperMmPortfolio.getConfig() })
+                  } else {
+                    paperMmEngine.resetSession()
+                    setDraft({ ...paperMmEngine.getConfig() })
+                  }
                 }
               }}
             >
@@ -292,130 +413,324 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
       </div>
 
-      {/* Dashboard */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Cash" value={formatDollars(s.cash)} />
-        <Stat
-          label="Inventory (YES)"
-          value={`${s.inventory > 0 ? '+' : ''}${s.inventory}`}
-          sub={s.avgEntry != null ? `avg ${formatCents(s.avgEntry)}` : 'flat'}
-        />
-        <Stat
-          label="Unrealized (inv)"
-          value={formatDollars(s.unrealizedInventoryPnl)}
-          tone={s.unrealizedInventoryPnl >= 0 ? 'good' : 'bad'}
-        />
-        <Stat
-          label="Realized (after fees)"
-          value={formatDollars(s.realizedSpreadPnl)}
-          tone={s.realizedSpreadPnl >= 0 ? 'good' : 'bad'}
-        />
-        <Stat
-          label="Fees paid"
-          value={formatDollars(s.feesPaid)}
-          tone={s.feesPaid > 0 ? 'warn' : 'neutral'}
-        />
-        <Stat
-          label="Total P&L"
-          value={formatPnlDual(totalPnl).dollars}
-          sub={formatPnlDual(totalPnl).centsLabel}
-          tone={totalPnl >= 0 ? 'good' : 'bad'}
-        />
-        <Stat
-          label="Spot"
-          value={
-            s.spotPrice != null
-              ? `$${s.spotPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-              : '—'
-          }
-          sub={s.spotSource ?? 'polling…'}
-        />
-        <Stat
-          label="Market mid"
-          value={formatCents(s.midYes)}
-          sub={`$${s.midYes.toFixed(4)}`}
-        />
-
-        <Stat
-          label="Fair value"
-          value={s.fairValue != null ? formatCents(s.fairValue) : '—'}
-          sub={
-            s.fvCenterActive
-              ? 'FV center ON'
-              : s.config.fvQuoting
-                ? 'FV unavailable · mid center'
-                : 'mid center (FV off)'
-          }
-        />
-        <Stat
-          label="Edge vs mid"
-          value={
-            s.edgeVsMidCents != null
-              ? `${s.edgeVsMidCents >= 0 ? '+' : ''}${s.edgeVsMidCents.toFixed(1)}¢`
-              : '—'
-          }
-          tone={
-            s.edgeVsMidCents == null
-              ? 'neutral'
-              : Math.abs(s.edgeVsMidCents) >= s.config.minEdgeCents
-                ? 'good'
-                : 'warn'
-          }
-          sub={
-            s.floorStrike != null
-              ? `strike ${s.floorStrike.toLocaleString()}`
-              : 'no floorStrike'
-          }
-        />
-
-        <Stat
-          label="Book BBO"
-          value={
-            s.bookBestBid != null && s.bookBestAsk != null
-              ? `${formatCents(s.bookBestBid)} / ${formatCents(s.bookBestAsk)}`
-              : '—'
-          }
-          sub={s.liveBook ? 'L2 live' : proxyOk ? 'proxy up · waiting' : 'proxy off'}
-        />
-        <Stat label="Spot guard" value={guardLive} tone={s.guardMode ? 'warn' : 'neutral'} />
-        <Stat
-          label="Mid-cross voids"
-          value={String(s.midCrossRejectCount)}
-          sub={`fill p=${s.config.midCrossFillProb}`}
-        />
-        <Stat
-          label="Base fill p"
-          value={s.config.baseFillProb.toFixed(4)}
-          sub={s.config.applyFees ? 'fees ON' : 'fees OFF'}
-        />
-      </div>
-
-      {/* Live quote */}
-      <div className="panel p-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-          Simulated quotes
-        </p>
-        {s.quote ? (
-          <div className="mt-2 flex flex-wrap items-center gap-4 font-mono text-sm">
-            <span className="text-emerald-300">
-              YES bid {formatCents(s.quote.yesBid)} × {s.quote.size}
-            </span>
-            <span className="text-slate-500">mid {formatCents(s.midYes)}</span>
-            <span className="text-rose-300">
-              YES ask {formatCents(s.quote.yesAsk)} × {s.quote.size}
-            </span>
-            <span className="text-xs text-slate-500">
-              half {s.quote.halfSpreadCents.toFixed(1)}¢ · skew {s.quote.skewCents.toFixed(2)}¢ ·{' '}
-              {s.quote.centerMode === 'fv' ? 'FV center' : 'mid center'} ·{' '}
-              {s.quote.active ? 'ACTIVE' : 'CANCELLED'}
-              {s.quote.bidActive ? '' : ` · ${s.quote.bidReason || 'bid OFF'}`}
-              {s.quote.askActive ? '' : ` · ${s.quote.askReason || 'ask OFF'}`}
-            </span>
+      {/* Multi-book aggregate + scan */}
+      {multiBook && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat
+              label="Active books"
+              value={`${portfolioState.aggregate.activeBooks} / ${cfg.maxActiveMarkets}`}
+              sub="cap = maxActiveMarkets"
+            />
+            <Stat label="Σ Cash" value={formatDollars(portfolioState.aggregate.cash)} />
+            <Stat
+              label="Σ Inventory"
+              value={`${portfolioState.aggregate.inventoryNet > 0 ? '+' : ''}${portfolioState.aggregate.inventoryNet}`}
+            />
+            <Stat
+              label="Σ Unrealized"
+              value={formatDollars(portfolioState.aggregate.unrealizedInventoryPnl)}
+              tone={portfolioState.aggregate.unrealizedInventoryPnl >= 0 ? 'good' : 'bad'}
+            />
+            <Stat
+              label="Σ Realized (after fees)"
+              value={formatDollars(portfolioState.aggregate.realizedSpreadPnl)}
+              tone={portfolioState.aggregate.realizedSpreadPnl >= 0 ? 'good' : 'bad'}
+            />
+            <Stat
+              label="Σ Fees"
+              value={formatDollars(portfolioState.aggregate.feesPaid)}
+              tone={portfolioState.aggregate.feesPaid > 0 ? 'warn' : 'neutral'}
+            />
+            <Stat
+              label="Σ Total P&L"
+              value={formatPnlDual(totalPnl).dollars}
+              sub={formatPnlDual(totalPnl).centsLabel}
+              tone={totalPnl >= 0 ? 'good' : 'bad'}
+            />
+            <Stat
+              label="Σ Fills"
+              value={String(portfolioState.aggregate.fillCount)}
+              sub={`${portfolioState.aggregate.cancelCount} cancels`}
+            />
           </div>
-        ) : (
-          <p className="mt-2 text-xs text-slate-500">No quote — start the paper MM.</p>
-        )}
-      </div>
+
+          <div className="panel p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Open crypto 15m scan · ranked by |FV − mid|
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Quoting Y only when this ticker holds an active multi-book slot and at least one side
+              passes minEdge + toxic guards. Correlated risk across assets.
+            </p>
+            <div className="mt-3 max-h-72 overflow-auto">
+              <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+                <thead className="sticky top-0 bg-slate-950 text-[10px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-2 py-1.5">Asset</th>
+                    <th className="px-2 py-1.5">Ticker</th>
+                    <th className="px-2 py-1.5">FV</th>
+                    <th className="px-2 py-1.5">Mid</th>
+                    <th className="px-2 py-1.5">Edge ¢</th>
+                    <th className="px-2 py-1.5">Spot</th>
+                    <th className="px-2 py-1.5">Quoting</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolioState.scan.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-2 py-3 text-slate-600">
+                        No open markets in feed — wait for refresh or check demo/live source.
+                      </td>
+                    </tr>
+                  )}
+                  {portfolioState.scan.map((row) => {
+                    const book = portfolioState.books.find(
+                      (b) => b.snapshot.marketTicker === row.ticker,
+                    )
+                    const quoting =
+                      Boolean(book?.snapshot.quote?.active) &&
+                      (book?.snapshot.quote?.bidActive || book?.snapshot.quote?.askActive)
+                    const inSlot = activeTickers.has(row.ticker)
+                    return (
+                      <tr
+                        key={row.ticker}
+                        className={`border-t border-slate-800/80 ${
+                          inSlot ? 'bg-violet-950/20' : ''
+                        }`}
+                      >
+                        <td className="px-2 py-1.5 font-semibold text-slate-200">{row.asset}</td>
+                        <td className="px-2 py-1.5 font-mono text-[11px] text-slate-400">
+                          {row.ticker}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-slate-300">
+                          {row.fairValue != null ? formatCents(row.fairValue) : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-slate-300">
+                          {formatCents(row.mid)}
+                        </td>
+                        <td
+                          className={`px-2 py-1.5 font-mono ${
+                            row.edgeCents == null
+                              ? 'text-slate-500'
+                              : Math.abs(row.edgeCents) >= cfg.minEdgeCents
+                                ? 'text-emerald-300'
+                                : 'text-amber-300'
+                          }`}
+                        >
+                          {row.edgeCents != null
+                            ? `${row.edgeCents >= 0 ? '+' : ''}${row.edgeCents.toFixed(1)}`
+                            : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-slate-400">
+                          {row.spot != null
+                            ? `$${row.spot.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                            : '—'}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          {quoting ? (
+                            <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                              Y
+                            </span>
+                          ) : inSlot ? (
+                            <span className="rounded-full bg-amber-950 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                              slot · gated
+                            </span>
+                          ) : (
+                            <span className="text-slate-600">N</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {portfolioState.books.length > 0 && (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {portfolioState.books.map((b) => {
+                const snap = b.snapshot
+                const bookPnl = snap.realizedSpreadPnl + snap.unrealizedInventoryPnl
+                return (
+                  <div key={b.slotId} className="panel p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-mono text-xs font-semibold text-violet-200">
+                        {snap.asset ?? '?'} · {snap.marketTicker ?? '—'}
+                      </p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          snap.quote?.active
+                            ? 'bg-emerald-950 text-emerald-300'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {snap.quote?.active ? 'QUOTING' : snap.settled ? 'SETTLED' : 'IDLE'}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                      <div>
+                        <p className="text-slate-500">Inv</p>
+                        <p className="font-mono text-slate-200">
+                          {snap.inventory > 0 ? '+' : ''}
+                          {snap.inventory}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Edge</p>
+                        <p className="font-mono text-slate-200">
+                          {snap.edgeVsMidCents != null
+                            ? `${snap.edgeVsMidCents >= 0 ? '+' : ''}${snap.edgeVsMidCents.toFixed(1)}¢`
+                            : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">P&amp;L</p>
+                        <p
+                          className={`font-mono ${bookPnl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}
+                        >
+                          {formatDollars(bookPnl)}
+                        </p>
+                      </div>
+                    </div>
+                    {snap.quote && (
+                      <p className="mt-2 font-mono text-[11px] text-slate-400">
+                        bid {formatCents(snap.quote.yesBid)}
+                        {snap.quote.bidActive ? '' : ' OFF'} / ask{' '}
+                        {formatCents(snap.quote.yesAsk)}
+                        {snap.quote.askActive ? '' : ' OFF'} · {snap.quote.centerMode}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Single-mode dashboard */}
+      {!multiBook && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Cash" value={formatDollars(s.cash)} />
+            <Stat
+              label="Inventory (YES)"
+              value={`${s.inventory > 0 ? '+' : ''}${s.inventory}`}
+              sub={s.avgEntry != null ? `avg ${formatCents(s.avgEntry)}` : 'flat'}
+            />
+            <Stat
+              label="Unrealized (inv)"
+              value={formatDollars(s.unrealizedInventoryPnl)}
+              tone={s.unrealizedInventoryPnl >= 0 ? 'good' : 'bad'}
+            />
+            <Stat
+              label="Realized (after fees)"
+              value={formatDollars(s.realizedSpreadPnl)}
+              tone={s.realizedSpreadPnl >= 0 ? 'good' : 'bad'}
+            />
+            <Stat
+              label="Fees paid"
+              value={formatDollars(s.feesPaid)}
+              tone={s.feesPaid > 0 ? 'warn' : 'neutral'}
+            />
+            <Stat
+              label="Total P&L"
+              value={formatPnlDual(totalPnl).dollars}
+              sub={formatPnlDual(totalPnl).centsLabel}
+              tone={totalPnl >= 0 ? 'good' : 'bad'}
+            />
+            <Stat
+              label="Spot"
+              value={
+                s.spotPrice != null
+                  ? `$${s.spotPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                  : '—'
+              }
+              sub={s.spotSource ?? 'polling…'}
+            />
+            <Stat label="Market mid" value={formatCents(s.midYes)} sub={`$${s.midYes.toFixed(4)}`} />
+            <Stat
+              label="Fair value"
+              value={s.fairValue != null ? formatCents(s.fairValue) : '—'}
+              sub={
+                s.fvCenterActive
+                  ? 'FV center ON'
+                  : s.config.fvQuoting
+                    ? 'FV unavailable · mid center'
+                    : 'mid center (FV off)'
+              }
+            />
+            <Stat
+              label="Edge vs mid"
+              value={
+                s.edgeVsMidCents != null
+                  ? `${s.edgeVsMidCents >= 0 ? '+' : ''}${s.edgeVsMidCents.toFixed(1)}¢`
+                  : '—'
+              }
+              tone={
+                s.edgeVsMidCents == null
+                  ? 'neutral'
+                  : Math.abs(s.edgeVsMidCents) >= s.config.minEdgeCents
+                    ? 'good'
+                    : 'warn'
+              }
+              sub={
+                s.floorStrike != null
+                  ? `strike ${s.floorStrike.toLocaleString()}`
+                  : 'no floorStrike'
+              }
+            />
+            <Stat
+              label="Book BBO"
+              value={
+                s.bookBestBid != null && s.bookBestAsk != null
+                  ? `${formatCents(s.bookBestBid)} / ${formatCents(s.bookBestAsk)}`
+                  : '—'
+              }
+              sub={s.liveBook ? 'L2 live' : proxyOk ? 'proxy up · waiting' : 'proxy off'}
+            />
+            <Stat label="Spot guard" value={guardLive} tone={s.guardMode ? 'warn' : 'neutral'} />
+            <Stat
+              label="Mid-cross voids"
+              value={String(s.midCrossRejectCount)}
+              sub={`fill p=${s.config.midCrossFillProb}`}
+            />
+            <Stat
+              label="Base fill p"
+              value={s.config.baseFillProb.toFixed(4)}
+              sub={s.config.applyFees ? 'fees ON' : 'fees OFF'}
+            />
+          </div>
+
+          <div className="panel p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Simulated quotes
+            </p>
+            {s.quote ? (
+              <div className="mt-2 flex flex-wrap items-center gap-4 font-mono text-sm">
+                <span className="text-emerald-300">
+                  YES bid {formatCents(s.quote.yesBid)} × {s.quote.size}
+                </span>
+                <span className="text-slate-500">mid {formatCents(s.midYes)}</span>
+                <span className="text-rose-300">
+                  YES ask {formatCents(s.quote.yesAsk)} × {s.quote.size}
+                </span>
+                <span className="text-xs text-slate-500">
+                  half {s.quote.halfSpreadCents.toFixed(1)}¢ · skew {s.quote.skewCents.toFixed(2)}¢ ·{' '}
+                  {s.quote.centerMode === 'fv' ? 'FV center' : 'mid center'} ·{' '}
+                  {s.quote.active ? 'ACTIVE' : 'CANCELLED'}
+                  {s.quote.bidActive ? '' : ` · ${s.quote.bidReason || 'bid OFF'}`}
+                  {s.quote.askActive ? '' : ` · ${s.quote.askReason || 'ask OFF'}`}
+                </span>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">No quote — start the paper MM.</p>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Config knobs */}
       <div className="panel p-4">
@@ -428,6 +743,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           </button>
         </div>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Knob
+            label="Max active markets (multi)"
+            value={draft.maxActiveMarkets}
+            step={1}
+            min={1}
+            max={12}
+            onChange={(v) => setDraft((d) => ({ ...d, maxActiveMarkets: v }))}
+          />
           <Knob
             label="Half-spread (¢)"
             value={draft.halfSpreadCents}
@@ -492,7 +815,6 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             max={2}
             onChange={(v) => setDraft((d) => ({ ...d, inventorySkewCentsPerUnit: v }))}
           />
-
           <Knob
             label="Min edge vs mid (¢)"
             value={draft.minEdgeCents}
@@ -509,7 +831,6 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             max={3}
             onChange={(v) => setDraft((d) => ({ ...d, annualVol: v }))}
           />
-
           <Knob
             label="Toxicity bias"
             value={draft.toxicityBias}
@@ -555,39 +876,60 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
           Run <code className="text-slate-400">npm run dev:real</code> for LIVE BOOK (read-only
-          proxy). Fills require L2 depth consumption or mid-walk through your price — not random
-          4% spam. Maker fee $0 on resting 15m; crossing → taker fee ceil(0.07·C·P·(1−P)). Prices
-          are dollars 0–1 (Total P&amp;L shows $ and ¢). Spot guard still uses Binance/Coinbase
-          public. Settlement marks inventory to 0/1 on close.
+          proxy). Multi-book ranks every open crypto 15m by |FV−mid| and quotes up to{' '}
+          <code className="text-slate-400">maxActiveMarkets</code> (default 5) with small size /
+          inventory per book. Same-asset auto-roll; dead books free the slot. Maker fee $0 on
+          resting 15m. Prices are dollars 0–1.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <LogPanel
-          title="Fills log"
-          empty="No fills yet."
-          rows={fills.map((f) => ({
-            id: f.id,
-            tone: f.reason === 'settlement' ? 'warn' : f.toxic ? 'bad' : 'neutral',
-            primary: `${f.side === 'buy_yes' ? 'BUY YES' : 'SELL YES'} ${f.size} @ ${
-              f.price === 0 || f.price === 1 ? (f.price === 1 ? '1.00' : '0.00') : formatCents(f.price)
-            }`,
-            secondary: `${f.reason}${f.taker ? ' · TAKER' : ' · maker'}${f.toxic ? ' · TOXIC' : ''} · fee ${formatDollars(f.feeDollars)} · mid ${formatCents(f.midAtFill)} ($${f.midAtFill.toFixed(4)}) · ${new Date(f.t).toLocaleTimeString()}`,
-          }))}
-        />
-        <LogPanel
-          title="Spot-guard cancels"
-          empty="No guard events yet."
-          rows={cancels.map((c) => ({
-            id: c.id,
-            tone: c.action === 'cancel' ? 'bad' : 'warn',
-            primary: `${c.action.toUpperCase()} · spot $${c.spotPrice.toFixed(2)}`,
-            secondary: `${c.reason} · ${new Date(c.t).toLocaleTimeString()}`,
-          }))}
-        />
-      </div>
+      {!multiBook && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <LogPanel
+            title="Fills log"
+            empty="No fills yet."
+            rows={fills.map((f) => ({
+              id: f.id,
+              tone: f.reason === 'settlement' ? 'warn' : f.toxic ? 'bad' : 'neutral',
+              primary: `${f.side === 'buy_yes' ? 'BUY YES' : 'SELL YES'} ${f.size} @ ${
+                f.price === 0 || f.price === 1
+                  ? f.price === 1
+                    ? '1.00'
+                    : '0.00'
+                  : formatCents(f.price)
+              }`,
+              secondary: `${f.reason}${f.taker ? ' · TAKER' : ' · maker'}${f.toxic ? ' · TOXIC' : ''} · fee ${formatDollars(f.feeDollars)} · mid ${formatCents(f.midAtFill)} ($${f.midAtFill.toFixed(4)}) · ${new Date(f.t).toLocaleTimeString()}`,
+            }))}
+          />
+          <LogPanel
+            title="Spot-guard cancels"
+            empty="No guard events yet."
+            rows={cancels.map((c) => ({
+              id: c.id,
+              tone: c.action === 'cancel' ? 'bad' : 'warn',
+              primary: `${c.action.toUpperCase()} · spot $${c.spotPrice.toFixed(2)}`,
+              secondary: `${c.reason} · ${new Date(c.t).toLocaleTimeString()}`,
+            }))}
+          />
+        </div>
+      )}
 
-      {s.lastTickAt && (
+      {multiBook && portfolioState.books.some((b) => b.fills.length > 0) && (
+        <LogPanel
+          title="Multi-book fills (recent per book)"
+          empty="No fills yet."
+          rows={portfolioState.books.flatMap((b) =>
+            b.fills.slice(0, 8).map((f) => ({
+              id: `${b.slotId}-${f.id}`,
+              tone: f.reason === 'settlement' ? 'warn' : f.toxic ? 'bad' : 'neutral',
+              primary: `${b.snapshot.asset ?? '?'} · ${f.side === 'buy_yes' ? 'BUY' : 'SELL'} ${f.size} @ ${formatCents(f.price)}`,
+              secondary: `${b.snapshot.marketTicker} · ${f.reason} · ${new Date(f.t).toLocaleTimeString()}`,
+            })),
+          )}
+        />
+      )}
+
+      {!multiBook && s.lastTickAt && (
         <p className="text-[11px] text-slate-600">
           Last engine tick {formatRelativeTime(new Date(s.lastTickAt).toISOString())}
         </p>

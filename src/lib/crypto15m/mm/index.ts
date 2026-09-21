@@ -35,3 +35,18 @@ export {
   type FairValueInput,
   type FairValueEstimate,
 } from './fairValue'
+
+export {
+  scoreMarketEdge,
+  rankMarketsByAbsEdge,
+  pickActiveMarkets,
+  type RankedMarket,
+  type PickActiveOptions,
+} from './edgeRank'
+export {
+  PaperMmPortfolio,
+  paperMmPortfolio,
+  type PortfolioState,
+  type PortfolioBookView,
+  type PortfolioAggregate,
+} from './portfolio'

@@ -1,0 +1,432 @@
+/**
+ * Multi-book / portfolio paper MM controller.
+ * Spawns up to maxActiveMarkets PaperMmEngine instances, ranks by |FV−mid|,
+ * auto-rolls same-asset, frees slots when a book dies with no same-asset roll.
+ * PAPER ONLY — never places live Kalshi orders.
+ */
+
+import type { Crypto15mMarket } from '../../../types/crypto15m'
+import { fetchPublicSpot, normalizeSpotAsset } from '../spot'
+import {
+  DEFAULT_PAPER_MM_CONFIG,
+  clampConfig,
+  presetsForMode,
+  type PaperMmConfig,
+} from './config'
+import { PaperMmEngine } from './engine'
+import {
+  pickActiveMarkets,
+  rankMarketsByAbsEdge,
+  type RankedMarket,
+} from './edgeRank'
+import { isMarketOpen, pickBestOpenMarket, pickRollTarget } from './marketSelect'
+import type { MmCancelEvent, MmEngineState, MmFill, MmSnapshot } from './types'
+
+export interface PortfolioBookView {
+  slotId: string
+  snapshot: MmSnapshot
+  fills: MmFill[]
+  cancels: MmCancelEvent[]
+}
+
+export interface PortfolioAggregate {
+  cash: number
+  realizedSpreadPnl: number
+  unrealizedInventoryPnl: number
+  feesPaid: number
+  fillCount: number
+  cancelCount: number
+  inventoryNet: number
+  activeBooks: number
+  moneyPrinterBug: boolean
+}
+
+export interface PortfolioState {
+  running: boolean
+  config: PaperMmConfig
+  books: PortfolioBookView[]
+  /** Full open-universe scan ranked by |edge|. */
+  scan: RankedMarket[]
+  aggregate: PortfolioAggregate
+  message: string
+  spotsByAsset: Record<string, number>
+  sessionStartedAt: number | null
+}
+
+let slotSeq = 0
+function nextSlotId(): string {
+  slotSeq += 1
+  return `slot-${slotSeq}`
+}
+
+export class PaperMmPortfolio {
+  private config: PaperMmConfig = { ...DEFAULT_PAPER_MM_CONFIG }
+  private running = false
+  private books = new Map<string, PaperMmEngine>()
+  private slotOfTicker = new Map<string, string>()
+  private listeners = new Set<() => void>()
+  private spotsByAsset: Record<string, number> = {}
+  private lastScan: RankedMarket[] = []
+  private message =
+    'Idle — multi-book paper MM scans all open crypto 15m by |FV−mid| edge. Read-only · never places trades.'
+  private sessionStartedAt: number | null = null
+  private spotTimer: number | null = null
+  private syncTimer: number | null = null
+  private lastMarkets: Crypto15mMarket[] = []
+  private unsubs: Array<() => void> = []
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn)
+    return () => this.listeners.delete(fn)
+  }
+
+  private emit(): void {
+    for (const fn of this.listeners) fn()
+  }
+
+  getConfig(): PaperMmConfig {
+    return { ...this.config }
+  }
+
+  setConfig(partial: Partial<PaperMmConfig>): void {
+    if (partial.strictRealism !== undefined && partial.strictRealism !== this.config.strictRealism) {
+      partial = { ...presetsForMode(partial.strictRealism), ...partial }
+    }
+    this.config = clampConfig({ ...this.config, ...partial })
+    for (const eng of this.books.values()) {
+      eng.setConfig(this.config)
+    }
+    // Cap may shrink — drop lowest-edge extras
+    if (this.lastMarkets.length > 0) {
+      this.rebalanceSlots(this.lastMarkets)
+    }
+    if (this.running) this.armTimers()
+    this.emit()
+  }
+
+  setStrictRealism(strict: boolean): void {
+    this.setConfig({ strictRealism: strict })
+  }
+
+  /** Test helper: seed spot for an asset without network. */
+  seedSpot(asset: string, price: number): void {
+    if (!Number.isFinite(price) || price <= 0) return
+    const key = normalizeSpotAsset(asset)
+    this.spotsByAsset = { ...this.spotsByAsset, [key]: price }
+    for (const eng of this.books.values()) {
+      const snap = eng.getState().snapshot
+      if (snap.asset && normalizeSpotAsset(snap.asset) === key) {
+        eng.seedSpot(price)
+      }
+    }
+    if (this.lastMarkets.length > 0) {
+      this.refreshScan(this.lastMarkets)
+      if (this.running) this.rebalanceSlots(this.lastMarkets)
+    }
+    this.emit()
+  }
+
+  getState(): PortfolioState {
+    const books: PortfolioBookView[] = []
+    for (const [slotId, eng] of this.books) {
+      const st = eng.getState()
+      books.push({
+        slotId,
+        snapshot: st.snapshot,
+        fills: st.fills,
+        cancels: st.cancels,
+      })
+    }
+    // Stable order: by abs edge of scan, then ticker
+    const edgeOf = (t: string | null) =>
+      this.lastScan.find((r) => r.ticker === t)?.absEdgeCents ?? -1
+    books.sort(
+      (a, b) =>
+        edgeOf(b.snapshot.marketTicker) - edgeOf(a.snapshot.marketTicker) ||
+        (a.snapshot.marketTicker ?? '').localeCompare(b.snapshot.marketTicker ?? ''),
+    )
+
+    let cash = 0
+    let realized = 0
+    let unrealized = 0
+    let fees = 0
+    let fills = 0
+    let cancels = 0
+    let inv = 0
+    let moneyPrinter = false
+    for (const b of books) {
+      cash += b.snapshot.cash
+      realized += b.snapshot.realizedSpreadPnl
+      unrealized += b.snapshot.unrealizedInventoryPnl
+      fees += b.snapshot.feesPaid
+      fills += b.snapshot.fillCount
+      cancels += b.snapshot.cancelCount
+      inv += b.snapshot.inventory
+      if (b.snapshot.moneyPrinterBug) moneyPrinter = true
+    }
+
+    return {
+      running: this.running,
+      config: { ...this.config },
+      books,
+      scan: [...this.lastScan],
+      aggregate: {
+        cash,
+        realizedSpreadPnl: realized,
+        unrealizedInventoryPnl: unrealized,
+        feesPaid: fees,
+        fillCount: fills,
+        cancelCount: cancels,
+        inventoryNet: inv,
+        activeBooks: books.length,
+        moneyPrinterBug: moneyPrinter,
+      },
+      message: this.message,
+      spotsByAsset: { ...this.spotsByAsset },
+      sessionStartedAt: this.sessionStartedAt,
+    }
+  }
+
+  /**
+   * Feed update: roll same-asset, free dead slots, fill from ranked edge list.
+   */
+  syncMarketUniverse(markets: Crypto15mMarket[]): void {
+    this.lastMarkets = markets
+    this.refreshScan(markets)
+
+    // 1) Roll or free each active book
+    const toRemove: string[] = []
+    for (const [slotId, eng] of this.books) {
+      const snap = eng.getState().snapshot
+      const currentTicker = snap.marketTicker
+      const current =
+        (currentTicker && markets.find((m) => m.ticker === currentTicker)) || null
+
+      if (!current) {
+        // Ticker vanished — try same-asset successor only; else free slot
+        const asset = snap.asset
+        const target = asset ? pickBestOpenMarket(markets, asset) : null
+        if (target) {
+          this.rollBook(slotId, eng, target)
+        } else {
+          toRemove.push(slotId)
+        }
+        continue
+      }
+
+      const target = pickRollTarget(markets, current)
+      if (target && target.ticker !== current.ticker) {
+        if (target.asset.toUpperCase() === current.asset.toUpperCase()) {
+          this.rollBook(slotId, eng, target)
+        } else if (!isMarketOpen(current)) {
+          // Dead with only cross-asset option → free slot for next-best edge
+          toRemove.push(slotId)
+        } else {
+          eng.onMarketTick(current)
+        }
+      } else if (!isMarketOpen(current)) {
+        toRemove.push(slotId)
+      } else {
+        eng.onMarketTick(current)
+      }
+    }
+
+    for (const slotId of toRemove) {
+      this.removeBook(slotId, 'Book died with no same-asset roll — slot freed for next-best edge.')
+    }
+
+    // 2) Fill free slots from ranked list
+    this.rebalanceSlots(markets)
+    this.emit()
+  }
+
+  private rollBook(slotId: string, eng: PaperMmEngine, target: Crypto15mMarket): void {
+    const prev = eng.getState().snapshot.marketTicker
+    if (prev) this.slotOfTicker.delete(prev)
+    eng.rollToMarket(target)
+    this.slotOfTicker.set(target.ticker, slotId)
+    const spot = this.spotsByAsset[normalizeSpotAsset(target.asset)]
+    if (spot != null) eng.seedSpot(spot)
+    this.message =
+      `Rolled ${prev ?? '?'} → ${target.ticker} (same asset). Read-only · never places trades.`
+  }
+
+  private removeBook(slotId: string, reason: string): void {
+    const eng = this.books.get(slotId)
+    if (!eng) return
+    const t = eng.getState().snapshot.marketTicker
+    eng.stop()
+    this.unsubEngine(eng)
+    this.books.delete(slotId)
+    if (t) this.slotOfTicker.delete(t)
+    this.message = reason
+  }
+
+  private rebalanceSlots(markets: Crypto15mMarket[]): void {
+    this.refreshScan(markets)
+    const sticky = [...this.slotOfTicker.keys()]
+    const desired = pickActiveMarkets(this.lastScan, {
+      maxActive: this.config.maxActiveMarkets,
+      stickyTickers: sticky,
+      onePerAsset: true,
+      requireEdge: this.config.fvQuoting,
+    })
+
+    const desiredTickers = new Set(desired.map((m) => m.ticker))
+
+    // Drop books not in desired (e.g. cap shrunk) — keep sticky if still desired
+    for (const [slotId, eng] of [...this.books.entries()]) {
+      const t = eng.getState().snapshot.marketTicker
+      if (t && !desiredTickers.has(t)) {
+        // Only drop if over cap or not sticky-open; if sticky was kept in desired, fine
+        this.removeBook(slotId, `Slot released (${t}) — outside top-${this.config.maxActiveMarkets} edge set.`)
+      }
+    }
+
+    // Add missing
+    for (const m of desired) {
+      if (this.slotOfTicker.has(m.ticker)) continue
+      if (this.books.size >= this.config.maxActiveMarkets) break
+      this.addBook(m)
+    }
+  }
+
+  private addBook(market: Crypto15mMarket): void {
+    if (this.slotOfTicker.has(market.ticker)) return
+    if (this.books.size >= this.config.maxActiveMarkets) return
+
+    const slotId = nextSlotId()
+    const eng = new PaperMmEngine()
+    eng.setConfig(this.config)
+    eng.setMarket(market)
+    const spot = this.spotsByAsset[normalizeSpotAsset(market.asset)]
+    if (spot != null) eng.seedSpot(spot)
+
+    const unsub = eng.subscribe(() => this.emit())
+    this.unsubs.push(unsub)
+    ;(eng as unknown as { __portfolioUnsub?: () => void }).__portfolioUnsub = unsub
+
+    this.books.set(slotId, eng)
+    this.slotOfTicker.set(market.ticker, slotId)
+
+    if (this.running) eng.start()
+    this.message =
+      `Quoting ${market.ticker} (${market.asset}) — multi-book slot ${this.books.size}/` +
+      `${this.config.maxActiveMarkets}. Read-only · never places trades.`
+  }
+
+  private unsubEngine(eng: PaperMmEngine): void {
+    const u = (eng as unknown as { __portfolioUnsub?: () => void }).__portfolioUnsub
+    if (u) {
+      u()
+      delete (eng as unknown as { __portfolioUnsub?: () => void }).__portfolioUnsub
+    }
+  }
+
+  private refreshScan(markets: Crypto15mMarket[]): void {
+    this.lastScan = rankMarketsByAbsEdge(
+      markets,
+      this.spotsByAsset,
+      this.config.annualVol,
+      this.config.minEdgeCents,
+    )
+  }
+
+  start(): void {
+    this.running = true
+    this.sessionStartedAt = Date.now()
+    this.message =
+      'Multi-book paper MM running. Scans all open crypto 15m by |FV−mid|; ' +
+      `quotes up to ${this.config.maxActiveMarkets} in parallel. ` +
+      'More markets = more shots at the same edge game — not independent lottery wins. ' +
+      'Read-only · never places trades.'
+    if (this.lastMarkets.length > 0) {
+      this.rebalanceSlots(this.lastMarkets)
+    }
+    for (const eng of this.books.values()) {
+      if (!eng.getState().snapshot.running) eng.start()
+    }
+    this.armTimers()
+    void this.pollAllSpots()
+    this.emit()
+  }
+
+  stop(): void {
+    this.running = false
+    this.clearTimers()
+    for (const eng of this.books.values()) eng.stop()
+    this.message = 'Multi-book stopped. Quotes cancelled (paper). Read-only · never places trades.'
+    this.emit()
+  }
+
+  resetSession(): void {
+    this.stop()
+    for (const slotId of [...this.books.keys()]) {
+      this.removeBook(slotId, 'reset')
+    }
+    this.books.clear()
+    this.slotOfTicker.clear()
+    this.sessionStartedAt = null
+    this.message =
+      'Multi-book session reset. Paper books cleared. Read-only · never places trades.'
+    if (this.lastMarkets.length > 0) {
+      this.refreshScan(this.lastMarkets)
+    }
+    this.emit()
+  }
+
+  private armTimers(): void {
+    this.clearTimers()
+    this.spotTimer = window.setInterval(() => {
+      void this.pollAllSpots()
+    }, this.config.spotPollMs)
+    this.syncTimer = window.setInterval(() => {
+      if (this.lastMarkets.length > 0) {
+        this.syncMarketUniverse(this.lastMarkets)
+      }
+    }, Math.max(2000, this.config.quoteRefreshMs))
+  }
+
+  private clearTimers(): void {
+    if (this.spotTimer != null) {
+      window.clearInterval(this.spotTimer)
+      this.spotTimer = null
+    }
+    if (this.syncTimer != null) {
+      window.clearInterval(this.syncTimer)
+      this.syncTimer = null
+    }
+  }
+
+  private async pollAllSpots(): Promise<void> {
+    const assets = new Set<string>()
+    for (const m of this.lastMarkets) {
+      if (isMarketOpen(m)) assets.add(normalizeSpotAsset(m.asset))
+    }
+    for (const a of assets) {
+      try {
+        const tick = await fetchPublicSpot(a)
+        this.spotsByAsset[normalizeSpotAsset(a)] = tick.price
+        for (const eng of this.books.values()) {
+          const snap = eng.getState().snapshot
+          if (snap.asset && normalizeSpotAsset(snap.asset) === normalizeSpotAsset(a)) {
+            eng.seedSpot(tick.price)
+          }
+        }
+      } catch {
+        /* keep last spot */
+      }
+    }
+    if (this.lastMarkets.length > 0) {
+      this.refreshScan(this.lastMarkets)
+      if (this.running) this.rebalanceSlots(this.lastMarkets)
+    }
+    this.emit()
+  }
+}
+
+/** Singleton multi-book controller for the lab panel. */
+export const paperMmPortfolio = new PaperMmPortfolio()
+
+/** Convenience: single-engine state shape adapter unused — UI talks to portfolio directly. */
+export type { MmEngineState }

@@ -84,6 +84,16 @@ Credentials (server-side only): `KALSHI_KEY_ID` + `KALSHI_PRIVATE_KEY` env, or b
 | **FV quoting** | Default **ON** — center on spot/strike fair value, not raw mid |
 | Min edge (¢) | Side ON only if |FV − mid| ≥ this (else that side parked) |
 | Annual vol | Research prior σ for Φ(ln(S/K)/(σ√T)) FV model |
+| **Multi-book** | Default **ON** — scan all open crypto 15m; quote up to N in parallel |
+| Max active markets | Cap concurrent books (default **5**, range 1–12) |
+
+**Multi-book / portfolio (paper):**
+- Ranks every open crypto 15m by **|FV − mid|** (asset-specific spot via `fetchPublicSpot`)
+- Activates up to `maxActiveMarkets` books (one per asset); each book is a full `PaperMmEngine` with its own inventory/cash
+- Same-asset auto-roll via `pickRollTarget`; if a book dies with no same-asset successor, the slot is freed for the next-best edge market
+- UI: scan table (asset/ticker/FV/mid/edge¢/quoting Y/N) + aggregate P&L + per-book cards
+- Toggle off for classic single-ticker mode
+- **More markets = more shots at the same edge game — not independent lottery wins / not guaranteed profit.** Spots and mids are correlated.
 
 **Fills (~99% realism target):**
 - Poll real L2; post simulated bid/ask at configurable distance from mid
