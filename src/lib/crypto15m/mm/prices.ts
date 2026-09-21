@@ -54,3 +54,14 @@ export function formatPnlDual(dollars: number): { dollars: string; centsLabel: s
   const centsLabel = `${cents >= 0 ? '+' : ''}${cents.toFixed(1)}¢`
   return { dollars: dollarsStr, centsLabel }
 }
+
+/**
+ * True when mid is usable for FV−mid edge / quoting.
+ * Rejects null/NaN, exact 0 or 1 (empty/missing book sentinels), and non-finite.
+ * Window-boundary books often parse as mid=0 → absurd EDGE vs FV≈0.99.
+ */
+export function isValidQuoteMid(mid: number | null | undefined): boolean {
+  if (mid == null || !Number.isFinite(mid)) return false
+  const m = asDollarPrice(mid, 'valid.mid')
+  return m > 0 && m < 1
+}

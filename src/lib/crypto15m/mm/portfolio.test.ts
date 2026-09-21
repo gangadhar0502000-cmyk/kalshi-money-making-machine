@@ -65,7 +65,8 @@ describe('PaperMmPortfolio', () => {
       setInterval: () => 1,
       clearInterval: () => undefined,
     })
-    portfolio = new PaperMmPortfolio()
+    portfolio = new PaperMmPortfolio({ skipRestore: true })
+    portfolio.setPersistEnabled(false)
     portfolio.setConfig({
       maxActiveMarkets: 3,
       multiBook: true,

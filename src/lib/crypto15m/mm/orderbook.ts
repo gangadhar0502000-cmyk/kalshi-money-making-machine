@@ -29,7 +29,8 @@ type RawLevel = [string | number, string | number]
 function parseLevel(pair: RawLevel): BookLevel | null {
   const price = asDollarPrice(Number.parseFloat(String(pair[0])), 'book.price')
   const size = Number.parseFloat(String(pair[1]))
-  if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) return null
+  // Reject empty-book sentinels at 0 / non-positive size (window-boundary junk).
+  if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0 || price <= 0) return null
   return { price, size }
 }
 
@@ -72,15 +73,25 @@ export function parseOrderbookFp(
 
   if (yesBids.length === 0 && yesAsks.length === 0) return null
 
-  const bestBid = yesBids[0]?.price ?? 0.01
-  const bestAsk = yesAsks[0]?.price ?? 0.99
-  let mid = (bestBid + bestAsk) / 2
-  if (!(bestBid > 0 && bestAsk > 0)) {
-    mid = bestBid > 0 ? bestBid : bestAsk > 0 ? bestAsk : 0.5
+  const hasBid = yesBids.length > 0
+  const hasAsk = yesAsks.length > 0
+  const bestBid = hasBid ? yesBids[0]!.price : 0
+  const bestAsk = hasAsk ? yesAsks[0]!.price : 0
+  let mid: number
+  if (hasBid && hasAsk) {
+    mid = (bestBid + bestAsk) / 2
+  } else if (hasBid) {
+    mid = bestBid
+  } else if (hasAsk) {
+    mid = bestAsk
+  } else {
+    return null
   }
   mid = asDollarPrice(mid, 'book.mid')
+  // One-sided / empty mid=0 is not a real quote mid — keep snapshot but mid stays 0
+  // so callers (isValidQuoteMid) can gate edge/quoting.
 
-  return { ticker, t, yesBids, yesAsks, bestBid, bestAsk, mid, authenticated }
+  return { ticker, t, yesBids, yesAsks, bestBid: hasBid ? bestBid : 0, bestAsk: hasAsk ? bestAsk : 0, mid, authenticated }
 }
 
 function depthBidAtOrAbove(book: OrderBookSnapshot, price: number): number {

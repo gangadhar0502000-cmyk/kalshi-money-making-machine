@@ -7,7 +7,7 @@ export {
   type PaperMmConfig,
 } from './config'
 export { PaperMmEngine, paperMmEngine } from './engine'
-export { asDollarPrice, formatPnlDual, clampPx, roundPx } from './prices'
+export { asDollarPrice, formatPnlDual, clampPx, roundPx, isValidQuoteMid } from './prices'
 export { fetchLiveOrderbook, fetchLocalHealth, fetchLocalCrypto15m } from './liveBook'
 export { parseOrderbookFp, detectBookFills } from './orderbook'
 export type {
@@ -50,3 +50,16 @@ export {
   type PortfolioBookView,
   type PortfolioAggregate,
 } from './portfolio'
+
+export {
+  PAPER_MM_SESSION_KEY,
+  serializePaperMmSession,
+  deserializePaperMmSession,
+  loadPaperMmSession,
+  savePaperMmSession,
+  clearPaperMmSession,
+  sessionLedgerSigma,
+  emptySessionLedger,
+  type PersistedPaperMmSession,
+  type SessionLedgerPersisted,
+} from './persist'

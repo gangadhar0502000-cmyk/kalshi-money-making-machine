@@ -4,7 +4,7 @@
  */
 
 import type { Crypto15mMarket } from '../../../types/crypto15m'
-import { asDollarPrice } from './prices'
+import { asDollarPrice, isValidQuoteMid } from './prices'
 import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
 import { isMarketOpen } from './marketSelect'
 import { normalizeSpotAsset } from '../spot'
@@ -47,7 +47,9 @@ export function scoreMarketEdge(
   toxicMidLow = 0.05,
   toxicMidHigh = 0.95,
 ): RankedMarket {
-  const mid = asDollarPrice(market.midYes, 'rank.mid')
+  const midRaw = market.midYes
+  const midOk = isValidQuoteMid(midRaw)
+  const mid = midOk ? asDollarPrice(midRaw, 'rank.mid') : 0
   const asset = normalizeSpotAsset(market.asset)
   const spotOk = spot != null && Number.isFinite(spot) && spot > 0 ? spot : null
 
@@ -73,16 +75,21 @@ export function scoreMarketEdge(
     })
     if (est) {
       fairValue = est.fairProb
-      edgeCents = edgeVsMidCents(est.fairProb, mid)
+      // Never publish wild EDGE from mid=0/null vs FV≈0.99 (empty book / window boundary).
+      if (midOk) {
+        edgeCents = edgeVsMidCents(est.fairProb, mid)
+      }
     } else {
       fvMissingReason = 'estimate_failed'
     }
   }
 
   const absEdgeCents = edgeCents != null ? Math.abs(edgeCents) : 0
-  const quoteEligible = edgeCents != null && absEdgeCents >= minEdgeCents
+  const midTradeable = midOk && mid > toxicMidLow && mid < toxicMidHigh
+  const quoteEligible =
+    midTradeable && edgeCents != null && absEdgeCents >= minEdgeCents
   const midFallbackEligible =
-    fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
+    midOk && fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
 
   return {
     market,
@@ -178,8 +185,8 @@ export function pickActiveMarkets(
     if (onePerAsset && usedAssets.has(r.asset)) return false
     if (mode === 'edge' && requireEdge && !r.quoteEligible) return false
     if (mode === 'mid_fallback' && !r.midFallbackEligible && !r.quoteEligible) {
-      // Still allow any open ranked market as last resort fill
-      if (!Number.isFinite(r.mid)) return false
+      // Still allow any open ranked market as last resort fill (but not mid=0 junk)
+      if (!Number.isFinite(r.mid) || r.mid <= 0 || r.mid >= 1) return false
     }
     chosen.push(r.market)
     usedTickers.add(r.ticker)

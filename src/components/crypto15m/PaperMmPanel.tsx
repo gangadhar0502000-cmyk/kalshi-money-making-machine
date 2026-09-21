@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Crypto15mMarket } from '../../types/crypto15m'
 import { formatCents, formatDollars, formatRelativeTime } from '../../lib/format'
-import {
-  DEFAULT_PAPER_MM_CONFIG,
-  type PaperMmConfig,
-} from '../../lib/crypto15m/mm/config'
+import { type PaperMmConfig } from '../../lib/crypto15m/mm/config'
 import { paperMmEngine } from '../../lib/crypto15m/mm/engine'
 import { paperMmPortfolio } from '../../lib/crypto15m/mm/portfolio'
-import { formatPnlDual } from '../../lib/crypto15m/mm/prices'
+import { formatPnlDual, isValidQuoteMid } from '../../lib/crypto15m/mm/prices'
 import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
 import type { PortfolioState } from '../../lib/crypto15m/mm/portfolio'
@@ -53,7 +50,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   const singleState = useEngineState()
   const portfolioState = usePortfolioState()
   const [draft, setDraft] = useState<PaperMmConfig>(() => ({
-    ...DEFAULT_PAPER_MM_CONFIG,
+    ...paperMmPortfolio.getConfig(),
   }))
   const [proxyOk, setProxyOk] = useState(false)
 
@@ -101,11 +98,19 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     if (selected) paperMmEngine.onMarketTick(selected)
   }, [selected, selected?.midYes, selected?.yesBid, selected?.yesAsk, multiBook])
 
-  // Multi-mode universe sync
+  // Multi-mode universe sync — rolls must never stop; restore auto-resumes if wasRunning
   useEffect(() => {
     if (!multiBook) return
     paperMmPortfolio.syncMarketUniverse(markets)
+    paperMmPortfolio.tryAutoResumeAfterSync()
   }, [markets, multiBook])
+
+  // On mount: if persistence restored wasRunning before markets arrived, resume once synced
+  useEffect(() => {
+    if (!multiBook) return
+    if (markets.length === 0) return
+    paperMmPortfolio.tryAutoResumeAfterSync()
+  }, [multiBook, markets.length])
 
   // Keep draft in sync when engine/portfolio applies presets
   useEffect(() => {
@@ -550,7 +555,13 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                           )}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-slate-300">
-                          {formatCents(row.mid)}
+                          {isValidQuoteMid(row.mid) ? (
+                            formatCents(row.mid)
+                          ) : (
+                            <span className="text-slate-500" title="Empty/invalid mid — no edge quoting">
+                              —
+                            </span>
+                          )}
                         </td>
                         <td
                           className={`px-2 py-1.5 font-mono ${
@@ -563,11 +574,13 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                         >
                           {row.edgeCents != null
                             ? `${row.edgeCents >= 0 ? '+' : ''}${row.edgeCents.toFixed(1)}`
-                            : row.fvMissingReason === 'no_spot'
-                              ? 'no spot'
-                              : row.fvMissingReason === 'no_strike'
-                                ? 'no strike'
-                                : '—'}
+                            : !isValidQuoteMid(row.mid)
+                              ? 'bad mid'
+                              : row.fvMissingReason === 'no_spot'
+                                ? 'no spot'
+                                : row.fvMissingReason === 'no_strike'
+                                  ? 'no strike'
+                                  : '—'}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-slate-400">
                           {row.spot != null

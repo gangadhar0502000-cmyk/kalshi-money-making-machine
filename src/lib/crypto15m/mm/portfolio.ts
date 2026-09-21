@@ -21,6 +21,15 @@ import {
 } from './edgeRank'
 import { isMarketOpen, pickBestOpenMarket, pickRollTarget } from './marketSelect'
 import type { MmCancelEvent, MmEngineState, MmFill, MmSnapshot } from './types'
+import {
+  clearPaperMmSession,
+  deserializePaperMmSession,
+  loadPaperMmSession,
+  savePaperMmSession,
+  serializePaperMmSession,
+  type PersistedPaperMmSession,
+  type SessionLedgerPersisted,
+} from './persist'
 
 export interface PortfolioBookView {
   slotId: string
@@ -57,14 +66,7 @@ export interface PortfolioState {
 }
 
 /** Banked stats from released books — preserved across rolls/releases. */
-interface SessionLedger {
-  realizedSpreadPnl: number
-  feesPaid: number
-  fillCount: number
-  cancelCount: number
-  fills: MmFill[]
-  cancels: MmCancelEvent[]
-}
+type SessionLedger = SessionLedgerPersisted
 
 function emptyLedger(): SessionLedger {
   return {
@@ -100,6 +102,92 @@ export class PaperMmPortfolio {
   private unsubs: Array<() => void> = []
   /** Realized / fees / fills banked when books are released (session totals). */
   private sessionLedger: SessionLedger = emptyLedger()
+  /** Set when localStorage said we were RUNNING — auto-start after first universe sync. */
+  private pendingAutoResume = false
+  private persistEnabled = true
+
+  constructor(opts?: { skipRestore?: boolean }) {
+    if (!opts?.skipRestore) {
+      this.restoreFromStorage()
+    }
+  }
+
+  /** Test helper: disable localStorage writes. */
+  setPersistEnabled(on: boolean): void {
+    this.persistEnabled = on
+  }
+
+  /** Whether a prior session asked to keep RUNNING across reload. */
+  wantsAutoResume(): boolean {
+    return this.pendingAutoResume
+  }
+
+  /** Snapshot for serialize/restore tests (session ledger Σ). */
+  getSessionLedger(): SessionLedger {
+    return {
+      realizedSpreadPnl: this.sessionLedger.realizedSpreadPnl,
+      feesPaid: this.sessionLedger.feesPaid,
+      fillCount: this.sessionLedger.fillCount,
+      cancelCount: this.sessionLedger.cancelCount,
+      fills: [...this.sessionLedger.fills],
+      cancels: [...this.sessionLedger.cancels],
+    }
+  }
+
+  /** Pure serialize of current session (does not require localStorage). */
+  serializeSession(): PersistedPaperMmSession {
+    const activeTickers = [...this.slotOfTicker.keys()]
+    return serializePaperMmSession({
+      running: this.running,
+      config: this.config,
+      sessionLedger: this.getSessionLedger(),
+      sessionStartedAt: this.sessionStartedAt,
+      activeTickers,
+    })
+  }
+
+  /** Apply a previously serialized session (ledger + knobs + wasRunning). Does not start engines. */
+  applySerializedSession(raw: PersistedPaperMmSession | unknown): boolean {
+    const parsed =
+      raw && typeof raw === 'object' && (raw as PersistedPaperMmSession).v === 1
+        ? deserializePaperMmSession(raw)
+        : deserializePaperMmSession(raw)
+    if (!parsed) return false
+    this.config = clampConfig(parsed.config)
+    this.sessionLedger = {
+      realizedSpreadPnl: parsed.sessionLedger.realizedSpreadPnl,
+      feesPaid: parsed.sessionLedger.feesPaid,
+      fillCount: parsed.sessionLedger.fillCount,
+      cancelCount: parsed.sessionLedger.cancelCount,
+      fills: [...parsed.sessionLedger.fills],
+      cancels: [...parsed.sessionLedger.cancels],
+    }
+    this.sessionStartedAt = parsed.sessionStartedAt
+    this.pendingAutoResume = parsed.running
+    // Do NOT set this.running yet — start({ resume: true }) after universe sync.
+    this.running = false
+    this.message =
+      parsed.running
+        ? 'Restored paper MM session — will auto-resume after market sync. Read-only · never places trades.'
+        : 'Restored paper MM session (stopped). Read-only · never places trades.'
+    this.emit()
+    return true
+  }
+
+  private restoreFromStorage(): void {
+    const loaded = loadPaperMmSession()
+    if (!loaded) return
+    this.applySerializedSession(loaded)
+  }
+
+  private persistNow(): void {
+    if (!this.persistEnabled) return
+    try {
+      savePaperMmSession(this.serializeSession())
+    } catch {
+      /* ignore */
+    }
+  }
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
@@ -107,6 +195,7 @@ export class PaperMmPortfolio {
   }
 
   private emit(): void {
+    this.persistNow()
     for (const fn of this.listeners) fn()
   }
 
@@ -286,6 +375,11 @@ export class PaperMmPortfolio {
             ? `Feed empty/stale — holding ${this.books.size} slot(s) until open crypto 15m refresh. Read-only · never places trades.`
             : `No ranked open edges yet — holding ${this.books.size} slot(s). Read-only · never places trades.`
       }
+      // Still auto-resume if we restored wasRunning (even on empty feed — hold idle running).
+      if (this.pendingAutoResume && !this.running) {
+        this.start({ resume: true })
+        return
+      }
       this.emit()
       return
     }
@@ -374,6 +468,12 @@ export class PaperMmPortfolio {
         `Multi-book under-filled (${after}/${this.config.maxActiveMarkets}) — ` +
         `retrying fill from ${openRanked.length} open ranked. Read-only · never places trades.`
       this.rebalanceSlots(markets)
+    }
+
+    // Auto-resume after reload: never leave STOPPED just because windows flipped / page remounted.
+    if (this.pendingAutoResume && !this.running) {
+      this.start({ resume: true })
+      return
     }
 
     this.emit()
@@ -521,9 +621,16 @@ export class PaperMmPortfolio {
     )
   }
 
-  start(): void {
+  /**
+   * Start paper MM. Pass `{ resume: true }` after localStorage restore so
+   * sessionStartedAt / ledger are preserved (refresh must not look like a wipe).
+   */
+  start(opts?: { resume?: boolean }): void {
     this.running = true
-    this.sessionStartedAt = Date.now()
+    this.pendingAutoResume = false
+    if (!opts?.resume || this.sessionStartedAt == null) {
+      this.sessionStartedAt = Date.now()
+    }
     this.message =
       'Multi-book paper MM running. Scans all open crypto 15m by |FV−mid|; ' +
       `quotes up to ${this.config.maxActiveMarkets} in parallel. ` +
@@ -540,8 +647,19 @@ export class PaperMmPortfolio {
     this.emit()
   }
 
+  /**
+   * If localStorage said wasRunning, start after universe sync without wiping ledger.
+   * Safe to call repeatedly — no-ops when not pending or already running.
+   */
+  tryAutoResumeAfterSync(): boolean {
+    if (!this.pendingAutoResume || this.running) return false
+    this.start({ resume: true })
+    return true
+  }
+
   stop(): void {
     this.running = false
+    this.pendingAutoResume = false
     this.clearTimers()
     for (const eng of this.books.values()) eng.stop()
     this.message = 'Multi-book stopped. Quotes cancelled (paper). Read-only · never places trades.'
@@ -563,12 +681,15 @@ export class PaperMmPortfolio {
     this.slotOfTicker.clear()
     this.sessionLedger = emptyLedger()
     this.sessionStartedAt = null
+    this.pendingAutoResume = false
     this.message =
       'Multi-book session reset. Paper books cleared. Read-only · never places trades.'
     if (this.lastMarkets.length > 0) {
       this.refreshScan(this.lastMarkets)
     }
     this.emit()
+    // Clear after emit so persistNow cannot re-write an empty shell.
+    clearPaperMmSession()
   }
 
   private armTimers(): void {

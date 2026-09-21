@@ -234,7 +234,9 @@ export function Crypto15mLab() {
         </div>
       )}
 
-      {tab === 'lab' && (
+      {/* Keep all lab tabs mounted — CSS-hide inactive so Paper MM portfolio
+          survives tab switches (unmount must never stop / wipe session). */}
+      <div className={tab === 'lab' ? '' : 'hidden'} aria-hidden={tab !== 'lab'}>
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
             <CryptoMarketFeed
@@ -257,18 +259,20 @@ export function Crypto15mLab() {
           </div>
           <LiveContextPanel market={selected} />
         </div>
-      )}
+      </div>
 
-      {tab === 'backtest' && <BacktestPanel />}
+      <div className={tab === 'backtest' ? '' : 'hidden'} aria-hidden={tab !== 'backtest'}>
+        <BacktestPanel />
+      </div>
 
-      {tab === 'mm' && (
+      <div className={tab === 'mm' ? '' : 'hidden'} aria-hidden={tab !== 'mm'}>
         <PaperMmPanel
           markets={markets}
           selectedTicker={selectedTicker}
           onSelect={setSelectedTicker}
           source={source ?? 'demo'}
         />
-      )}
+      </div>
     </div>
   )
 }

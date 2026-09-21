@@ -25,7 +25,7 @@ import {
   type OrderBookSnapshot,
 } from './orderbook'
 import { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
-import { asDollarPrice, clampPx } from './prices'
+import { asDollarPrice, clampPx, isValidQuoteMid } from './prices'
 import { pickRollTarget } from './marketSelect'
 import { allowAskAtMid, allowBidAtMid, isToxicExtremeMid } from './toxicity'
 import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
@@ -777,13 +777,20 @@ export class PaperMmEngine {
       })
       if (est) {
         fair = est.fairProb
-        edgeCents = edgeVsMidCents(est.fairProb, mid)
+        if (isValidQuoteMid(mid)) {
+          edgeCents = edgeVsMidCents(est.fairProb, mid)
+        }
       }
     }
     this.lastFairValue = fair
+    // Null wild edge when mid is empty-book / invalid (mid=0 vs FV=0.99).
+    if (!isValidQuoteMid(mid)) {
+      edgeCents = null
+    }
     this.lastEdgeVsMidCents = edgeCents
 
-    const useFv = this.config.fvQuoting && fair != null
+    const midValid = isValidQuoteMid(mid)
+    const useFv = this.config.fvQuoting && fair != null && midValid
     this.lastFvCenterActive = useFv
     const center = useFv ? fair! : mid
 
@@ -839,6 +846,11 @@ export class PaperMmEngine {
       activeAsk = false
       bidReason = this.settled ? 'settled' : 'not running'
       askReason = bidReason
+    } else if (!midValid) {
+      activeBid = false
+      activeAsk = false
+      bidReason = 'bid off: invalid mid'
+      askReason = 'ask off: invalid mid'
     } else {
       if (atMaxLong) {
         activeBid = false
