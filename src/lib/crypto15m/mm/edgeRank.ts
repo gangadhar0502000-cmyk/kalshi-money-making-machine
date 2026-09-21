@@ -7,7 +7,7 @@ import type { Crypto15mMarket } from '../../../types/crypto15m'
 import { asDollarPrice, isValidQuoteMid } from './prices'
 import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
 import { isMarketOpen } from './marketSelect'
-import { normalizeSpotAsset } from '../spot'
+import { canonicalMmAsset, normalizeSpotAsset } from '../spot'
 
 /**
  * Multi-book universe: real KXBTC15M/KXETH15M/… up-down with a usable floorStrike.
@@ -68,7 +68,9 @@ export function scoreMarketEdge(
   const midRaw = market.midYes
   const midOk = isValidQuoteMid(midRaw)
   const mid = midOk ? asDollarPrice(midRaw, 'rank.mid') : 0
-  const asset = normalizeSpotAsset(market.asset)
+  // True series asset for display / one-per-asset — never collapsed to BTC.
+  const asset = canonicalMmAsset(market.asset)
+  // Spot must be for THIS asset; callers pass null when unsupported / missing.
   const spotOk = spot != null && Number.isFinite(spot) && spot > 0 ? spot : null
 
   const resolved = resolveStrike(market.floorStrike, spotOk, {
@@ -141,8 +143,13 @@ export function rankMarketsByAbsEdge(
     (m) => isMarketOpen(m, nowMs) && isMmQuoteUniverseMarket(m),
   )
   const scored = open.map((m) => {
-    const key = normalizeSpotAsset(m.asset)
-    const spot = spotsByAsset[key] ?? spotsByAsset[m.asset.toUpperCase()]
+    const spotKey = normalizeSpotAsset(m.asset)
+    const canon = canonicalMmAsset(m.asset)
+    // Only use a spot keyed to the true asset — never fall back to BTC for ZEC/etc.
+    const spot =
+      spotKey != null
+        ? (spotsByAsset[spotKey] ?? spotsByAsset[canon])
+        : spotsByAsset[canon]
     return scoreMarketEdge(m, spot, annualVol, minEdgeCents)
   })
   scored.sort((a, b) => {

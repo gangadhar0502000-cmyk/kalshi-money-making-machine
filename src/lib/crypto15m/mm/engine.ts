@@ -50,11 +50,16 @@ function nextId(prefix: string): string {
   return `${prefix}-${Date.now()}-${idSeq}`
 }
 
+/**
+ * Official YES settlement price.
+ * Fail closed: without an explicit result, mark to mid (no invented binary 0/1).
+ * Inventing YES=1 from mid≥0.5 was a soft P&L path.
+ */
 function settlementYesPrice(market: Crypto15mMarket): number {
   const result = (market.raw?.result ?? '').toLowerCase()
   if (result === 'yes') return 1
   if (result === 'no') return 0
-  return asDollarPrice(market.midYes, 'settle.inferMid') >= 0.5 ? 1 : 0
+  return asDollarPrice(market.midYes, 'settle.markMid')
 }
 
 function marketLooksSettled(market: Crypto15mMarket): boolean {
@@ -441,7 +446,14 @@ export class PaperMmEngine {
       this.rebuildQuote(false)
       this.emit()
     } catch (e) {
-      this.message = `Spot poll failed: ${e instanceof Error ? e.message : String(e)}`
+      const msg = e instanceof Error ? e.message : String(e)
+      // Unsupported assets fail closed — clear any stale BTC/demo tick so FV cannot lie.
+      if (/unsupported spot asset/i.test(msg)) {
+        this.lastSpot = null
+        this.message = `No spot for ${this.market.asset} — FV parked (not BTC).`
+      } else {
+        this.message = `Spot poll failed: ${msg}`
+      }
       this.emit()
     }
   }
@@ -708,9 +720,17 @@ export class PaperMmEngine {
       })
       if (this.fills.length > 500) this.fills.splice(0, this.fills.length - 500)
 
+      const official =
+        (market.raw?.result ?? '').toLowerCase() === 'yes' ||
+        (market.raw?.result ?? '').toLowerCase() === 'no'
       this.message =
-        `SETTLEMENT: inventory ${inv > 0 ? '+' : ''}${inv} marked to ${settlePx === 1 ? 'YES=1' : 'YES=0'} ` +
-        `(P&L ${pnlPer * size >= 0 ? '+' : ''}${(pnlPer * size).toFixed(2)}). Spread gains can wipe.` +
+        `SETTLEMENT: inventory ${inv > 0 ? '+' : ''}${inv} marked to ` +
+        (official
+          ? settlePx === 1
+            ? 'YES=1'
+            : 'YES=0'
+          : `mid $${settlePx.toFixed(4)} (no official result — fail-closed)`) +
+        ` (P&L ${pnlPer * size >= 0 ? '+' : ''}${(pnlPer * size).toFixed(2)}). Spread gains can wipe.` +
         (awaitRoll ? ' Waiting to auto-roll…' : '')
     } else {
       this.message =
@@ -1106,10 +1126,6 @@ export class PaperMmEngine {
   }
 
   /**
-   * If |Δ Total P&L| > $1 in under 2s, freeze quoting — money-printer fill bug.
-   */
-  
-  /**
    * Settle open inventory (e.g. before portfolio release). Idempotent.
    */
   settleNow(): void {
@@ -1146,7 +1162,7 @@ export class PaperMmEngine {
    */
   seedSpot(price: number): void {
     if (!Number.isFinite(price) || price <= 0) return
-    const asset = this.market?.asset ?? 'BTC'
+    const asset = this.market?.asset ?? 'UNKNOWN'
     this.lastSpot = { asset, price, source: 'demo', t: Date.now() }
     this.spotHist.push(price, Date.now())
     this.rebuildQuote(true)
@@ -1164,7 +1180,10 @@ export class PaperMmEngine {
     this.emit()
   }
 
-private checkMoneyPrinterBug(): void {
+  /**
+   * If |Δ Total P&L| > $1 in under 2s, freeze quoting — money-printer fill bug.
+   */
+  private checkMoneyPrinterBug(): void {
     if (this.moneyPrinterBug) return
     const mid = this.midDollars()
     const total = this.realizedSpreadPnl + this.unrealizedDollars(mid)

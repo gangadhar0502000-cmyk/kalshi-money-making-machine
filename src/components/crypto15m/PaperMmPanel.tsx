@@ -189,8 +189,16 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         <strong>Read-only API · never places trades.</strong> Near-real paper MM polls Kalshi L2
         via a local proxy (secrets stay server-side). On 15m, bots cancel faster — this teaches
         whether <em>YOUR</em> params survive. Fills require book depth / mid-walk (not random
-        spam). Maker fee $0 on resting 15m; taker fee if you cross. <strong>Paper MM green ≠ live edge.</strong> Paper research only; positive P&amp;L not
+        spam). Maker fee $0 on resting 15m; taker fee if you cross.{' '}
+        <strong>Paper MM green ≠ live edge.</strong> Paper research only; positive P&amp;L not
         guaranteed. Demo market fixtures removed — online live feeds only.
+      </div>
+
+      <div className="rounded-xl border border-sky-800/40 bg-sky-950/30 px-4 py-3 text-xs text-sky-100/90">
+        <strong>Wrong-spot bug fixed.</strong> Unknown assets no longer default to BTC spot (~$86k).
+        Scan shows the real series asset (ZEC / HYPE / NEAR / …) and that asset&apos;s spot — or{' '}
+        <em>no spot</em> / — if unsupported. Fake BTC FV edges on altcoins are gone. Still:{' '}
+        <strong>paper green ≠ live edge</strong>.
       </div>
 
       <div className="rounded-xl border border-violet-800/40 bg-violet-950/25 px-4 py-3 text-xs text-violet-100/90">

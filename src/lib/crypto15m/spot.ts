@@ -1,9 +1,23 @@
 /**
  * Free public spot prices (Binance / Coinbase) — no API keys.
  * Used by the paper MM spot guard. Proxied via Vite to avoid CORS.
+ *
+ * CRITICAL: never default unknown assets to BTC. Unsupported → null / throw.
  */
 
-export type SpotAsset = 'BTC' | 'ETH' | 'SOL' | 'DOGE' | 'ADA' | 'BNB' | 'XRP' | 'BCH'
+export type SpotAsset =
+  | 'BTC'
+  | 'ETH'
+  | 'SOL'
+  | 'DOGE'
+  | 'ADA'
+  | 'BNB'
+  | 'XRP'
+  | 'BCH'
+  | 'ZEC'
+  | 'NEAR'
+  | 'TON'
+  | 'HYPE'
 
 export interface SpotTick {
   asset: string
@@ -21,6 +35,10 @@ const BINANCE_SYMBOL: Record<string, string> = {
   BNB: 'BNBUSDT',
   XRP: 'XRPUSDT',
   BCH: 'BCHUSDT',
+  ZEC: 'ZECUSDT',
+  NEAR: 'NEARUSDT',
+  TON: 'TONUSDT',
+  HYPE: 'HYPEUSDT',
 }
 
 const COINBASE_PRODUCT: Record<string, string> = {
@@ -29,22 +47,51 @@ const COINBASE_PRODUCT: Record<string, string> = {
   SOL: 'SOL-USD',
   DOGE: 'DOGE-USD',
   ADA: 'ADA-USD',
-  // BNB / BCH / XRP may 404 on Coinbase — Binance is primary
+  // BNB may 404 on Coinbase — Binance is primary
   XRP: 'XRP-USD',
   BCH: 'BCH-USD',
+  ZEC: 'ZEC-USD',
+  NEAR: 'NEAR-USD',
+  TON: 'TON-USD',
+  HYPE: 'HYPE-USD',
 }
 
-/** Map lab asset codes (from series) onto spotable symbols. */
-export function normalizeSpotAsset(asset: string): string {
-  const a = asset.toUpperCase()
-  if (a === 'BITCOIN') return 'BTC'
-  if (a === 'ETHEREUM') return 'ETH'
-  if (a === 'SOLANA') return 'SOL'
-  if (a === 'DOGECOIN') return 'DOGE'
-  if (a === 'CARDANO') return 'ADA'
-  if (a === 'RIPPLE') return 'XRP'
-  if (BINANCE_SYMBOL[a]) return a
-  return 'BTC'
+/** Name aliases only — never invent a different coin. */
+const ASSET_ALIASES: Record<string, string> = {
+  BITCOIN: 'BTC',
+  ETHEREUM: 'ETH',
+  SOLANA: 'SOL',
+  DOGECOIN: 'DOGE',
+  CARDANO: 'ADA',
+  RIPPLE: 'XRP',
+  ZCASH: 'ZEC',
+  'BITCOIN CASH': 'BCH',
+  BITCOINCASH: 'BCH',
+}
+
+/**
+ * Canonical MM asset code for display / one-per-asset keys.
+ * Applies name aliases only — does NOT collapse unknowns to BTC.
+ */
+export function canonicalMmAsset(asset: string): string {
+  const raw = asset.trim().toUpperCase()
+  if (!raw) return 'UNKNOWN'
+  return ASSET_ALIASES[raw] ?? raw
+}
+
+/** True when we have a Binance and/or Coinbase symbol for this asset. */
+export function isSpotSupported(asset: string): boolean {
+  return normalizeSpotAsset(asset) != null
+}
+
+/**
+ * Map lab asset codes onto spotable symbols.
+ * Returns null for unsupported / unknown — NEVER defaults to BTC.
+ */
+export function normalizeSpotAsset(asset: string): string | null {
+  const a = canonicalMmAsset(asset)
+  if (BINANCE_SYMBOL[a] || COINBASE_PRODUCT[a]) return a
+  return null
 }
 
 export const DEMO_SPOT_BASE: Record<string, number> = {
@@ -56,11 +103,18 @@ export const DEMO_SPOT_BASE: Record<string, number> = {
   BNB: 620,
   XRP: 0.6,
   BCH: 480,
+  ZEC: 40,
+  NEAR: 5,
+  TON: 5,
+  HYPE: 25,
 }
 
 /** Deterministic-ish demo walk so offline mode still exercises the guard. */
 function demoSpot(asset: string): SpotTick {
-  const base = DEMO_SPOT_BASE[asset] ?? 100
+  const base = DEMO_SPOT_BASE[asset]
+  if (base == null || !(base > 0)) {
+    throw new Error(`no demo spot for unsupported asset: ${asset}`)
+  }
   const t = Date.now()
   // ~0.05% wobble + occasional larger jumps so guard can fire in demo
   const wobble = Math.sin(t / 4000) * 0.0004 + Math.sin(t / 17000) * 0.0008
@@ -94,13 +148,17 @@ async function fetchCoinbase(asset: string, signal?: AbortSignal): Promise<SpotT
 }
 
 /**
- * Poll free public spot. Prefers Binance, falls back to Coinbase, then demo walk.
+ * Poll free public spot. Prefers Binance, falls back to Coinbase, then demo walk
+ * for *supported* assets only. Unknown assets fail closed (throw) — never BTC.
  */
 export async function fetchPublicSpot(
   assetRaw: string,
   signal?: AbortSignal,
 ): Promise<SpotTick> {
   const asset = normalizeSpotAsset(assetRaw)
+  if (!asset) {
+    throw new Error(`unsupported spot asset: ${assetRaw}`)
+  }
   try {
     const b = await fetchBinance(asset, signal)
     if (b) return b

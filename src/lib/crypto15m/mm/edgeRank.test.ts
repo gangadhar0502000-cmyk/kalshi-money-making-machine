@@ -189,4 +189,82 @@ describe('edgeRank', () => {
     const picked = pickActiveMarkets(ranked, { maxActive: 5 })
     expect(picked.map((m) => m.ticker)).toEqual(['KXBTC15M-OK'])
   })
+
+  it('ZEC without ZEC spot → no FV from BTC spot; no_spot / not quoteEligible', () => {
+    const zec = mk({
+      ticker: 'KXZEC15M-1',
+      asset: 'ZEC',
+      seriesTicker: 'KXZEC15M',
+      midYes: 0.5,
+      floorStrike: 40,
+      minutesRemaining: 5,
+    })
+    // Only BTC spot present — must NOT invent FV from $102k vs ZEC strike 40
+    const scored = scoreMarketEdge(zec, null, 0.7, 2)
+    expect(scored.asset).toBe('ZEC')
+    expect(scored.fairValue).toBeNull()
+    expect(scored.fvMissingReason).toBe('no_spot')
+    expect(scored.quoteEligible).toBe(false)
+    expect(scored.absEdgeCents).toBe(0)
+
+    const ranked = rankMarketsByAbsEdge(
+      [zec],
+      { BTC: 102_000 }, // deliberate contamination attempt
+      0.7,
+      2,
+      now,
+    )
+    expect(ranked).toHaveLength(1)
+    expect(ranked[0]!.asset).toBe('ZEC')
+    expect(ranked[0]!.spot).toBeNull()
+    expect(ranked[0]!.fairValue).toBeNull()
+    expect(ranked[0]!.fvMissingReason).toBe('no_spot')
+  })
+
+  it('BTC and ZEC do not collapse to same one-per-asset key', () => {
+    const btc = mk({
+      ticker: 'KXBTC15M-1',
+      asset: 'BTC',
+      midYes: 0.45,
+      floorStrike: 100_000,
+      minutesRemaining: 2,
+    })
+    const zec = mk({
+      ticker: 'KXZEC15M-1',
+      asset: 'ZEC',
+      midYes: 0.45,
+      floorStrike: 40,
+      minutesRemaining: 2,
+    })
+    const ranked = rankMarketsByAbsEdge(
+      [btc, zec],
+      { BTC: 102_000, ZEC: 42 },
+      0.7,
+      2,
+      now,
+    )
+    expect(ranked.map((r) => r.asset).sort()).toEqual(['BTC', 'ZEC'])
+    const picked = pickActiveMarkets(ranked, { maxActive: 2, onePerAsset: true })
+    expect(picked).toHaveLength(2)
+    expect(new Set(picked.map((m) => m.asset)).size).toBe(2)
+  })
+
+  it('ZEC with its own spot scores FV against ZEC strike, not BTC', () => {
+    const zec = mk({
+      ticker: 'KXZEC15M-OK',
+      asset: 'ZEC',
+      midYes: 0.5,
+      floorStrike: 40,
+      minutesRemaining: 5,
+    })
+    const scored = scoreMarketEdge(zec, 42, 0.7, 2)
+    expect(scored.asset).toBe('ZEC')
+    expect(scored.spot).toBe(42)
+    expect(scored.fairValue).not.toBeNull()
+    // Deep ITM vs strike 40 at spot 42 → FV well above 0.5, but not the absurd
+    // ~0.99 you get from comparing $102k BTC spot to a $40 ZEC strike.
+    expect(scored.fairValue!).toBeGreaterThan(0.5)
+    expect(scored.fairValue!).toBeLessThan(0.999)
+  })
+
 })

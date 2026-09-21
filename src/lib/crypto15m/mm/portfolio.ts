@@ -6,7 +6,12 @@
  */
 
 import type { Crypto15mMarket } from '../../../types/crypto15m'
-import { DEMO_SPOT_BASE, fetchPublicSpot, normalizeSpotAsset } from '../spot'
+import {
+  DEMO_SPOT_BASE,
+  canonicalMmAsset,
+  fetchPublicSpot,
+  normalizeSpotAsset,
+} from '../spot'
 import {
   DEFAULT_PAPER_MM_CONFIG,
   clampConfig,
@@ -227,6 +232,7 @@ export class PaperMmPortfolio {
   seedSpot(asset: string, price: number): void {
     if (!Number.isFinite(price) || price <= 0) return
     const key = normalizeSpotAsset(asset)
+    if (!key) return // refuse seeding unsupported → never store under BTC
     this.spotsByAsset = { ...this.spotsByAsset, [key]: price }
     for (const eng of this.books.values()) {
       const snap = eng.getState().snapshot
@@ -273,6 +279,7 @@ export class PaperMmPortfolio {
   private ensureProvisionalSpots(markets: Crypto15mMarket[]): void {
     for (const m of markets) {
       const key = normalizeSpotAsset(m.asset)
+      if (!key) continue // unsupported: leave no spot (scan shows no_spot)
       if (this.spotsByAsset[key] != null) continue
       const base = DEMO_SPOT_BASE[key]
       if (base != null && base > 0) {
@@ -406,7 +413,7 @@ export class PaperMmPortfolio {
 
       const target = pickRollTarget(markets, current)
       if (target && target.ticker !== current.ticker) {
-        if (target.asset.toUpperCase() === current.asset.toUpperCase()) {
+        if (canonicalMmAsset(target.asset) === canonicalMmAsset(current.asset)) {
           this.rollBook(slotId, eng, target)
         } else if (!isMarketOpen(current) && hasValidRanked) {
           // Dead with only cross-asset option → free slot for next-best edge
@@ -431,11 +438,14 @@ export class PaperMmPortfolio {
     const openRanked = this.lastScan
     const assignedAssets = new Set(
       [...this.books.values()]
-        .map((e) => e.getState().snapshot.asset?.toUpperCase())
+        .map((e) => {
+          const a = e.getState().snapshot.asset
+          return a ? canonicalMmAsset(a) : undefined
+        })
         .filter((a): a is string => Boolean(a)),
     )
     const hasUnassignedOpen = openRanked.some(
-      (r) => !assignedAssets.has(r.asset.toUpperCase()) && !this.slotOfTicker.has(r.ticker),
+      (r) => !assignedAssets.has(canonicalMmAsset(r.asset)) && !this.slotOfTicker.has(r.ticker),
     )
 
     for (const slotId of toRemove) {
@@ -484,7 +494,8 @@ export class PaperMmPortfolio {
     if (prev) this.slotOfTicker.delete(prev)
     eng.rollToMarket(target)
     this.slotOfTicker.set(target.ticker, slotId)
-    const spot = this.spotsByAsset[normalizeSpotAsset(target.asset)]
+    const spotKey = normalizeSpotAsset(target.asset)
+    const spot = spotKey != null ? this.spotsByAsset[spotKey] : undefined
     if (spot != null) eng.seedSpot(spot)
     this.message =
       `Rolled ${prev ?? '?'} → ${target.ticker} (same asset). Read-only · never places trades.`
@@ -588,7 +599,8 @@ export class PaperMmPortfolio {
     eng.setConfig(this.config)
     eng.setMarket(market)
     // New book: cash/inventory start fresh; session ledger keeps historical realized/fills
-    const spot = this.spotsByAsset[normalizeSpotAsset(market.asset)]
+    const spotKey = normalizeSpotAsset(market.asset)
+    const spot = spotKey != null ? this.spotsByAsset[spotKey] : undefined
     if (spot != null) eng.seedSpot(spot)
 
     const unsub = eng.subscribe(() => this.emit())
@@ -718,20 +730,22 @@ export class PaperMmPortfolio {
   private async pollAllSpots(): Promise<void> {
     const assets = new Set<string>()
     for (const m of this.lastMarkets) {
-      if (isMarketOpen(m)) assets.add(normalizeSpotAsset(m.asset))
+      if (!isMarketOpen(m)) continue
+      const key = normalizeSpotAsset(m.asset)
+      if (key) assets.add(key)
     }
     for (const a of assets) {
       try {
         const tick = await fetchPublicSpot(a)
-        this.spotsByAsset[normalizeSpotAsset(a)] = tick.price
+        this.spotsByAsset[a] = tick.price
         for (const eng of this.books.values()) {
           const snap = eng.getState().snapshot
-          if (snap.asset && normalizeSpotAsset(snap.asset) === normalizeSpotAsset(a)) {
+          if (snap.asset && normalizeSpotAsset(snap.asset) === a) {
             eng.seedSpot(tick.price)
           }
         }
       } catch {
-        /* keep last spot */
+        /* keep last spot — never invent BTC for foreign assets */
       }
     }
     if (this.lastMarkets.length > 0) {
