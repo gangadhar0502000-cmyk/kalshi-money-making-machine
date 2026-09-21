@@ -76,17 +76,27 @@ Credentials (server-side only): `KALSHI_KEY_ID` + `KALSHI_PRIVATE_KEY` env, or b
 
 | Knob | Role |
 | --- | --- |
-| Half-spread (¢) | Distance from mid for bid & ask |
-| Size / max inventory | Quote size and position limit |
+| Half-spread (¢) | Maker buffer around **FV** (or mid if FV quoting off) |
+| Size / max inventory | Quote size and position limit (keep conservative) |
 | Spot move % / $ / window | Spot guard (Binance/Coinbase public) |
 | Book poll (ms) | L2 poll via `/local-api/orderbook` |
 | Strict realism | Default **ON** |
+| **FV quoting** | Default **ON** — center on spot/strike fair value, not raw mid |
+| Min edge (¢) | Side ON only if |FV − mid| ≥ this (else that side parked) |
+| Annual vol | Research prior σ for Φ(ln(S/K)/(σ√T)) FV model |
 
 **Fills (~99% realism target):**
 - Poll real L2; post simulated bid/ask at configurable distance from mid
 - Fill **only** when aggressive flow would consume size at your price (book depth drop / mid walk) — not random 4% spam
 - **Fees:** resting maker on 15m → **$0**; if sim would cross the spread immediately → taker `ceil(0.07·C·P·(1−P))`
 - Spot guard + settlement (mark inventory to 0/1 on close) unchanged
+
+
+**Fair-value quoting (paper research):**
+- P(YES) ≈ Φ(ln(S/K)/(σ√T)) with zero drift, constant annual vol, free public spot + `floorStrike`
+- Quotes center on FV (not market mid); inventory skew + spot-guard widen/cancel still apply
+- Edge gate: bid ON only if FV−mid ≥ minEdge¢; ask ON only if mid−FV ≥ minEdge¢; else that side OFF
+- Mid-centered quoting + touch fills is structurally −EV after fees/toxicity — this is the next research step, **not** a live profitability claim
 
 **P&L units:** YES prices are dollars on **[0, 1]**. Unrealized = `inventory * (mid - avgEntry)` in dollars — never ×100. Total P&L shows **$ and ¢**. If mid/avgEntry look like cents (|p|>1.5), they are normalized `/100` and logged.
 

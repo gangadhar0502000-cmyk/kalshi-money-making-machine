@@ -27,3 +27,11 @@ export {
   DEFAULT_TOXIC_MID_LOW,
   DEFAULT_TOXIC_MID_HIGH,
 } from './toxicity'
+
+export {
+  normCdf,
+  estimateYesFairValue,
+  edgeVsMidCents,
+  type FairValueInput,
+  type FairValueEstimate,
+} from './fairValue'

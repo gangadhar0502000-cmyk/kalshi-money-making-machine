@@ -28,6 +28,7 @@ import { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
 import { asDollarPrice, clampPx } from './prices'
 import { pickRollTarget } from './marketSelect'
 import { allowAskAtMid, allowBidAtMid, isToxicExtremeMid } from './toxicity'
+import { edgeVsMidCents, estimateYesFairValue } from './fairValue'
 import type {
   MmCancelEvent,
   MmEngineState,
@@ -101,6 +102,9 @@ export class PaperMmEngine {
   private lastFillAt = 0
   private midWalkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
   private moneyPrinterBug = false
+  private lastFairValue: number | null = null
+  private lastEdgeVsMidCents: number | null = null
+  private lastFvCenterActive = false
   private lastTotalPnl = 0
   private lastTotalPnlAt = 0
 
@@ -205,6 +209,11 @@ export class PaperMmEngine {
       bookBestAsk: this.bookBestAsk,
       unitsWarning: this.unitsWarning,
       moneyPrinterBug: this.moneyPrinterBug,
+      fairValue: this.lastFairValue,
+      edgeVsMidCents: this.lastEdgeVsMidCents,
+      floorStrike: this.market?.floorStrike ?? null,
+      minutesRemaining: this.market?.minutesRemaining ?? null,
+      fvCenterActive: this.lastFvCenterActive,
     }
   }
 
@@ -240,6 +249,9 @@ export class PaperMmEngine {
       this.lastUnrealizedAbs = 0
       this.unitsWarning = null
       this.moneyPrinterBug = false
+      this.lastFairValue = null
+      this.lastEdgeVsMidCents = null
+      this.lastFvCenterActive = false
       this.lastTotalPnl = 0
       this.lastTotalPnlAt = 0
       if (prevTicker && market) {
@@ -309,6 +321,9 @@ export class PaperMmEngine {
     this.unitsWarning = null
     this.lastUnrealizedAbs = 0
     this.moneyPrinterBug = false
+      this.lastFairValue = null
+      this.lastEdgeVsMidCents = null
+      this.lastFvCenterActive = false
     this.lastTotalPnl = 0
     this.lastTotalPnlAt = 0
     this.lastFillAt = 0
@@ -355,6 +370,9 @@ export class PaperMmEngine {
     this.unitsWarning = null
     this.lastUnrealizedAbs = 0
     this.moneyPrinterBug = false
+      this.lastFairValue = null
+      this.lastEdgeVsMidCents = null
+      this.lastFvCenterActive = false
     this.lastTotalPnl = 0
     this.lastTotalPnlAt = 0
     this.lastFillAt = 0
@@ -405,6 +423,8 @@ export class PaperMmEngine {
       this.lastSpot = tick
       this.spotHist.push(tick.price, tick.t)
       this.evaluateSpotGuard()
+      // Spot feeds FV — requote so edge gates track distance-to-strike
+      this.rebuildQuote(false)
       this.emit()
     } catch (e) {
       this.message = `Spot poll failed: ${e instanceof Error ? e.message : String(e)}`
@@ -698,24 +718,71 @@ export class PaperMmEngine {
   private rebuildQuote(force: boolean): void {
     if (!this.market) {
       this.quote = null
+      this.lastFairValue = null
+      this.lastEdgeVsMidCents = null
+      this.lastFvCenterActive = false
       return
     }
     const now = Date.now()
     if (this.moneyPrinterBug) {
       if (this.quote) {
-        this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+        this.quote = {
+          ...this.quote,
+          active: false,
+          bidActive: false,
+          askActive: false,
+          bidReason: 'money printer freeze',
+          askReason: 'money printer freeze',
+        }
       }
       return
     }
     const guardCancel = this.guardMode === 'cancel' && now < this.guardActiveUntil
     if (guardCancel) {
       if (this.quote) {
-        this.quote = { ...this.quote, active: false, bidActive: false, askActive: false }
+        this.quote = {
+          ...this.quote,
+          active: false,
+          bidActive: false,
+          askActive: false,
+          bidReason: 'spot guard cancel',
+          askReason: 'spot guard cancel',
+        }
       }
       return
     }
 
     const mid = this.midDollars()
+    const spot = this.lastSpot?.price
+    const strike = this.market.floorStrike
+    const mins = this.market.minutesRemaining
+    let fair: number | null = null
+    let edgeCents: number | null = null
+    if (
+      spot != null &&
+      strike != null &&
+      Number.isFinite(spot) &&
+      Number.isFinite(strike) &&
+      mins != null
+    ) {
+      const est = estimateYesFairValue({
+        spot,
+        strike,
+        minutesRemaining: mins,
+        annualVol: this.config.annualVol,
+      })
+      if (est) {
+        fair = est.fairProb
+        edgeCents = edgeVsMidCents(est.fairProb, mid)
+      }
+    }
+    this.lastFairValue = fair
+    this.lastEdgeVsMidCents = edgeCents
+
+    const useFv = this.config.fvQuoting && fair != null
+    this.lastFvCenterActive = useFv
+    const center = useFv ? fair! : mid
+
     let half = this.config.halfSpreadCents
     if (this.guardMode === 'widen' && now < this.guardActiveUntil) {
       half += this.config.guardWidenCents
@@ -723,8 +790,8 @@ export class PaperMmEngine {
 
     const skewCents = this.inventory * this.config.inventorySkewCentsPerUnit
     const skew = skewCents / 100
-    const bid = clampPx(mid - half / 100 - skew)
-    let ask = clampPx(mid + half / 100 - skew)
+    const bid = clampPx(center - half / 100 - skew)
+    let ask = clampPx(center + half / 100 - skew)
     if (ask <= bid) ask = clampPx(bid + 0.01)
 
     const atMaxLong = this.inventory >= this.config.maxInventory
@@ -732,11 +799,60 @@ export class PaperMmEngine {
     const midOkBid = allowBidAtMid(mid, this.config.toxicMidLow)
     const midOkAsk = allowAskAtMid(mid, this.config.toxicMidHigh)
 
-    let activeBid = !atMaxLong && midOkBid
-    let activeAsk = !atMaxShort && midOkAsk
+    const minEdge = this.config.minEdgeCents
+    let edgeOkBid = true
+    let edgeOkAsk = true
+    let edgeBidReason: string | null = null
+    let edgeAskReason: string | null = null
+    if (this.config.fvQuoting) {
+      if (fair == null || edgeCents == null) {
+        edgeOkBid = false
+        edgeOkAsk = false
+        edgeBidReason = 'bid off: FV unavailable'
+        edgeAskReason = 'ask off: FV unavailable'
+      } else {
+        // Primary gate: edge vs mid (FV ≫ mid → bid; FV ≪ mid → ask)
+        edgeOkBid = edgeCents >= minEdge
+        edgeOkAsk = -edgeCents >= minEdge
+                if (!edgeOkBid) edgeBidReason = 'bid off: no edge'
+        if (!edgeOkAsk) edgeAskReason = 'ask off: no edge'
+        // Quote half-spread is the maker buffer around FV; activation is gated
+        // by edge-vs-mid above (not by half ≥ minEdge, which would never fire).
+      }
+    }
+
+    let bidReason = 'ok'
+    let askReason = 'ok'
+    let activeBid = true
+    let activeAsk = true
+
     if (!this.running || this.settled) {
       activeBid = false
       activeAsk = false
+      bidReason = this.settled ? 'settled' : 'not running'
+      askReason = bidReason
+    } else {
+      if (atMaxLong) {
+        activeBid = false
+        bidReason = 'bid off: max inventory'
+      } else if (!midOkBid) {
+        activeBid = false
+        bidReason = 'bid off: toxic mid'
+      } else if (!edgeOkBid) {
+        activeBid = false
+        bidReason = edgeBidReason ?? 'bid off: no edge'
+      }
+
+      if (atMaxShort) {
+        activeAsk = false
+        askReason = 'ask off: max inventory'
+      } else if (!midOkAsk) {
+        activeAsk = false
+        askReason = 'ask off: toxic mid'
+      } else if (!edgeOkAsk) {
+        activeAsk = false
+        askReason = edgeAskReason ?? 'ask off: no edge'
+      }
     }
 
     // Park inactive sides away from the touch so taker_cross cannot fire on them
@@ -752,6 +868,9 @@ export class PaperMmEngine {
       askActive: activeAsk && !guardCancel,
       skewCents,
       halfSpreadCents: half,
+      centerMode: useFv ? 'fv' : 'mid',
+      bidReason,
+      askReason,
     }
 
     this.lastQuoteAt = now
@@ -955,7 +1074,21 @@ export class PaperMmEngine {
   /**
    * If |Δ Total P&L| > $1 in under 2s, freeze quoting — money-printer fill bug.
    */
-  private checkMoneyPrinterBug(): void {
+  
+  /**
+   * Test/helper: seed last public spot without network (paper research only).
+   * Triggers an FV requote.
+   */
+  seedSpot(price: number): void {
+    if (!Number.isFinite(price) || price <= 0) return
+    const asset = this.market?.asset ?? 'BTC'
+    this.lastSpot = { asset, price, source: 'demo', t: Date.now() }
+    this.spotHist.push(price, Date.now())
+    this.rebuildQuote(true)
+    this.emit()
+  }
+
+private checkMoneyPrinterBug(): void {
     if (this.moneyPrinterBug) return
     const mid = this.midDollars()
     const total = this.realizedSpreadPnl + this.unrealizedDollars(mid)

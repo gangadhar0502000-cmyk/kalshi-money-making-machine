@@ -62,6 +62,22 @@ export interface PaperMmConfig {
   toxicMidHigh: number
   /** Auto-roll to next open 15m for same underlying after close/settle. */
   autoRoll: boolean
+  /**
+   * Center quotes on spot/strike fair value (default ON) instead of raw mid.
+   * Mid-centered quoting is structurally −EV after fees/toxicity — research toggle.
+   */
+  fvQuoting: boolean
+  /**
+   * Minimum edge vs mid (cents) to activate a side when fvQuoting.
+   * Bid ON only if (FV − mid) ≥ minEdge; ask ON only if (mid − FV) ≥ minEdge.
+   * When |FV − mid| < minEdge both sides OFF.
+   */
+  minEdgeCents: number
+  /**
+   * Annualized log-vol for the normal distance-to-strike FV model (e.g. 0.70 = 70%).
+   * Free research prior — not implied vol from a paid feed.
+   */
+  annualVol: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -91,6 +107,9 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicMidLow: 0.05,
   toxicMidHigh: 0.95,
   autoRoll: true,
+  fvQuoting: true,
+  minEdgeCents: 2,
+  annualVol: 0.7,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -149,6 +168,9 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     toxicMidLow: clamp(c.toxicMidLow, 0.01, 0.45),
     toxicMidHigh: clamp(c.toxicMidHigh, 0.55, 0.99),
     autoRoll: Boolean(c.autoRoll),
+    fvQuoting: Boolean(c.fvQuoting),
+    minEdgeCents: clamp(c.minEdgeCents, 0, 20),
+    annualVol: clamp(c.annualVol, 0.05, 3),
   }
 }
 

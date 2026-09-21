@@ -8,13 +8,19 @@ export interface MmQuote {
   yesAsk: number
   size: number
   active: boolean
-  /** Bid side enabled (false when max long or extreme-low mid). */
+  /** Bid side enabled (false when max long, extreme-low mid, or no edge). */
   bidActive: boolean
-  /** Ask side enabled (false when max short or extreme-high mid). */
+  /** Ask side enabled (false when max short, extreme-high mid, or no edge). */
   askActive: boolean
   /** Inventory skew applied (cents, positive = shift down = favor selling). */
   skewCents: number
   halfSpreadCents: number
+  /** Quote center mode for this rebuild. */
+  centerMode: 'fv' | 'mid'
+  /** Why bid is off (or 'ok'). */
+  bidReason: string
+  /** Why ask is off (or 'ok'). */
+  askReason: string
 }
 
 export interface MmFill {
@@ -97,6 +103,16 @@ export interface MmSnapshot {
    * Indicates a money-printer fill bug; user must Reset.
    */
   moneyPrinterBug: boolean
+  /** Spot/strike FV P(YES) dollars 0–1, or null if unavailable. */
+  fairValue: number | null
+  /** (FV − mid) in cents; null if no FV. */
+  edgeVsMidCents: number | null
+  /** Active market floorStrike (reference), if any. */
+  floorStrike: number | null
+  /** Minutes remaining used for FV (from market). */
+  minutesRemaining: number | null
+  /** Whether this rebuild centered on FV (vs mid fallback). */
+  fvCenterActive: boolean
 }
 
 export interface MmEngineState {

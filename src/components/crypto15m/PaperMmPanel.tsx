@@ -86,7 +86,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   // Keep draft in sync when engine applies strict/loose presets
   useEffect(() => {
     setDraft({ ...s.config })
-  }, [s.config.strictRealism, s.config.baseFillProb, s.config.midCrossFillProb])
+  }, [s.config.strictRealism, s.config.baseFillProb, s.config.midCrossFillProb, s.config.fvQuoting])
 
   const applyConfig = () => {
     paperMmEngine.setConfig(draft)
@@ -228,6 +228,24 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               settlement
             </span>
           </label>
+
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-600"
+              checked={draft.fvQuoting}
+              onChange={(e) => {
+                const fvQuoting = e.target.checked
+                setDraft((d) => ({ ...d, fvQuoting }))
+                paperMmEngine.setConfig({ fvQuoting })
+              }}
+            />
+            <span>
+              <strong>FV quoting</strong> (default ON) — center on spot/strike fair value + edge
+              gate (vs mid-centered)
+            </span>
+          </label>
+        
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -317,6 +335,39 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           value={formatCents(s.midYes)}
           sub={`$${s.midYes.toFixed(4)}`}
         />
+
+        <Stat
+          label="Fair value"
+          value={s.fairValue != null ? formatCents(s.fairValue) : '—'}
+          sub={
+            s.fvCenterActive
+              ? 'FV center ON'
+              : s.config.fvQuoting
+                ? 'FV unavailable · mid center'
+                : 'mid center (FV off)'
+          }
+        />
+        <Stat
+          label="Edge vs mid"
+          value={
+            s.edgeVsMidCents != null
+              ? `${s.edgeVsMidCents >= 0 ? '+' : ''}${s.edgeVsMidCents.toFixed(1)}¢`
+              : '—'
+          }
+          tone={
+            s.edgeVsMidCents == null
+              ? 'neutral'
+              : Math.abs(s.edgeVsMidCents) >= s.config.minEdgeCents
+                ? 'good'
+                : 'warn'
+          }
+          sub={
+            s.floorStrike != null
+              ? `strike ${s.floorStrike.toLocaleString()}`
+              : 'no floorStrike'
+          }
+        />
+
         <Stat
           label="Book BBO"
           value={
@@ -355,9 +406,10 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             </span>
             <span className="text-xs text-slate-500">
               half {s.quote.halfSpreadCents.toFixed(1)}¢ · skew {s.quote.skewCents.toFixed(2)}¢ ·{' '}
+              {s.quote.centerMode === 'fv' ? 'FV center' : 'mid center'} ·{' '}
               {s.quote.active ? 'ACTIVE' : 'CANCELLED'}
-              {s.quote.bidActive === false ? ' · bid OFF' : ''}
-              {s.quote.askActive === false ? ' · ask OFF' : ''}
+              {s.quote.bidActive ? '' : ` · ${s.quote.bidReason || 'bid OFF'}`}
+              {s.quote.askActive ? '' : ` · ${s.quote.askReason || 'ask OFF'}`}
             </span>
           </div>
         ) : (
@@ -440,6 +492,24 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             max={2}
             onChange={(v) => setDraft((d) => ({ ...d, inventorySkewCentsPerUnit: v }))}
           />
+
+          <Knob
+            label="Min edge vs mid (¢)"
+            value={draft.minEdgeCents}
+            step={0.5}
+            min={0}
+            max={20}
+            onChange={(v) => setDraft((d) => ({ ...d, minEdgeCents: v }))}
+          />
+          <Knob
+            label="Annual vol (FV)"
+            value={draft.annualVol}
+            step={0.05}
+            min={0.05}
+            max={3}
+            onChange={(v) => setDraft((d) => ({ ...d, annualVol: v }))}
+          />
+
           <Knob
             label="Toxicity bias"
             value={draft.toxicityBias}
