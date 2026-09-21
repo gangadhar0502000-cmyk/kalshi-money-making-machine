@@ -21,6 +21,7 @@ import { RuleExperimentsPanel } from './RuleExperimentsPanel'
 import { BacktestPanel } from './BacktestPanel'
 import { PaperMmPanel } from './PaperMmPanel'
 import { pickBestOpenMarket, pickRollTarget } from '../../lib/crypto15m/mm/marketSelect'
+import { shouldApplyLabRefresh } from '../../lib/crypto15m/labRefresh'
 
 type LabTab = 'lab' | 'backtest' | 'mm'
 
@@ -35,6 +36,7 @@ export function Crypto15mLab() {
   const [entries, setEntries] = useState<PaperJournalEntry[]>(() => loadJournal())
   const [nowTick, setNowTick] = useState(0)
   const lastMarketsRef = useRef<Crypto15mMarket[]>([])
+  const sourceRef = useRef<'live' | 'demo' | null>(null)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -43,8 +45,14 @@ export function Crypto15mLab() {
       if (signal?.aborted) return
 
       // Never wipe a good universe with a transient empty/failed refresh (rollover gap).
+      // Explicit: DEMO → LIVE with markets always replaces the demo universe.
+      const decision = shouldApplyLabRefresh({
+        prevSource: sourceRef.current,
+        next: result,
+        lastMarketsLen: lastMarketsRef.current.length,
+      })
       let marketsForPick = result.markets
-      if (result.markets.length === 0 && lastMarketsRef.current.length > 0) {
+      if (decision === 'keep-last') {
         marketsForPick = lastMarketsRef.current
         setError(
           (result.error ? result.error + ' · ' : '') +
@@ -54,6 +62,7 @@ export function Crypto15mLab() {
         lastMarketsRef.current = result.markets
         setMarkets(result.markets)
         setSource(result.source)
+        sourceRef.current = result.source
         setError(result.error)
         setFetchedAt(result.fetchedAt)
       }
@@ -202,9 +211,12 @@ export function Crypto15mLab() {
         <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={() => void refresh()}>
           Refresh now
         </button>
-        {error && source === 'demo' && (
-          <span className="max-w-xl truncate text-amber-400/80" title={error}>
-            Live unavailable → demo
+        {error && (
+          <span
+            className={`max-w-2xl truncate ${source === 'demo' ? 'text-amber-400/90' : 'text-slate-500'}`}
+            title={error}
+          >
+            {source === 'demo' ? `lastError: ${error}` : error}
           </span>
         )}
       </div>

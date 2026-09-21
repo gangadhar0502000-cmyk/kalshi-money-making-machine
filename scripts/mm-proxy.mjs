@@ -221,6 +221,23 @@ function isCrypto15m(m) {
   return /15M$/i.test(series) && /BTC|ETH|SOL|DOGE|ADA|BNB|XRP|BCH|CRYPTO|TON|NEAR|ZEC|HYPE/i.test(series)
 }
 
+
+/** Run async work over items with limited parallelism (read-only fan-out). */
+async function mapPool(items, concurrency, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  async function worker() {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      results[i] = await fn(items[i], i)
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length))
+  await Promise.all(Array.from({ length: n }, () => worker()))
+  return results
+}
+
 async function handleLocal(req, res, url) {
   const route = url.pathname
 
@@ -302,7 +319,8 @@ async function handleLocal(req, res, url) {
   if (route === '/local-api/crypto15m') {
     const byTicker = new Map()
     const errors = []
-    for (const series of CRYPTO_15M_SERIES) {
+    // Limited concurrency (not fully serial) — keeps read-only, speeds Lab universe load.
+    await mapPool(CRYPTO_15M_SERIES, 4, async (series) => {
       try {
         const q = new URLSearchParams({
           series_ticker: series,
@@ -317,7 +335,7 @@ async function handleLocal(req, res, url) {
       } catch (e) {
         errors.push(`${series}: ${e instanceof Error ? e.message : String(e)}`)
       }
-    }
+    })
     return sendJson(res, 200, {
       readOnly: true,
       authenticated: Boolean(secrets.keyId),

@@ -49,23 +49,37 @@ export async function fetchLiveOrderbook(
   return parseOrderbookFp(ticker, data, Boolean(data.authenticated))
 }
 
+function formatLocalError(e: unknown, signal?: AbortSignal): Error {
+  if (signal?.aborted) return new Error('aborted')
+  if (e instanceof Error) {
+    if (e.name === 'AbortError' || /aborted/i.test(e.message)) return new Error('aborted')
+    return e
+  }
+  return new Error(String(e))
+}
+
 /**
  * Prefer proxy path for open crypto 15m universe (authenticated when keys loaded).
- * Returns null when proxy is down — caller falls back to public API.
+ * Throws with a real reason (HTTP status, abort, network) so callers can surface
+ * proxy failures instead of silently falling through with an empty error list.
  */
 export async function fetchLocalCrypto15m(
   signal?: AbortSignal,
-): Promise<LocalCrypto15mResponse | null> {
+): Promise<LocalCrypto15mResponse> {
   try {
     const res = await fetch('/local-api/crypto15m', {
       signal,
       headers: { Accept: 'application/json' },
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`)
+    }
     const data = (await res.json()) as LocalCrypto15mResponse
-    if (!Array.isArray(data.markets)) return null
+    if (!Array.isArray(data.markets)) {
+      throw new Error('invalid markets payload')
+    }
     return data
-  } catch {
-    return null
+  } catch (e) {
+    throw formatLocalError(e, signal)
   }
 }
