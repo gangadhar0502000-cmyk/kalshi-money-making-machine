@@ -25,10 +25,15 @@ import {
   type OrderBookSnapshot,
 } from './orderbook'
 import { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
-import { asDollarPrice, clampPx, isValidQuoteMid } from './prices'
+import { asDollarPrice, isValidQuoteMid } from './prices'
 import { pickRollTarget } from './marketSelect'
-import { allowAskAtMid, allowBidAtMid, isToxicExtremeMid } from './toxicity'
+import { isToxicExtremeMid } from './toxicity'
 import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
+import {
+  decideQuoteSides,
+  DEFAULT_DECISION_POLICY,
+  type DecisionPolicyConfig,
+} from './decisionPolicy'
 import type {
   MmCancelEvent,
   MmEngineState,
@@ -107,6 +112,10 @@ export class PaperMmEngine {
   private lastFvCenterActive = false
   private lastTotalPnl = 0
   private lastTotalPnlAt = 0
+  /** Temporary bid pull after toxic buy_yes fill. */
+  private toxicBidPullUntil = 0
+  /** Temporary ask pull after toxic sell_yes fill. */
+  private toxicAskPullUntil = 0
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
@@ -254,6 +263,8 @@ export class PaperMmEngine {
       this.lastFvCenterActive = false
       this.lastTotalPnl = 0
       this.lastTotalPnlAt = 0
+      this.toxicBidPullUntil = 0
+      this.toxicAskPullUntil = 0
       if (prevTicker && market) {
         this.message =
           `Rolled to ${market.ticker} (from ${prevTicker}) · close ${market.closeTime} · ` +
@@ -375,6 +386,8 @@ export class PaperMmEngine {
       this.lastFvCenterActive = false
     this.lastTotalPnl = 0
     this.lastTotalPnlAt = 0
+    this.toxicBidPullUntil = 0
+    this.toxicAskPullUntil = 0
     this.lastFillAt = 0
     this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = 'Session reset. Paper cash restored. Read-only API · never places trades.'
@@ -724,34 +737,6 @@ export class PaperMmEngine {
       return
     }
     const now = Date.now()
-    if (this.moneyPrinterBug) {
-      if (this.quote) {
-        this.quote = {
-          ...this.quote,
-          active: false,
-          bidActive: false,
-          askActive: false,
-          bidReason: 'money printer freeze',
-          askReason: 'money printer freeze',
-        }
-      }
-      return
-    }
-    const guardCancel = this.guardMode === 'cancel' && now < this.guardActiveUntil
-    if (guardCancel) {
-      if (this.quote) {
-        this.quote = {
-          ...this.quote,
-          active: false,
-          bidActive: false,
-          askActive: false,
-          bidReason: 'spot guard cancel',
-          askReason: 'spot guard cancel',
-        }
-      }
-      return
-    }
-
     const mid = this.midDollars()
     const spot = this.lastSpot?.price
     const mins = this.market.minutesRemaining
@@ -783,114 +768,62 @@ export class PaperMmEngine {
       }
     }
     this.lastFairValue = fair
-    // Null wild edge when mid is empty-book / invalid (mid=0 vs FV=0.99).
     if (!isValidQuoteMid(mid)) {
       edgeCents = null
     }
     this.lastEdgeVsMidCents = edgeCents
 
-    const midValid = isValidQuoteMid(mid)
-    const useFv = this.config.fvQuoting && fair != null && midValid
-    this.lastFvCenterActive = useFv
-    const center = useFv ? fair! : mid
+    const guardCancel = this.guardMode === 'cancel' && now < this.guardActiveUntil
+    const guardWiden = this.guardMode === 'widen' && now < this.guardActiveUntil
 
-    let half = this.config.halfSpreadCents
-    if (this.guardMode === 'widen' && now < this.guardActiveUntil) {
-      half += this.config.guardWidenCents
+    const policyCfg: DecisionPolicyConfig = {
+      halfSpreadCents: this.config.halfSpreadCents,
+      quoteSize: this.config.quoteSize,
+      maxInventory: this.config.maxInventory,
+      inventorySkewCentsPerUnit: this.config.inventorySkewCentsPerUnit,
+      guardWidenCents: this.config.guardWidenCents,
+      toxicMidLow: this.config.toxicMidLow,
+      toxicMidHigh: this.config.toxicMidHigh,
+      minEdgeCents: this.config.minEdgeCents,
+      expiryPullMinutes: this.config.expiryPullMinutes,
+      fvQuoting: this.config.fvQuoting,
+      sizeDownEdgeMult: DEFAULT_DECISION_POLICY.sizeDownEdgeMult,
+      sizeUpEdgeMult: DEFAULT_DECISION_POLICY.sizeUpEdgeMult,
     }
 
-    const skewCents = this.inventory * this.config.inventorySkewCentsPerUnit
-    const skew = skewCents / 100
-    const bid = clampPx(center - half / 100 - skew)
-    let ask = clampPx(center + half / 100 - skew)
-    if (ask <= bid) ask = clampPx(bid + 0.01)
+    const decision = decideQuoteSides({
+      mid,
+      fairValue: fair,
+      edgeCents,
+      inventory: this.inventory,
+      bookBestBid: this.bookBestBid,
+      bookBestAsk: this.bookBestAsk,
+      minutesRemaining: mins,
+      running: this.running,
+      settled: this.settled,
+      moneyPrinterBug: this.moneyPrinterBug,
+      spotGuardCancel: guardCancel,
+      guardWiden,
+      toxicBidPullUntil: this.toxicBidPullUntil,
+      toxicAskPullUntil: this.toxicAskPullUntil,
+      now,
+      config: policyCfg,
+    })
 
-    const atMaxLong = this.inventory >= this.config.maxInventory
-    const atMaxShort = this.inventory <= -this.config.maxInventory
-    const midOkBid = allowBidAtMid(mid, this.config.toxicMidLow)
-    const midOkAsk = allowAskAtMid(mid, this.config.toxicMidHigh)
-
-    const minEdge = this.config.minEdgeCents
-    let edgeOkBid = true
-    let edgeOkAsk = true
-    let edgeBidReason: string | null = null
-    let edgeAskReason: string | null = null
-    if (this.config.fvQuoting) {
-      if (fair == null || edgeCents == null) {
-        // Mid-centered fallback — do NOT park both sides forever with no explanation.
-        // Inventory + toxic-mid guards still apply below.
-        edgeOkBid = true
-        edgeOkAsk = true
-        edgeBidReason = null
-        edgeAskReason = null
-      } else {
-        // Primary gate: edge vs mid (FV ≫ mid → bid; FV ≪ mid → ask)
-        edgeOkBid = edgeCents >= minEdge
-        edgeOkAsk = -edgeCents >= minEdge
-        if (!edgeOkBid) edgeBidReason = 'bid off: no edge'
-        if (!edgeOkAsk) edgeAskReason = 'ask off: no edge'
-        // Quote half-spread is the maker buffer around FV; activation is gated
-        // by edge-vs-mid above (not by half ≥ minEdge, which would never fire).
-      }
-    }
-
-    const midFallback =
-      this.config.fvQuoting && (fair == null || edgeCents == null)
-    let bidReason = midFallback ? 'ok · mid fallback (no FV)' : 'ok'
-    let askReason = midFallback ? 'ok · mid fallback (no FV)' : 'ok'
-    let activeBid = true
-    let activeAsk = true
-
-    if (!this.running || this.settled) {
-      activeBid = false
-      activeAsk = false
-      bidReason = this.settled ? 'settled' : 'not running'
-      askReason = bidReason
-    } else if (!midValid) {
-      activeBid = false
-      activeAsk = false
-      bidReason = 'bid off: invalid mid'
-      askReason = 'ask off: invalid mid'
-    } else {
-      if (atMaxLong) {
-        activeBid = false
-        bidReason = 'bid off: max inventory'
-      } else if (!midOkBid) {
-        activeBid = false
-        bidReason = 'bid off: toxic mid'
-      } else if (!edgeOkBid) {
-        activeBid = false
-        bidReason = edgeBidReason ?? 'bid off: no edge'
-      }
-
-      if (atMaxShort) {
-        activeAsk = false
-        askReason = 'ask off: max inventory'
-      } else if (!midOkAsk) {
-        activeAsk = false
-        askReason = 'ask off: toxic mid'
-      } else if (!edgeOkAsk) {
-        activeAsk = false
-        askReason = edgeAskReason ?? 'ask off: no edge'
-      }
-    }
-
-    // Park inactive sides away from the touch so taker_cross cannot fire on them
-    const qBid = activeBid ? bid : 0.01
-    const qAsk = activeAsk ? ask : 0.99
+    this.lastFvCenterActive = decision.centerMode === 'fv'
 
     this.quote = {
-      yesBid: qBid,
-      yesAsk: qAsk,
-      size: this.config.quoteSize,
-      active: this.running && !this.settled && (activeBid || activeAsk) && !guardCancel,
-      bidActive: activeBid && !guardCancel,
-      askActive: activeAsk && !guardCancel,
-      skewCents,
-      halfSpreadCents: half,
-      centerMode: useFv ? 'fv' : 'mid',
-      bidReason,
-      askReason,
+      yesBid: decision.yesBid,
+      yesAsk: decision.yesAsk,
+      size: decision.size,
+      active: decision.active && !guardCancel,
+      bidActive: decision.bidActive && !guardCancel,
+      askActive: decision.askActive && !guardCancel,
+      skewCents: decision.skewCents,
+      halfSpreadCents: decision.halfSpreadCents,
+      centerMode: decision.centerMode,
+      bidReason: decision.bidReason,
+      askReason: decision.askReason,
     }
 
     this.lastQuoteAt = now
@@ -1086,6 +1019,14 @@ export class PaperMmEngine {
 
     if (toxic) {
       this.message = `Toxic ${side} @ ${(price * 100).toFixed(0)}¢ — spot moved against you.`
+      const pullMs = this.config.toxicFillPullMs
+      if (pullMs > 0) {
+        if (side === 'buy_yes') {
+          this.toxicBidPullUntil = Math.max(this.toxicBidPullUntil, Date.now() + pullMs)
+        } else {
+          this.toxicAskPullUntil = Math.max(this.toxicAskPullUntil, Date.now() + pullMs)
+        }
+      }
     }
 
     this.checkMoneyPrinterBug()

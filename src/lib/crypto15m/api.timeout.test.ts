@@ -63,7 +63,7 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     expect(result.error ?? '').toMatch(/proxy:\s*aborted/i)
   })
 
-  it('proxy HTTP failure surfaces real reason in demo error (not bare default)', async () => {
+  it('proxy + public fail → LIVE-ONLY empty (not demo)', async () => {
     const { fetchCrypto15mMarkets } = await import('./api')
 
     vi.stubGlobal(
@@ -73,7 +73,7 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
         if (url.includes('/local-api/crypto15m')) {
           return { ok: false, status: 502, json: async () => ({}) } as Response
         }
-        // Public also fails → demo
+        // Public also fails → empty live, not demo
         throw new Error('network down')
       }),
     )
@@ -83,11 +83,12 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
       publicMs: 500,
     })
 
-    expect(result.source).toBe('demo')
+    expect(result.source).not.toBe('demo')
+    expect(result.source).toBe('live')
+    expect(result.markets).toEqual([])
     expect(result.error).toBeTruthy()
+    expect(result.error).toMatch(/LIVE-ONLY FAILURE/i)
     expect(result.error).toMatch(/proxy:\s*HTTP 502/i)
-    // Must not be only the misleading bare default with no detail
-    expect(result.error).not.toBe('Live crypto 15m fetch failed')
   })
 
   it('proxy abort surfaces aborted reason', async () => {
@@ -117,13 +118,15 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
       proxyMs: 30,
       publicMs: 30,
     })
-    expect(result.source).toBe('demo')
+    expect(result.source).toBe('live')
+    expect(result.markets).toEqual([])
+    expect(result.error ?? '').toMatch(/LIVE-ONLY FAILURE/i)
     expect(result.error ?? '').toMatch(/proxy:\s*aborted/i)
   })
 })
 
-describe('Lab demo → live recovery', () => {
-  it('demo is not sticky when live returns markets', () => {
+describe('Lab live-only refresh', () => {
+  it('stale demo is replaced when live returns markets', () => {
     expect(
       shouldApplyLabRefresh({
         prevSource: 'demo',
@@ -133,7 +136,7 @@ describe('Lab demo → live recovery', () => {
     ).toBe('apply')
   })
 
-  it('keeps last universe on empty refresh', () => {
+  it('keeps last LIVE universe on empty refresh (rollover)', () => {
     expect(
       shouldApplyLabRefresh({
         prevSource: 'live',
@@ -143,12 +146,22 @@ describe('Lab demo → live recovery', () => {
     ).toBe('keep-last')
   })
 
-  it('applies demo when nothing else available and last is empty', () => {
+  it('cold-start empty live applies empty (LIVE-ONLY failure, not fixtures)', () => {
     expect(
       shouldApplyLabRefresh({
         prevSource: null,
-        next: { source: 'demo', markets: [{ ticker: 'D' } as never] },
+        next: { source: 'live', markets: [], error: 'LIVE-ONLY FAILURE' },
         lastMarketsLen: 0,
+      }),
+    ).toBe('apply')
+  })
+
+  it('wipes stale demo on live empty failure', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: 'demo',
+        next: { source: 'live', markets: [], error: 'LIVE-ONLY FAILURE' },
+        lastMarketsLen: 5,
       }),
     ).toBe('apply')
   })

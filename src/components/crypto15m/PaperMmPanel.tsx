@@ -183,8 +183,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         <strong>Read-only API · never places trades.</strong> Near-real paper MM polls Kalshi L2
         via a local proxy (secrets stay server-side). On 15m, bots cancel faster — this teaches
         whether <em>YOUR</em> params survive. Fills require book depth / mid-walk (not random
-        spam). Maker fee $0 on resting 15m; taker fee if you cross. <strong>Paper MM green ≠ live
-        edge.</strong>
+        spam). Maker fee $0 on resting 15m; taker fee if you cross. <strong>Paper MM green ≠ live edge.</strong> Paper research only; positive P&amp;L not
+        guaranteed. Demo market fixtures removed — online live feeds only.
       </div>
 
       <div className="rounded-xl border border-violet-800/40 bg-violet-950/25 px-4 py-3 text-xs text-violet-100/90">
@@ -211,11 +211,10 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
       )}
 
-      {source === 'demo' && (
-        <div className="rounded-xl border-2 border-amber-500/70 bg-amber-950/45 px-4 py-3 text-sm font-semibold text-amber-100">
-          ⚠ DEMO market universe — not live Kalshi. Fixtures include floor_strike for FV testing.
-          Auto-recovers to LIVE when proxy/public succeeds. L2 badge (if shown) is independent of
-          this market-source badge.
+      {source === 'live' && markets.length === 0 && (
+        <div className="rounded-xl border-2 border-rose-500/70 bg-rose-950/45 px-4 py-3 text-sm font-semibold text-rose-100">
+          🛑 LIVE-ONLY FAILURE — no markets. Demo fixtures removed. Start paper MM only when live
+          Kalshi (proxy or public) returns open crypto 15m contracts.
         </div>
       )}
 
@@ -251,11 +250,15 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             )}
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                source === 'live' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-200'
+                source === 'live' && markets.length > 0
+                  ? 'bg-emerald-950 text-emerald-300'
+                  : 'bg-rose-950 text-rose-200'
               }`}
-              title="Market universe source (proxy → public → demo fallback)"
+              title="Market universe source (proxy → public; demo removed)"
             >
-              {source === 'live' ? 'LIVE markets (Kalshi)' : 'DEMO markets (offline)'}
+              {source === 'live' && markets.length > 0
+                ? 'LIVE markets (Kalshi)'
+                : 'LIVE-ONLY FAILURE'}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -672,6 +675,10 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                         {snap.quote.bidActive ? '' : ' OFF'} / ask{' '}
                         {formatCents(snap.quote.yesAsk)}
                         {snap.quote.askActive ? '' : ' OFF'} · {snap.quote.centerMode}
+                        <br />
+                        <span className="text-violet-200/80">
+                          {snap.quote.bidReason} · {snap.quote.askReason}
+                        </span>
                       </p>
                     )}
                   </div>
@@ -730,7 +737,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                 s.fvCenterActive
                   ? 'FV center ON'
                   : s.config.fvQuoting
-                    ? 'FV unavailable · mid center'
+                    ? 'FV required · both OFF'
                     : 'mid center (FV off)'
               }
             />
@@ -793,8 +800,9 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                   half {s.quote.halfSpreadCents.toFixed(1)}¢ · skew {s.quote.skewCents.toFixed(2)}¢ ·{' '}
                   {s.quote.centerMode === 'fv' ? 'FV center' : 'mid center'} ·{' '}
                   {s.quote.active ? 'ACTIVE' : 'CANCELLED'}
-                  {s.quote.bidActive ? '' : ` · ${s.quote.bidReason || 'bid OFF'}`}
-                  {s.quote.askActive ? '' : ` · ${s.quote.askReason || 'ask OFF'}`}
+                </span>
+                <span className="w-full text-[11px] text-violet-200/90">
+                  {s.quote.bidReason} · {s.quote.askReason}
                 </span>
               </div>
             ) : (

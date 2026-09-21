@@ -2,7 +2,7 @@
 
 A **private research lab** for discovering, paper-testing, and **killing** trading-rule hypotheses on Kalshi **crypto 15‑minute up/down** markets (BTC, ETH, SOL, …).
 
-> **Brutal honesty:** You have **no proven rules yet**. This app does **not** ship money-printing signals. **No edge until a rule survives paper.** These are hypotheses. Printing money is not guaranteed. You can lose money in prediction markets.
+> **Brutal honesty:** You have **no proven rules yet**. This app does **not** ship money-printing signals. **No edge until a rule survives paper.** These are hypotheses. **Paper research only — positive P&L not guaranteed.** Crypto 15m market fetch is **LIVE ONLY** (demo universe removed). You can lose money in prediction markets.
 
 Default landing UI = **Crypto 15m Lab**. The older **Edge Finder** (ESPN / Polymarket / NOAA) remains behind a secondary tab.
 
@@ -13,7 +13,7 @@ Default landing UI = **Crypto 15m Lab**. The older **Edge Finder** (ESPN / Polym
 | Kalshi public Trade API (Vite `/api/kalshi`) | Open crypto 15m markets |
 | **Read-only local proxy** (`npm run dev:real`) | Signed GET orderbooks / markets — **never places trades** |
 | Binance / Coinbase public tickers | Spot guard for paper MM |
-| Bundled demo fixtures | Offline / rate-limit fallback |
+| *(demo fixtures removed)* | Crypto 15m fetch is **LIVE ONLY** — empty + error if proxy+public fail |
 
 Browser **never** holds the private key. Secrets load server-side from `KALSHI_KEY_ID` / `KALSHI_PRIVATE_KEY` env or box secrets — **not** logged, **not** committed.
 
@@ -106,7 +106,13 @@ Credentials (server-side only): `KALSHI_KEY_ID` + `KALSHI_PRIVATE_KEY` env, or b
 - P(YES) ≈ Φ(ln(S/K)/(σ√T)) with zero drift, constant annual vol, free public spot + `floorStrike`
 - Quotes center on FV (not market mid); inventory skew + spot-guard widen/cancel still apply
 - Edge gate: bid ON only if FV−mid ≥ minEdge¢; ask ON only if mid−FV ≥ minEdge¢; else that side OFF
-- Mid-centered quoting + touch fills is structurally −EV after fees/toxicity — this is the next research step, **not** a live profitability claim
+- When FV quoting is ON and FV is unavailable → **both sides OFF** (no silent mid-only spam)
+- **Not** a live profitability claim. Paper research; positive P&L not guaranteed.
+
+**Decision policy (`mm/decisionPolicy.ts`) — default NO TRADE:**
+- Quote only when: valid mid, FV (in FV mode), |FV−mid| ≥ minEdge¢, not toxic mid band, spot-guard not canceling, inventory allows side, time-to-expiry ≥ expiryPullMinutes (default 0.5m), coherent ask > bid
+- Side selection: FV ≫ mid → prefer bid; FV ≪ mid → prefer ask; inventory long → suppress bids harder (and vice versa); size scales with |edge| (capped)
+- Pull: no edge / invalid inputs / expiry chaos / after toxic fill → that side (or both) OFF with explicit UI reasons
 
 **P&L units:** YES prices are dollars on **[0, 1]**. Unrealized = `inventory * (mid - avgEntry)` in dollars — never ×100. Total P&L shows **$ and ¢**. If mid/avgEntry look like cents (|p|>1.5), they are normalized `/100` and logged.
 
@@ -176,7 +182,8 @@ src/
     ruleConfig.ts         ALL experiment knobs
     rules.ts              Rule evaluators (hypotheses)
     fees.ts               Maker $0 / taker Kalshi-style fees
-    api.ts                Public API fetch + demo fallback
+    api.ts                Public API fetch (LIVE ONLY — no demo fallback)
+    mm/decisionPolicy.ts  Explicit quote ON/OFF rules (edge, toxic, expiry)
     mm/                   Paper MM engine, L2 fills, price units
   scripts/
     mm-proxy.mjs          Read-only Kalshi proxy (assertReadOnly)
@@ -185,7 +192,7 @@ src/
     spot.ts               Free public Binance/Coinbase spot (MM guard)
     mm/                   Paper market maker engine + config
     backtest/             Settled-history rule replay engine
-  fixtures/demoCrypto15m.ts
+  fixtures/demoCrypto15m.ts           Unit-test helpers only (not used as live feed)
   fixtures/liveSettledCrypto15m.json  Bundled real settled+candles snapshot
   components/EdgeFinderApp.tsx   Secondary general edge finder
 ```

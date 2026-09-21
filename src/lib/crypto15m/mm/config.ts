@@ -88,6 +88,15 @@ export interface PaperMmConfig {
    * When false, classic single-ticker paper MM.
    */
   multiBook: boolean
+  /**
+   * Pull both quote sides when minutesRemaining < this (expiry chaos).
+   * Default 0.5 minutes (30s).
+   */
+  expiryPullMinutes: number
+  /**
+   * After an adverse (toxic) fill, temporarily pull that side for this many ms.
+   */
+  toxicFillPullMs: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -118,10 +127,12 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicMidHigh: 0.95,
   autoRoll: true,
   fvQuoting: true,
-  minEdgeCents: 2,
+  minEdgeCents: 2.5,
   annualVol: 0.7,
   maxActiveMarkets: 5,
   multiBook: true,
+  expiryPullMinutes: 0.5,
+  toxicFillPullMs: 8000,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -185,6 +196,8 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     annualVol: clamp(c.annualVol, 0.05, 3),
     maxActiveMarkets: Math.round(clamp(c.maxActiveMarkets, 1, 12)),
     multiBook: Boolean(c.multiBook),
+    expiryPullMinutes: clamp(c.expiryPullMinutes, 0, 5),
+    toxicFillPullMs: Math.round(clamp(c.toxicFillPullMs, 0, 120_000)),
   }
 }
 

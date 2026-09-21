@@ -1,5 +1,5 @@
 /**
- * Quant-grade hardening: demo FV, live-prefer, multi-book fill, mid fallback,
+ * Quant-grade hardening: fixture FV helpers, live-prefer, multi-book fill, no-FV park,
  * slot-gated invariant, session P&L retention, edge sticky, toxic block, empty feed.
  * @vitest-environment node
  */
@@ -164,7 +164,7 @@ describe('live-prefer fetchCrypto15mMarkets', () => {
     expect(result.markets.some((m) => m.ticker === 'KXBTC15M-LIVE-PROXY')).toBe(true)
   })
 
-  it('falls back to demo only when proxy + public fail', async () => {
+  it('returns empty live + LIVE-ONLY error when proxy + public fail (no demo)', async () => {
     const { fetchCrypto15mMarkets } = await import('../api')
     vi.stubGlobal(
       'fetch',
@@ -173,10 +173,11 @@ describe('live-prefer fetchCrypto15mMarkets', () => {
       }),
     )
     const result = await fetchCrypto15mMarkets()
-    expect(result.source).toBe('demo')
-    expect(result.markets.length).toBeGreaterThanOrEqual(5)
-    expect(result.markets.every((m) => m.floorStrike != null)).toBe(true)
+    expect(result.source).not.toBe('demo')
+    expect(result.source).toBe('live')
+    expect(result.markets).toEqual([])
     expect(result.error).toBeTruthy()
+    expect(result.error!).toMatch(/LIVE-ONLY FAILURE/i)
   })
 })
 
@@ -242,7 +243,7 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
     for (const t of active) {
       const book = st.books.find((b) => b.snapshot.marketTicker === t)
       expect(book).toBeTruthy()
-      // With FV ITM, at least one side should be quoteable OR mid-fallback active
+      // Book is assigned; quoting depends on decision policy (edge/FV)
       const q = book!.snapshot.quote
       expect(q).toBeTruthy()
     }
@@ -384,7 +385,7 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
   })
 })
 
-describe('FV missing ⇒ mid fallback quoting', () => {
+describe('FV missing ⇒ both sides OFF (no mid spam)', () => {
   let engine: PaperMmEngine
 
   beforeEach(() => {
@@ -412,9 +413,7 @@ describe('FV missing ⇒ mid fallback quoting', () => {
     vi.unstubAllGlobals()
   })
 
-  it('activates at least one side when mid not toxic and FV inputs incomplete', () => {
-    // Explicitly no floorStrike and we will NOT seed spot → fair null
-    // But resolveStrike needs spot; without spot FV null → mid fallback
+  it('parks both sides when FV inputs incomplete', () => {
     const market = mk({
       ticker: 'NO-FV',
       asset: 'BTC',
@@ -428,16 +427,15 @@ describe('FV missing ⇒ mid fallback quoting', () => {
     })
     engine.setMarket(market)
     engine.start()
-    // no seedSpot → fair stays null
     const s = engine.getState().snapshot
     expect(s.fairValue).toBeNull()
     expect(s.quote).not.toBeNull()
-    expect(s.quote!.centerMode).toBe('mid')
-    expect(s.quote!.bidActive || s.quote!.askActive).toBe(true)
-    expect(s.quote!.bidReason + s.quote!.askReason).toMatch(/mid fallback/i)
+    expect(s.quote!.bidActive).toBe(false)
+    expect(s.quote!.askActive).toBe(false)
+    expect(s.quote!.bidReason + s.quote!.askReason).toMatch(/no FV/i)
   })
 
-  it('toxic mid + taker_cross still blocked under mid fallback', () => {
+  it('toxic mid still blocks bid even without FV', () => {
     const market = mk({
       ticker: 'TOXIC-MID',
       asset: 'BTC',
@@ -453,7 +451,8 @@ describe('FV missing ⇒ mid fallback quoting', () => {
     engine.start()
     const s = engine.getState().snapshot
     expect(s.quote?.bidActive).toBe(false)
-    expect(s.quote?.bidReason.toLowerCase()).toMatch(/toxic/)
+    // no FV parks both first; reason may be no FV (checked before toxic mid)
+    expect(s.quote?.bidReason.toLowerCase()).toMatch(/no fv|toxic|invalid/)
   })
 })
 

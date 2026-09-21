@@ -7,7 +7,7 @@
  * - Constant annualized vol σ (`annualVol`, default 0.70). No jumps in FV.
  * - P(YES) = Φ( ln(S/K) / (σ √T) ), T in years from minutes remaining.
  * - Clamp to [0.01, 0.99]. T→0: S≥K → 0.99 else 0.01.
- * - Missing/invalid spot or strike → null (engine falls back to mid center).
+ * - Missing/invalid spot or strike → null (decision policy parks both sides when FV mode is on).
  *
  * Free public spot only — no paid APIs.
  */

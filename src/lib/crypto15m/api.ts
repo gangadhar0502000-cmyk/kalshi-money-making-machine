@@ -1,10 +1,8 @@
 import type { KalshiMarketRaw, KalshiMarketsResponse } from '../../types/kalshi'
 import type { Crypto15mMarket, FetchCrypto15mResult } from '../../types/crypto15m'
-import { getDemoCrypto15m } from '../../fixtures/demoCrypto15m'
 import { CRYPTO_15M_SERIES, isCrypto15mMarket } from './detect'
 import { normalizeCrypto15m } from './normalize'
 import { recordMid } from './midHistory'
-import { seedDemoMidHistory } from './seedDemoHistory'
 import { fetchLocalCrypto15m } from './mm/liveBook'
 
 const LIVE_BASES = ['/api/kalshi', '/api/kalshi-ext'] as const
@@ -92,7 +90,9 @@ function finalizeLive(
 }
 
 /**
- * Fetch open crypto 15m markets — proxy preferred, public fallback, demo last.
+ * Fetch open crypto 15m markets — proxy preferred, then public Kalshi API.
+ * LIVE ONLY: no demo / offline fixtures. If proxy + public both fail, returns
+ * empty markets with a loud error (UI shows LIVE-ONLY failure).
  *
  * Proxy and public use **separate** AbortSignal budgets so a slow/aborted proxy
  * cannot burn the public fallback timeout.
@@ -185,22 +185,18 @@ export async function fetchCrypto15mMarkets(
     }
   }
 
-  // 3) Demo fixtures (offline / all sources empty)
-  const markets = getDemoCrypto15m()
-    .map((m) => {
-      const n = normalizeCrypto15m(m)
-      recordMid(n.ticker, n.midYes)
-      return n
-    })
-    .sort(byRemaining)
-  seedDemoMidHistory(markets)
+  // 3) LIVE-ONLY failure — never fall back to demo fixtures
+  const detail =
+    errors.join(' | ') ||
+    'proxy and public both returned no markets'
+  const loud =
+    `LIVE-ONLY FAILURE: no crypto 15m markets (online sources only — demo removed). ${detail}`
+  console.error(`[crypto15m] ${loud}`)
   return {
-    markets,
-    source: 'demo',
+    markets: [],
+    source: 'live',
     fetchedAt: new Date().toISOString(),
-    error:
-      errors.join(' | ') ||
-      'Live crypto 15m fetch failed (proxy and public both returned no markets)',
+    error: loud,
     seriesTried: [...seriesList],
   }
 }

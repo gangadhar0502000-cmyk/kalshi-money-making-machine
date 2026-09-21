@@ -5,32 +5,33 @@ export type LabSource = 'live' | 'demo' | null
 /**
  * Decide whether a refresh should replace the Lab market universe.
  *
- * Explicit preference: if we were on DEMO and the new result is LIVE with
- * markets, always apply (demo must never stick once live data is available).
- * Empty feeds keep the last non-empty universe (rollover gap).
+ * LIVE ONLY: demo fixtures are never applied from fetch. Empty live feeds keep
+ * the last non-empty LIVE universe during rollover gaps. Hard empty+error on a
+ * cold start applies empty so the UI can show LIVE-ONLY failure (not fixtures).
  */
 export function shouldApplyLabRefresh(opts: {
   prevSource: LabSource
-  next: Pick<FetchCrypto15mResult, 'source' | 'markets'>
+  next: Pick<FetchCrypto15mResult, 'source' | 'markets' | 'error'>
   lastMarketsLen: number
 }): 'apply' | 'keep-last' {
   const { prevSource, next, lastMarketsLen } = opts
 
-  // Demo → live with markets: always replace DEMO universe.
-  if (prevSource === 'demo' && next.source === 'live' && next.markets.length > 0) {
+  // Never keep a stale DEMO universe once anything live arrives (incl. empty fail).
+  if (prevSource === 'demo' && next.source === 'live') {
     return 'apply'
   }
 
-  // Any successful live refresh with markets always applies.
+  // Successful live refresh with markets always applies.
   if (next.source === 'live' && next.markets.length > 0) {
     return 'apply'
   }
 
-  // Transient empty — keep last universe (do not wipe).
-  if (next.markets.length === 0 && lastMarketsLen > 0) {
+  // Transient empty while we already have a live universe — keep last (rollover).
+  if (next.markets.length === 0 && lastMarketsLen > 0 && prevSource === 'live') {
     return 'keep-last'
   }
 
+  // Cold start / hard fail → apply empty (LIVE-ONLY failure UI, not fixtures).
   return 'apply'
 }
 

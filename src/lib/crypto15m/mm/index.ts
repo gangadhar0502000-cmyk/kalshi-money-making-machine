@@ -63,3 +63,11 @@ export {
   type PersistedPaperMmSession,
   type SessionLedgerPersisted,
 } from './persist'
+
+export {
+  decideQuoteSides,
+  DEFAULT_DECISION_POLICY,
+  type DecisionPolicyInput,
+  type DecisionPolicyResult,
+  type DecisionPolicyConfig,
+} from './decisionPolicy'

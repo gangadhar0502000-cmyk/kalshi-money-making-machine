@@ -44,8 +44,8 @@ export function Crypto15mLab() {
       const result = await fetchCrypto15mMarkets(signal)
       if (signal?.aborted) return
 
-      // Never wipe a good universe with a transient empty/failed refresh (rollover gap).
-      // Explicit: DEMO → LIVE with markets always replaces the demo universe.
+      // Never wipe a good LIVE universe with a transient empty refresh (rollover gap).
+      // LIVE-ONLY: demo fixtures are never applied.
       const decision = shouldApplyLabRefresh({
         prevSource: sourceRef.current,
         next: result,
@@ -193,17 +193,17 @@ export function Crypto15mLab() {
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
         <span
           className={`rounded-full px-2 py-0.5 font-semibold ${
-            source === 'live'
+            source === 'live' && markets.length > 0
               ? 'bg-emerald-950 text-emerald-300'
-              : source === 'demo'
-                ? 'bg-amber-950 text-amber-200'
+              : source === 'live' && markets.length === 0
+                ? 'bg-rose-950 text-rose-200'
                 : 'bg-slate-800 text-slate-400'
           }`}
         >
-          {source === 'live'
+          {source === 'live' && markets.length > 0
             ? 'LIVE Kalshi (proxy → public)'
-            : source === 'demo'
-              ? 'DEMO fixtures (offline fallback)'
+            : source === 'live' && markets.length === 0
+              ? 'LIVE-ONLY FAILURE'
               : 'Fetching markets…'}
         </span>
         {fetchedAt && <span>Updated {formatRelativeTime(fetchedAt)}</span>}
@@ -212,22 +212,19 @@ export function Crypto15mLab() {
           Refresh now
         </button>
         {error && (
-          <span
-            className={`max-w-2xl truncate ${source === 'demo' ? 'text-amber-400/90' : 'text-slate-500'}`}
-            title={error}
-          >
-            {source === 'demo' ? `lastError: ${error}` : error}
+          <span className="max-w-2xl truncate text-rose-300/90" title={error}>
+            {error}
           </span>
         )}
       </div>
 
-      {source === 'demo' && (
-        <div className="rounded-xl border-2 border-amber-500/70 bg-amber-950/50 px-4 py-3 text-sm font-semibold text-amber-100 shadow-lg shadow-amber-950/40">
-          ⚠ DEMO MARKET UNIVERSE — live proxy (/local-api/crypto15m) and public Kalshi API both
-          failed. Paper MM is using offline fixtures with synthetic floor_strike. Will auto-switch
-          back to LIVE on the next successful refresh — do not treat demo P&amp;L as live edge.
+      {source === 'live' && markets.length === 0 && error && (
+        <div className="rounded-xl border-2 border-rose-500/70 bg-rose-950/50 px-4 py-3 text-sm font-semibold text-rose-100 shadow-lg shadow-rose-950/40">
+          🛑 LIVE-ONLY FAILURE — no market universe. Proxy and public Kalshi both failed (demo
+          fixtures removed). Paper research requires online markets; nothing offline is loaded.
+          Retry when the network / proxy is up. Positive P&amp;L is not guaranteed.
           {error ? (
-            <p className="mt-1 text-xs font-normal text-amber-200/80" title={error}>
+            <p className="mt-1 text-xs font-normal text-rose-200/80" title={error}>
               {error}
             </p>
           ) : null}
@@ -270,7 +267,7 @@ export function Crypto15mLab() {
           markets={markets}
           selectedTicker={selectedTicker}
           onSelect={setSelectedTicker}
-          source={source ?? 'demo'}
+          source={source === 'demo' ? 'live' : (source ?? 'live')}
         />
       </div>
     </div>
