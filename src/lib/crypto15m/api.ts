@@ -54,6 +54,25 @@ function formatFetchError(e: unknown): string {
   return String(e)
 }
 
+/** Caller AbortSignal (Strict Mode / effect cleanup) — not a live outage. */
+export function isAbortReason(e: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true
+  if (e instanceof Error) {
+    return e.name === 'AbortError' || /aborted/i.test(e.message)
+  }
+  return false
+}
+
+/** Quiet result when the caller aborted — never LIVE-ONLY FAILURE / never demo. */
+function abortedFetchResult(seriesList: readonly string[]): FetchCrypto15mResult {
+  return {
+    markets: [],
+    source: 'live',
+    fetchedAt: new Date().toISOString(),
+    seriesTried: [...seriesList],
+  }
+}
+
 async function fetchSeries(
   base: string,
   seriesTicker: string,
@@ -94,6 +113,9 @@ function finalizeLive(
  * LIVE ONLY: no demo / offline fixtures. If proxy + public both fail, returns
  * empty markets with a loud error (UI shows LIVE-ONLY failure).
  *
+ * Caller AbortSignal aborts (React Strict Mode / effect cleanup) are quiet:
+ * no LIVE-ONLY FAILURE, no console.error, no demo fallback.
+ *
  * Proxy and public use **separate** AbortSignal budgets so a slow/aborted proxy
  * cannot burn the public fallback timeout.
  */
@@ -102,6 +124,8 @@ export async function fetchCrypto15mMarkets(
   seriesList: readonly string[] = CRYPTO_15M_SERIES,
   budgets?: FetchCrypto15mBudgets,
 ): Promise<FetchCrypto15mResult> {
+  if (signal?.aborted) return abortedFetchResult(seriesList)
+
   const proxyMs = budgets?.proxyMs ?? PROXY_TIMEOUT_MS
   const publicMs = budgets?.publicMs ?? PUBLIC_TIMEOUT_MS
   const errors: string[] = []
@@ -112,6 +136,7 @@ export async function fetchCrypto15mMarkets(
     const { signal: proxyTimed, clear } = mergeAbort(signal, proxyMs)
     try {
       const proxy = await fetchLocalCrypto15m(proxyTimed)
+      if (signal?.aborted) return abortedFetchResult(seriesList)
       if (proxy.markets.length > 0) {
         for (const m of proxy.markets) {
           if (isCrypto15mMarket(m)) byTicker.set(m.ticker, m)
@@ -126,11 +151,15 @@ export async function fetchCrypto15mMarkets(
         errors.push('proxy: empty open set')
       }
     } catch (e) {
+      // Caller abort (Strict Mode) — quiet exit. Proxy-budget timeout continues to public.
+      if (signal?.aborted) return abortedFetchResult(seriesList)
       errors.push(`proxy: ${formatFetchError(e)}`)
     } finally {
       clear()
     }
   }
+
+  if (signal?.aborted) return abortedFetchResult(seriesList)
 
   // 2) Public Kalshi Trade API via Vite proxies — fresh timeout (never inherits proxy abort)
   {
@@ -185,7 +214,11 @@ export async function fetchCrypto15mMarkets(
     }
   }
 
+  // Caller abort / Strict Mode cleanup — never treat as live outage
+  if (signal?.aborted) return abortedFetchResult(seriesList)
+
   // 3) LIVE-ONLY failure — never fall back to demo fixtures
+  // Only when the request completed (or timed out for real) with no markets.
   const detail =
     errors.join(' | ') ||
     'proxy and public both returned no markets'

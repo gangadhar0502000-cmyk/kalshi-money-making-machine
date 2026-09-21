@@ -123,6 +123,60 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     expect(result.error ?? '').toMatch(/LIVE-ONLY FAILURE/i)
     expect(result.error ?? '').toMatch(/proxy:\s*aborted/i)
   })
+
+  it('caller AbortSignal abort → no LIVE-ONLY FAILURE / no demo / no console.error', async () => {
+    const { fetchCrypto15mMarkets } = await import('./api')
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        await new Promise<never>((_resolve, reject) => {
+          const s = init?.signal
+          const fail = () => {
+            const err = new Error('The operation was aborted')
+            err.name = 'AbortError'
+            reject(err)
+          }
+          if (s?.aborted) return fail()
+          s?.addEventListener('abort', fail, { once: true })
+        })
+      }),
+    )
+
+    const ac = new AbortController()
+    const pending = fetchCrypto15mMarkets(ac.signal, ['KXBTC15M'], {
+      proxyMs: 5_000,
+      publicMs: 5_000,
+    })
+    ac.abort()
+    const result = await pending
+
+    expect(result.source).toBe('live')
+    expect(result.source).not.toBe('demo')
+    expect(result.error ?? '').not.toMatch(/LIVE-ONLY FAILURE/i)
+    expect(result.error).toBeUndefined()
+    expect(errSpy).not.toHaveBeenCalled()
+    // Must not look like a completed outage with a loud failure string
+    expect(errSpy.mock.calls.flat().join(' ')).not.toMatch(/LIVE-ONLY FAILURE/i)
+  })
+
+  it('already-aborted signal → quiet empty (no LIVE-ONLY / no demo)', async () => {
+    const { fetchCrypto15mMarkets } = await import('./api')
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const ac = new AbortController()
+    ac.abort()
+    const result = await fetchCrypto15mMarkets(ac.signal, ['KXBTC15M'])
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(result.source).not.toBe('demo')
+    expect(result.markets).toEqual([])
+    expect(result.error ?? '').not.toMatch(/LIVE-ONLY FAILURE/i)
+    expect(errSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe('Lab live-only refresh', () => {

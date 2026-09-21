@@ -4,7 +4,7 @@ import type {
   ExperimentSuggestion,
   PaperJournalEntry,
 } from '../../types/crypto15m'
-import { fetchCrypto15mMarkets, fetchMarketByTicker } from '../../lib/crypto15m/api'
+import { fetchCrypto15mMarkets, fetchMarketByTicker, isAbortReason } from '../../lib/crypto15m/api'
 import {
   clearJournal,
   computeRuleStats,
@@ -42,6 +42,7 @@ export function Crypto15mLab() {
     setLoading(true)
     try {
       const result = await fetchCrypto15mMarkets(signal)
+      // Strict Mode / effect cleanup abort — never LIVE-ONLY, never wipe live universe.
       if (signal?.aborted) return
 
       // Never wipe a good LIVE universe with a transient empty refresh (rollover gap).
@@ -78,7 +79,7 @@ export function Crypto15mLab() {
         return pickBestOpenMarket(marketsForPick)?.ticker ?? marketsForPick[0]?.ticker ?? null
       })
     } catch (e) {
-      if (signal?.aborted) return
+      if (signal?.aborted || isAbortReason(e, signal)) return
       setError(
         `Refresh failed: ${e instanceof Error ? e.message : String(e)} — retrying…`,
       )

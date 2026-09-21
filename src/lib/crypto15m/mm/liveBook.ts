@@ -66,6 +66,7 @@ function formatLocalError(e: unknown, signal?: AbortSignal): Error {
 export async function fetchLocalCrypto15m(
   signal?: AbortSignal,
 ): Promise<LocalCrypto15mResponse> {
+  if (signal?.aborted) throw new Error('aborted')
   try {
     const res = await fetch('/local-api/crypto15m', {
       signal,
