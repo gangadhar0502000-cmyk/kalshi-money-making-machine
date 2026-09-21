@@ -480,7 +480,9 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                   {portfolioState.scan.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-2 py-3 text-slate-600">
-                        No open markets in feed — wait for refresh or check demo/live source.
+                        {portfolioState.aggregate.activeBooks > 0
+                          ? 'No open markets in ranked feed — holding active slots until refresh/rollover (not releasing).'
+                          : 'No open markets in feed — wait for refresh or check demo/live/proxy source.'}
                       </td>
                     </tr>
                   )}
@@ -914,18 +916,34 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </div>
       )}
 
-      {multiBook && portfolioState.books.some((b) => b.fills.length > 0) && (
+      {multiBook &&
+        (portfolioState.books.some((b) => b.fills.length > 0) ||
+          portfolioState.sessionFills.length > 0) && (
         <LogPanel
-          title="Multi-book fills (recent per book)"
+          title="Multi-book fills (session + active books)"
           empty="No fills yet."
-          rows={portfolioState.books.flatMap((b) =>
-            b.fills.slice(0, 8).map((f) => ({
-              id: `${b.slotId}-${f.id}`,
-              tone: f.reason === 'settlement' ? 'warn' : f.toxic ? 'bad' : 'neutral',
-              primary: `${b.snapshot.asset ?? '?'} · ${f.side === 'buy_yes' ? 'BUY' : 'SELL'} ${f.size} @ ${formatCents(f.price)}`,
-              secondary: `${b.snapshot.marketTicker} · ${f.reason} · ${new Date(f.t).toLocaleTimeString()}`,
+          rows={[
+            ...portfolioState.sessionFills.slice(0, 12).map((f) => ({
+              id: `session-${f.id}`,
+              tone:
+                f.reason === 'settlement' ? ('warn' as const) : f.toxic ? ('bad' as const) : ('neutral' as const),
+              primary: `SESSION · ${f.side === 'buy_yes' ? 'BUY' : 'SELL'} ${f.size} @ ${formatCents(f.price)}`,
+              secondary: `${f.reason} · ${new Date(f.t).toLocaleTimeString()}`,
             })),
-          )}
+            ...portfolioState.books.flatMap((b) =>
+              b.fills.slice(0, 8).map((f) => ({
+                id: `${b.slotId}-${f.id}`,
+                tone:
+                  f.reason === 'settlement'
+                    ? ('warn' as const)
+                    : f.toxic
+                      ? ('bad' as const)
+                      : ('neutral' as const),
+                primary: `${b.snapshot.asset ?? '?'} · ${f.side === 'buy_yes' ? 'BUY' : 'SELL'} ${f.size} @ ${formatCents(f.price)}`,
+                secondary: `${b.snapshot.marketTicker} · ${f.reason} · ${new Date(f.t).toLocaleTimeString()}`,
+              })),
+            ),
+          ]}
         />
       )}
 

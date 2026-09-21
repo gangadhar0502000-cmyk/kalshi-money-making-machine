@@ -3,12 +3,22 @@
  * Never holds the private key.
  */
 
+import type { KalshiMarketRaw } from '../../../types/kalshi'
 import { parseOrderbookFp, type OrderBookSnapshot } from './orderbook'
 
 export interface LocalApiHealth {
   ok: boolean
   readOnly: boolean
   credentialsLoaded: boolean
+  banner?: string
+}
+
+export interface LocalCrypto15mResponse {
+  readOnly: boolean
+  authenticated: boolean
+  markets: KalshiMarketRaw[]
+  errors?: string[]
+  fetchedAt?: string
   banner?: string
 }
 
@@ -37,4 +47,25 @@ export async function fetchLiveOrderbook(
   }
   if (data.error) throw new Error(data.error)
   return parseOrderbookFp(ticker, data, Boolean(data.authenticated))
+}
+
+/**
+ * Prefer proxy path for open crypto 15m universe (authenticated when keys loaded).
+ * Returns null when proxy is down — caller falls back to public API.
+ */
+export async function fetchLocalCrypto15m(
+  signal?: AbortSignal,
+): Promise<LocalCrypto15mResponse | null> {
+  try {
+    const res = await fetch('/local-api/crypto15m', {
+      signal,
+      headers: { Accept: 'application/json' },
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as LocalCrypto15mResponse
+    if (!Array.isArray(data.markets)) return null
+    return data
+  } catch {
+    return null
+  }
 }

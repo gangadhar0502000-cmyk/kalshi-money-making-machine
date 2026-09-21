@@ -1076,6 +1076,37 @@ export class PaperMmEngine {
    */
   
   /**
+   * Settle open inventory (e.g. before portfolio release). Idempotent.
+   */
+  settleNow(): void {
+    if (!this.market || this.settled) return
+    this.settleInventory(this.market, { keepRunning: false })
+    this.emit()
+  }
+
+  /**
+   * Test helper — seed paper P&L / a fill without soft-sim (portfolio ledger tests).
+   */
+  seedPaperStats(opts: {
+    realizedSpreadPnl?: number
+    feesPaid?: number
+    cash?: number
+    fill?: MmFill
+    cancel?: MmCancelEvent
+  }): void {
+    if (opts.realizedSpreadPnl != null) this.realizedSpreadPnl = opts.realizedSpreadPnl
+    if (opts.feesPaid != null) this.feesPaid = opts.feesPaid
+    if (opts.cash != null) this.cash = opts.cash
+    if (opts.fill) {
+      this.fills.push(opts.fill)
+    }
+    if (opts.cancel) {
+      this.cancels.push(opts.cancel)
+    }
+    this.emit()
+  }
+
+  /**
    * Test/helper: seed last public spot without network (paper research only).
    * Triggers an FV requote.
    */

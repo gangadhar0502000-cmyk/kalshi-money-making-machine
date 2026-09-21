@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Crypto15mMarket,
   ExperimentSuggestion,
@@ -34,29 +34,45 @@ export function Crypto15mLab() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null)
   const [entries, setEntries] = useState<PaperJournalEntry[]>(() => loadJournal())
   const [nowTick, setNowTick] = useState(0)
+  const lastMarketsRef = useRef<Crypto15mMarket[]>([])
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
     try {
       const result = await fetchCrypto15mMarkets(signal)
       if (signal?.aborted) return
-      setMarkets(result.markets)
-      setSource(result.source)
-      setError(result.error)
-      setFetchedAt(result.fetchedAt)
+
+      // Never wipe a good universe with a transient empty/failed refresh (rollover gap).
+      let marketsForPick = result.markets
+      if (result.markets.length === 0 && lastMarketsRef.current.length > 0) {
+        marketsForPick = lastMarketsRef.current
+        setError(
+          (result.error ? result.error + ' · ' : '') +
+            'Empty feed — keeping last markets; retrying…',
+        )
+      } else {
+        lastMarketsRef.current = result.markets
+        setMarkets(result.markets)
+        setSource(result.source)
+        setError(result.error)
+        setFetchedAt(result.fetchedAt)
+      }
+
       setSelectedTicker((prev) => {
-        const current = prev ? result.markets.find((m) => m.ticker === prev) ?? null : null
-        // If prev disappeared from feed, treat as closed → pick best open
-        const synthetic = current
-        const roll = pickRollTarget(result.markets, synthetic)
+        const current = prev ? marketsForPick.find((m) => m.ticker === prev) ?? null : null
+        const roll = pickRollTarget(marketsForPick, current)
         if (roll) return roll.ticker
         if (prev && !current) {
-          // Expired ticker dropped from open feed — roll to best open
-          return pickBestOpenMarket(result.markets)?.ticker ?? null
+          return pickBestOpenMarket(marketsForPick)?.ticker ?? prev
         }
         if (prev && current) return prev
-        return pickBestOpenMarket(result.markets)?.ticker ?? result.markets[0]?.ticker ?? null
+        return pickBestOpenMarket(marketsForPick)?.ticker ?? marketsForPick[0]?.ticker ?? null
       })
+    } catch (e) {
+      if (signal?.aborted) return
+      setError(
+        `Refresh failed: ${e instanceof Error ? e.message : String(e)} — retrying…`,
+      )
     } finally {
       if (!signal?.aborted) setLoading(false)
     }

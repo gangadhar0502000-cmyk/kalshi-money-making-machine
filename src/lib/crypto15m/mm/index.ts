@@ -8,7 +8,7 @@ export {
 } from './config'
 export { PaperMmEngine, paperMmEngine } from './engine'
 export { asDollarPrice, formatPnlDual, clampPx, roundPx } from './prices'
-export { fetchLiveOrderbook, fetchLocalHealth } from './liveBook'
+export { fetchLiveOrderbook, fetchLocalHealth, fetchLocalCrypto15m } from './liveBook'
 export { parseOrderbookFp, detectBookFills } from './orderbook'
 export type {
   MmCancelEvent,
