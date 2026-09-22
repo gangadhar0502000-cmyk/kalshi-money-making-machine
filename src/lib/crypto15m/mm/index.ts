@@ -69,10 +69,15 @@ export {
 export {
   decideQuoteSides,
   canAcceptInventoryIncreasingFill,
+  clampQuotesMakerOnly,
+  makerCaptureCents,
+  emptyEdgePersistState,
+  effectiveOpeningMinEdgeCents,
   DEFAULT_DECISION_POLICY,
   type DecisionPolicyInput,
   type DecisionPolicyResult,
   type DecisionPolicyConfig,
+  type EdgePersistState,
 } from './decisionPolicy'
 
 export {

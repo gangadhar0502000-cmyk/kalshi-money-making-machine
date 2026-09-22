@@ -1064,12 +1064,28 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             onChange={(v) => setDraft((d) => ({ ...d, inventorySkewCentsPerUnit: v }))}
           />
           <Knob
-            label="Min edge vs mid (¢)"
+            label="Min open edge vs mid (¢)"
             value={draft.minEdgeCents}
             step={0.5}
             min={0}
             max={20}
             onChange={(v) => setDraft((d) => ({ ...d, minEdgeCents: v }))}
+          />
+          <Knob
+            label="Edge persist ticks"
+            value={draft.edgePersistTicks}
+            step={1}
+            min={1}
+            max={10}
+            onChange={(v) => setDraft((d) => ({ ...d, edgePersistTicks: v }))}
+          />
+          <Knob
+            label="Min maker capture (¢)"
+            value={draft.minCaptureCents}
+            step={0.5}
+            min={0}
+            max={10}
+            onChange={(v) => setDraft((d) => ({ ...d, minCaptureCents: v }))}
           />
           <Knob
             label="Annual vol (FV)"

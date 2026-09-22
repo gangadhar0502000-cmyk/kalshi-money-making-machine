@@ -92,6 +92,7 @@ describe('FV quoting + edge gates', () => {
       settleOnClose: true,
       fvQuoting: true,
       minEdgeCents: 3,
+      edgePersistTicks: 1,
       maxSaneEdgeCents: 25,
       annualVol: 0.7,
     })

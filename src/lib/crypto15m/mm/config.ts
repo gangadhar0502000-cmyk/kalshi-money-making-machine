@@ -108,6 +108,31 @@ export interface PaperMmConfig {
    */
   maxSaneEdgeCents: number
   /**
+   * After maker clamp to BBO, resting price must still capture ≥ this many cents
+   * vs FV (bid: FV−bid; ask: ask−FV). Default 1¢. Opening sides only.
+   */
+  minCaptureCents: number
+  /**
+   * Consecutive quote rebuilds where edge sign+threshold must hold before a side
+   * turns ON (~3–5s at default quoteRefreshMs). Drop immediately on flip/insanity.
+   * Default 3. Set 1 to activate on first qualifying tick.
+   */
+  edgePersistTicks: number
+  /**
+   * When |edge| < this band AND inventory flat, both sides may quote.
+   * Default 0 = never two-sided from edge mode (strict one-sided when |edge| ≥ minEdge).
+   */
+  twoSidedEdgeBandCents: number
+  /**
+   * Extra cents added to minEdge for *opening* (inventory-adding) quotes only.
+   * Unwind unchanged. Default 0.
+   */
+  openingEdgeExtraCents: number
+  /**
+   * When true, opening min also requires ≥ minEdge + halfSpreadCents.
+   */
+  openEdgeAddHalfSpread: boolean
+  /**
    * Minimum contracts of depth that must be consumed at our touch price
    * between consecutive book polls to count as a book_depth fill.
    * Strict default is high so mild flicker does not print fills.
@@ -174,7 +199,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicMidHigh: 0.95,
   autoRoll: true,
   fvQuoting: true,
-  minEdgeCents: 2.5,
+  minEdgeCents: 3.5,
   annualVol: 0.7,
   maxActiveMarkets: 5,
   multiBook: true,
@@ -182,6 +207,11 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicFillPullMs: 8000,
   unwindThreshold: 1,
   maxSaneEdgeCents: 25,
+  minCaptureCents: 1,
+  edgePersistTicks: 3,
+  twoSidedEdgeBandCents: 0,
+  openingEdgeExtraCents: 0,
+  openEdgeAddHalfSpread: false,
   minBookDepthConsumed: 8,
   minTouchPolls: 4,
   allowMidWalk: false,
@@ -271,6 +301,11 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     toxicFillPullMs: Math.round(clamp(c.toxicFillPullMs, 0, 120_000)),
     unwindThreshold: Math.round(clamp(c.unwindThreshold, 1, 500)),
     maxSaneEdgeCents: clamp(c.maxSaneEdgeCents, 5, 100),
+    minCaptureCents: clamp(c.minCaptureCents, 0, 20),
+    edgePersistTicks: Math.round(clamp(c.edgePersistTicks, 1, 30)),
+    twoSidedEdgeBandCents: clamp(c.twoSidedEdgeBandCents, 0, 20),
+    openingEdgeExtraCents: clamp(c.openingEdgeExtraCents, 0, 20),
+    openEdgeAddHalfSpread: Boolean(c.openEdgeAddHalfSpread),
     minBookDepthConsumed: Math.round(clamp(c.minBookDepthConsumed, 1, 500)),
     minTouchPolls: Math.round(clamp(c.minTouchPolls, 1, 30)),
     allowMidWalk: Boolean(c.allowMidWalk),
@@ -323,5 +358,27 @@ export function migratePersistedScarcityConfig(
   // Older saves lacked the knob (treated as 0) — lift to STRICT default.
   out.minChurnCaptureCents =
     churn > 0 ? churn : STRICT_PAPER_MM_CONFIG.minChurnCaptureCents
+  // Lift opening edge bar for older saves that still carry 2.5¢.
+  const minEdge =
+    typeof partial.minEdgeCents === 'number' && Number.isFinite(partial.minEdgeCents)
+      ? partial.minEdgeCents
+      : STRICT_PAPER_MM_CONFIG.minEdgeCents
+  out.minEdgeCents = Math.max(minEdge, STRICT_PAPER_MM_CONFIG.minEdgeCents)
+  // Ensure new decision knobs exist on older sessions.
+  if (partial.minCaptureCents == null || !Number.isFinite(partial.minCaptureCents)) {
+    out.minCaptureCents = STRICT_PAPER_MM_CONFIG.minCaptureCents
+  }
+  if (partial.edgePersistTicks == null || !Number.isFinite(partial.edgePersistTicks)) {
+    out.edgePersistTicks = STRICT_PAPER_MM_CONFIG.edgePersistTicks
+  }
+  if (partial.twoSidedEdgeBandCents == null || !Number.isFinite(partial.twoSidedEdgeBandCents)) {
+    out.twoSidedEdgeBandCents = STRICT_PAPER_MM_CONFIG.twoSidedEdgeBandCents
+  }
+  if (partial.openingEdgeExtraCents == null || !Number.isFinite(partial.openingEdgeExtraCents)) {
+    out.openingEdgeExtraCents = STRICT_PAPER_MM_CONFIG.openingEdgeExtraCents
+  }
+  if (partial.openEdgeAddHalfSpread == null) {
+    out.openEdgeAddHalfSpread = STRICT_PAPER_MM_CONFIG.openEdgeAddHalfSpread
+  }
   return out
 }

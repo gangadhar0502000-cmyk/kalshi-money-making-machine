@@ -53,6 +53,8 @@ export interface RankedMarket {
   midFallbackEligible: boolean
   /** True when FV exists and |edge| exceeds maxSaneEdgeCents. */
   sanityPark: boolean
+  /** True when market has a coherent top-of-book bid/ask. */
+  hasL2: boolean
 }
 
 /**
@@ -121,6 +123,17 @@ export function scoreMarketEdge(
   const midFallbackEligible =
     midOk && fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
 
+  const yesBid = market.yesBid
+  const yesAsk = market.yesAsk
+  const hasL2 =
+    yesBid != null &&
+    yesAsk != null &&
+    Number.isFinite(yesBid) &&
+    Number.isFinite(yesAsk) &&
+    yesAsk > yesBid &&
+    yesBid > 0 &&
+    yesAsk < 1
+
   return {
     market,
     asset,
@@ -136,6 +149,7 @@ export function scoreMarketEdge(
     quoteEligible,
     midFallbackEligible,
     sanityPark,
+    hasL2,
   }
 }
 
@@ -173,11 +187,17 @@ export function rankMarketsByAbsEdge(
     )
   })
   scored.sort((a, b) => {
-    // Still rank by |FV−mid| so scan shows insane edges; quoting parks them as sanity.
+    // Primary: |FV−mid| so scan still surfaces large edges (quoting parks insanity).
     if (b.absEdgeCents !== a.absEdgeCents) return b.absEdgeCents - a.absEdgeCents
-    // Prefer quoteEligible over mid-fallback / empty-FV when abs edge ties
+    // Prefer quote-eligible (stable sane edge) over mid-fallback / empty-FV.
     if (a.quoteEligible !== b.quoteEligible) return a.quoteEligible ? -1 : 1
     if (a.sanityPark !== b.sanityPark) return a.sanityPark ? 1 : -1
+    if (a.midFallbackEligible !== b.midFallbackEligible) return a.midFallbackEligible ? 1 : -1
+    const aNoSpot = a.fvMissingReason === 'no_spot'
+    const bNoSpot = b.fvMissingReason === 'no_spot'
+    if (aNoSpot !== bNoSpot) return aNoSpot ? 1 : -1
+    // Prefer markets with usable L2 when other keys tie.
+    if (a.hasL2 !== b.hasL2) return a.hasL2 ? -1 : 1
     const ac = Date.parse(a.market.closeTime)
     const bc = Date.parse(b.market.closeTime)
     if (Number.isFinite(ac) && Number.isFinite(bc) && ac !== bc) return ac - bc

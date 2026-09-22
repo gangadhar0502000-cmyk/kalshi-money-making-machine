@@ -33,7 +33,9 @@ import {
   canAcceptInventoryIncreasingFill,
   decideQuoteSides,
   DEFAULT_DECISION_POLICY,
+  emptyEdgePersistState,
   type DecisionPolicyConfig,
+  type EdgePersistState,
 } from './decisionPolicy'
 import type {
   MmCancelEvent,
@@ -135,6 +137,8 @@ export class PaperMmEngine {
   private toxicBidPullUntil = 0
   /** Temporary ask pull after toxic sell_yes fill. */
   private toxicAskPullUntil = 0
+  /** Edge persistence counters across quote rebuilds. */
+  private edgePersistState: EdgePersistState = emptyEdgePersistState()
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
@@ -404,6 +408,7 @@ export class PaperMmEngine {
       this.lastTotalPnlAt = 0
       this.toxicBidPullUntil = 0
       this.toxicAskPullUntil = 0
+    this.edgePersistState = emptyEdgePersistState()
       if (prevTicker && market) {
         this.message =
           `Rolled to ${market.ticker} (from ${prevTicker}) · close ${market.closeTime} · ` +
@@ -528,6 +533,7 @@ export class PaperMmEngine {
     this.lastTotalPnlAt = 0
     this.toxicBidPullUntil = 0
     this.toxicAskPullUntil = 0
+    this.edgePersistState = emptyEdgePersistState()
     this.lastFillAt = 0
     if (this.ownsFillCapStore) {
       this.fillCapStore = new TickerFillCapStore(Date.now())
@@ -978,6 +984,11 @@ export class PaperMmEngine {
       sizeUpEdgeMult: DEFAULT_DECISION_POLICY.sizeUpEdgeMult,
       unwindThreshold: this.config.unwindThreshold,
       maxSaneEdgeCents: this.config.maxSaneEdgeCents,
+      minCaptureCents: this.config.minCaptureCents,
+      edgePersistTicks: this.config.edgePersistTicks,
+      twoSidedEdgeBandCents: this.config.twoSidedEdgeBandCents,
+      openingEdgeExtraCents: this.config.openingEdgeExtraCents,
+      openEdgeAddHalfSpread: this.config.openEdgeAddHalfSpread,
     }
 
     const decision = decideQuoteSides({
@@ -997,7 +1008,9 @@ export class PaperMmEngine {
       toxicAskPullUntil: this.toxicAskPullUntil,
       now,
       config: policyCfg,
+      edgePersist: this.edgePersistState,
     })
+    this.edgePersistState = decision.edgePersist
 
     this.lastFvCenterActive = decision.centerMode === 'fv'
 

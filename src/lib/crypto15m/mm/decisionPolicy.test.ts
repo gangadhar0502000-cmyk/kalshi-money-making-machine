@@ -27,6 +27,11 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     sizeUpEdgeMult: DEFAULT_DECISION_POLICY.sizeUpEdgeMult,
     unwindThreshold: DEFAULT_DECISION_POLICY.unwindThreshold,
     maxSaneEdgeCents: DEFAULT_DECISION_POLICY.maxSaneEdgeCents,
+    minCaptureCents: DEFAULT_DECISION_POLICY.minCaptureCents,
+    edgePersistTicks: 1, // unit tests: activate on first qualifying tick
+    twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
+    openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
+    openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
     ...partial,
   }
 }
@@ -273,3 +278,110 @@ describe('canAcceptInventoryIncreasingFill', () => {
     expect(canAcceptInventoryIncreasingFill('sell_yes', 5, 10, 1)).toBe(true) // reducing long OK
   })
 })
+
+
+describe('decisionPolicy hardening (opening bar / clamp / persist / one-sided)', () => {
+  it('Opening quote blocked when edge 2.5¢ < new min (3.5)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        edgeCents: 2.5,
+        fairValue: 0.525,
+        mid: 0.5,
+        config: baseConfig({ minEdgeCents: 3.5, edgePersistTicks: 1 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason ?? d.bidReason).toMatch(/no edge|open min/i)
+  })
+
+  it('Clamp to BBO that removes edge → side off with clamp killed edge', () => {
+    // FV barely above bestBid after clamp → capture < minCaptureCents
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.5,
+        fairValue: 0.505,
+        edgeCents: 5,
+        bookBestBid: 0.5,
+        bookBestAsk: 0.52,
+        config: baseConfig({
+          minEdgeCents: 3,
+          halfSpreadCents: 0.5,
+          minCaptureCents: 1,
+          edgePersistTicks: 1,
+          maxSaneEdgeCents: 25,
+        }),
+      }),
+    )
+    // After clamp bid joins ≤ 0.50; FV−bid = 0.5¢ < 1¢ → killed
+    expect(d.bidActive).toBe(false)
+    expect(d.bidReason.toLowerCase()).toMatch(/clamp killed edge/)
+  })
+
+  it('Edge must persist N ticks before ON; flips off immediately on reverse', () => {
+    const cfg = baseConfig({ minEdgeCents: 3, edgePersistTicks: 3 })
+    const mk = (edge: number, persist: { bidTicks: number; askTicks: number }) =>
+      decideQuoteSides(
+        baseInput({
+          edgeCents: edge,
+          fairValue: 0.5 + edge / 100,
+          mid: 0.5,
+          config: cfg,
+          edgePersist: persist,
+        }),
+      )
+
+    const t1 = mk(5, { bidTicks: 0, askTicks: 0 })
+    expect(t1.bidActive).toBe(false)
+    expect(t1.bidReason.toLowerCase()).toMatch(/flicker|persist/)
+    expect(t1.edgePersist.bidTicks).toBe(1)
+
+    const t2 = mk(5, t1.edgePersist)
+    expect(t2.bidActive).toBe(false)
+    expect(t2.edgePersist.bidTicks).toBe(2)
+
+    const t3 = mk(5, t2.edgePersist)
+    expect(t3.bidActive).toBe(true)
+    expect(t3.bidReason).toMatch(/bid ON:.*persist/)
+    expect(t3.askActive).toBe(false)
+
+    // Reverse edge → drop immediately
+    const flip = mk(-5, t3.edgePersist)
+    expect(flip.bidActive).toBe(false)
+    expect(flip.askActive).toBe(false) // ask needs 3 ticks too
+    expect(flip.edgePersist.bidTicks).toBe(0)
+    expect(flip.edgePersist.askTicks).toBe(1)
+    expect(flip.askReason.toLowerCase()).toMatch(/flicker/)
+  })
+
+  it('|edge| large → only one side', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        edgeCents: 8,
+        fairValue: 0.58,
+        mid: 0.5,
+        inventory: 0,
+        config: baseConfig({ minEdgeCents: 3.5, edgePersistTicks: 1, twoSidedEdgeBandCents: 0 }),
+      }),
+    )
+    expect(d.bidActive).toBe(true)
+    expect(d.askActive).toBe(false)
+  })
+
+  it('Unwind still forces reduce side even without edge', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 4,
+        fairValue: null,
+        edgeCents: null,
+        mid: 0.5,
+        config: baseConfig({ edgePersistTicks: 1 }),
+      }),
+    )
+    expect(d.askActive).toBe(true)
+    expect(d.askReason.toLowerCase()).toMatch(/unwind/)
+    expect(d.bidActive).toBe(false)
+    expect(d.unwindActive).toBe(true)
+  })
+})
+

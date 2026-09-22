@@ -7,7 +7,9 @@
  * 1. Hard parks (money printer / not running / settled / feed / guard / expiry / bad mid)
  * 2. Inventory unwind (ALWAYS beats edge gate — stuck longs must be able to sell)
  * 3. Edge sanity cap (absurd |FV−mid| or near-0/1 mid vs conflicting FV → park, except unwind)
- * 4. Edge mode only adds inventory when flat-ish and |edge| ≥ minEdge
+ * 4. Edge mode only adds inventory when flat-ish, |edge| ≥ opening min, edge persisted,
+ *    and maker-clamped resting price still captures ≥ minCaptureCents vs FV
+ * 5. One-sided discipline: never both sides when |edge| ≥ minEdge (unless unwind)
  */
 
 import { clampPx, isValidQuoteMid } from './prices'
@@ -40,6 +42,31 @@ export interface DecisionPolicyConfig {
    * Park (except unwind) when |edgeCents| exceeds this — near-zero mid vs FV≈1 junk.
    */
   maxSaneEdgeCents: number
+  /**
+   * After maker clamp to BBO, resting price must still capture ≥ this many cents
+   * vs FV (bid: FV−bid; ask: ask−FV). Default 1¢. Opening sides only; unwind exempt.
+   */
+  minCaptureCents: number
+  /**
+   * Consecutive quote rebuilds where edge sign+threshold must hold before a side
+   * turns ON (~3–5s at default quoteRefreshMs). Drop immediately on flip/insanity.
+   * 1 = activate on first qualifying tick (tests / loose).
+   */
+  edgePersistTicks: number
+  /**
+   * When |edge| < this band AND inventory flat, both sides may quote.
+   * Default 0 = never two-sided from edge mode (strict one-sided when |edge| ≥ minEdge).
+   */
+  twoSidedEdgeBandCents: number
+  /**
+   * Extra cents added to minEdge for *opening* (inventory-adding) quotes only.
+   * Unwind unchanged. Default 0.
+   */
+  openingEdgeExtraCents: number
+  /**
+   * When true, opening min also requires ≥ minEdge + halfSpreadCents.
+   */
+  openEdgeAddHalfSpread: boolean
 }
 
 export const DEFAULT_DECISION_POLICY: Pick<
@@ -49,12 +76,41 @@ export const DEFAULT_DECISION_POLICY: Pick<
   | 'sizeUpEdgeMult'
   | 'unwindThreshold'
   | 'maxSaneEdgeCents'
+  | 'minCaptureCents'
+  | 'edgePersistTicks'
+  | 'twoSidedEdgeBandCents'
+  | 'openingEdgeExtraCents'
+  | 'openEdgeAddHalfSpread'
 > = {
   expiryPullMinutes: 0.5,
   sizeDownEdgeMult: 1.5,
   sizeUpEdgeMult: 3,
   unwindThreshold: 1,
   maxSaneEdgeCents: 25,
+  minCaptureCents: 1,
+  edgePersistTicks: 3,
+  twoSidedEdgeBandCents: 0,
+  openingEdgeExtraCents: 0,
+  openEdgeAddHalfSpread: false,
+}
+
+/** Mutable edge-persistence counters carried across quote rebuilds. */
+export interface EdgePersistState {
+  bidTicks: number
+  askTicks: number
+}
+
+export function emptyEdgePersistState(): EdgePersistState {
+  return { bidTicks: 0, askTicks: 0 }
+}
+
+/** Effective minimum |edge| to *open* (add inventory). Unwind ignores this. */
+export function effectiveOpeningMinEdgeCents(cfg: DecisionPolicyConfig): number {
+  let m = cfg.minEdgeCents + (cfg.openingEdgeExtraCents || 0)
+  if (cfg.openEdgeAddHalfSpread) {
+    m = Math.max(m, cfg.minEdgeCents + cfg.halfSpreadCents)
+  }
+  return m
 }
 
 export interface DecisionPolicyInput {
@@ -78,6 +134,8 @@ export interface DecisionPolicyInput {
   config: DecisionPolicyConfig
   /** Optional loud global reason (e.g. live feed down) — forces both OFF. */
   feedDownReason?: string | null
+  /** Prior persist counters (from last rebuild). */
+  edgePersist?: EdgePersistState | null
 }
 
 export interface DecisionPolicyResult {
@@ -96,6 +154,8 @@ export interface DecisionPolicyResult {
   active: boolean
   /** True when ask (or bid) was forced on for inventory reduction. */
   unwindActive: boolean
+  /** Updated persist counters for the next rebuild. */
+  edgePersist: EdgePersistState
 }
 
 function fmtEdge(edgeCents: number): string {
@@ -110,6 +170,7 @@ function parkBoth(
       DecisionPolicyResult,
       'yesBid' | 'yesAsk' | 'size' | 'skewCents' | 'halfSpreadCents' | 'centerMode'
     >,
+  persist: EdgePersistState = emptyEdgePersistState(),
 ): DecisionPolicyResult {
   return {
     bidActive: false,
@@ -119,6 +180,7 @@ function parkBoth(
     bothOffReason: reason,
     active: false,
     unwindActive: false,
+    edgePersist: persist,
     ...partial,
   }
 }
@@ -166,6 +228,27 @@ function edgeFailsSanity(
   if (mid <= 0.05 && fairValue >= 0.5 && edgeCents > maxSane * 0.5) return true
   if (mid >= 0.95 && fairValue <= 0.5 && -edgeCents > maxSane * 0.5) return true
   return false
+}
+
+function resolvePersistNeeded(cfg: DecisionPolicyConfig): number {
+  const raw = cfg.edgePersistTicks
+  if (!Number.isFinite(raw) || raw <= 1) return 1
+  return Math.min(30, Math.floor(raw))
+}
+
+/**
+ * Resting maker capture vs FV in cents. Null if FV unavailable.
+ * Bid: FV − bid; ask: ask − FV.
+ */
+export function makerCaptureCents(
+  side: 'bid' | 'ask',
+  restingPx: number,
+  fairValue: number | null,
+): number | null {
+  if (fairValue == null || !Number.isFinite(fairValue)) return null
+  if (!Number.isFinite(restingPx)) return null
+  if (side === 'bid') return (fairValue - restingPx) * 100
+  return (restingPx - fairValue) * 100
 }
 
 /**
@@ -262,6 +345,10 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   const unwindThresh = resolveUnwindThreshold(cfg)
   const needAskUnwind = input.inventory >= unwindThresh
   const needBidUnwind = input.inventory <= -unwindThresh
+  const openMin = effectiveOpeningMinEdgeCents(cfg)
+  const persistNeeded = resolvePersistNeeded(cfg)
+  const prevPersist = input.edgePersist ?? emptyEdgePersistState()
+  let nextPersist: EdgePersistState = { ...prevPersist }
 
   const blank = {
     yesBid: 0.01,
@@ -272,30 +359,35 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     centerMode: 'mid' as const,
   }
 
+  const resetPersist = (): EdgePersistState => {
+    nextPersist = emptyEdgePersistState()
+    return nextPersist
+  }
+
   if (input.moneyPrinterBug) {
-    return parkBoth('money printer freeze', blank)
+    return parkBoth('money printer freeze', blank, resetPersist())
   }
   if (!input.running) {
-    return parkBoth('not running', blank)
+    return parkBoth('not running', blank, resetPersist())
   }
   if (input.settled) {
-    return parkBoth('settled', blank)
+    return parkBoth('settled', blank, resetPersist())
   }
   if (input.feedDownReason) {
-    return parkBoth(input.feedDownReason, blank)
+    return parkBoth(input.feedDownReason, blank, resetPersist())
   }
   if (input.spotGuardCancel) {
-    return parkBoth('spot guard cancel', blank)
+    return parkBoth('spot guard cancel', blank, resetPersist())
   }
 
   const mins = input.minutesRemaining
   if (mins != null && Number.isFinite(mins) && mins < cfg.expiryPullMinutes) {
-    return parkBoth('expiry pull', blank)
+    return parkBoth('expiry pull', blank, resetPersist())
   }
 
   const midValid = isValidQuoteMid(input.mid)
   if (!midValid) {
-    return parkBoth('invalid mid', blank)
+    return parkBoth('invalid mid', blank, resetPersist())
   }
 
   if (
@@ -305,13 +397,13 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     Number.isFinite(input.bookBestAsk) &&
     !(input.bookBestAsk > input.bookBestBid)
   ) {
-    return parkBoth('incoherent book spread', blank)
+    return parkBoth('incoherent book spread', blank, resetPersist())
   }
 
   const useFv = cfg.fvQuoting && input.fairValue != null && midValid
   // FV mode: require FV for *edge* quoting — but inventory unwind may proceed on mid
   if (cfg.fvQuoting && !useFv && !needAskUnwind && !needBidUnwind) {
-    return parkBoth('no FV', { ...blank, centerMode: 'mid' })
+    return parkBoth('no FV', { ...blank, centerMode: 'mid' }, resetPersist())
   }
 
   const center = useFv ? input.fairValue! : input.mid
@@ -323,14 +415,18 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     ask = clampPx(bid + 0.01)
   }
   if (!(ask > bid)) {
-    return parkBoth('incoherent quote spread', {
-      yesBid: 0.01,
-      yesAsk: 0.99,
-      size: Math.max(1, cfg.quoteSize),
-      skewCents,
-      halfSpreadCents: half,
-      centerMode,
-    })
+    return parkBoth(
+      'incoherent quote spread',
+      {
+        yesBid: 0.01,
+        yesAsk: 0.99,
+        size: Math.max(1, cfg.quoteSize),
+        skewCents,
+        halfSpreadCents: half,
+        centerMode,
+      },
+      resetPersist(),
+    )
   }
 
   const absEdge = input.edgeCents != null ? Math.abs(input.edgeCents) : 0
@@ -364,14 +460,18 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
 
   // --- Abs edge sanity: park edge mode (unwind still allowed) ---
   if (sanityBroken && !needAskUnwind && !needBidUnwind) {
-    return parkBoth('edge sanity', {
-      yesBid: 0.01,
-      yesAsk: 0.99,
-      size,
-      skewCents,
-      halfSpreadCents: half,
-      centerMode,
-    })
+    return parkBoth(
+      'edge sanity',
+      {
+        yesBid: 0.01,
+        yesAsk: 0.99,
+        size,
+        skewCents,
+        halfSpreadCents: half,
+        centerMode,
+      },
+      resetPersist(),
+    )
   }
 
   let bidActive = false
@@ -379,6 +479,9 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   let bidReason = 'bid OFF: parked'
   let askReason = 'ask OFF: parked'
   let unwindActive = false
+  /** Edge-side candidates before persist / capture / one-sided gates. */
+  let bidEdgeCandidate = false
+  let askEdgeCandidate = false
 
   // ========== 1. INVENTORY UNWIND (priority over edge gate) ==========
   if (needAskUnwind) {
@@ -386,7 +489,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       askActive = false
       askReason = 'ask OFF: toxic mid'
     } else if (toxicAskPull) {
-      // After toxic sell we pull ask briefly; still prefer unwind — only block if still toxic mid
       askActive = false
       askReason = 'ask OFF: toxic fill pull'
     } else {
@@ -394,7 +496,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       askReason = 'ask ON: inventory unwind'
       unwindActive = true
       ask = priceUnwindAsk(input.mid, half, input.bookBestBid, input.bookBestAsk)
-      // Re-price bid placeholder so spread stays coherent if bid also on
       if (!(ask > bid)) bid = clampPx(ask - 0.01)
     }
   }
@@ -416,7 +517,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   }
 
   // ========== 2. EDGE MODE — only add inventory when flat-ish ==========
-  // Bid for edge: only if not in long-unwind-only, under max, edge ≥ min
   if (!needAskUnwind && !atMaxLong) {
     if (!midOkBid) {
       if (!bidActive) {
@@ -436,38 +536,37 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         }
       } else {
         const edge = input.edgeCents
-        if (edge == null || edge < cfg.minEdgeCents) {
+        if (edge == null || edge < openMin) {
           if (!bidActive) {
             bidActive = false
-            bidReason = 'bid OFF: no edge'
+            bidReason =
+              edge == null || edge < cfg.minEdgeCents
+                ? 'bid OFF: no edge'
+                : `bid OFF: open min ${openMin.toFixed(1)}¢`
           }
         } else {
           const longPenalty =
             input.inventory > 0 ? input.inventory * cfg.inventorySkewCentsPerUnit : 0
-          if (edge < cfg.minEdgeCents + longPenalty) {
+          if (edge < openMin + longPenalty) {
             if (!bidActive) {
               bidActive = false
               bidReason = 'bid OFF: inventory skew'
             }
           } else {
-            bidActive = true
-            bidReason = `bid ON: ${fmtEdge(edge)}`
+            bidEdgeCandidate = true
           }
         }
       }
     } else if (!bidActive) {
-      bidActive = true
-      bidReason = 'bid ON: mid mode'
+      bidEdgeCandidate = true
     }
   } else if (atMaxLong || needAskUnwind) {
-    // Never bid into max long / while unwinding a long
     if (!bidActive) {
       bidActive = false
       bidReason = atMaxLong ? 'bid OFF: max inventory' : 'bid OFF: unwind-only (long)'
     }
   }
 
-  // Ask for edge: only if not in short-unwind-only, above -max, edge ≤ −min
   if (!needBidUnwind && !atMaxShort) {
     if (!midOkAsk) {
       if (!askActive) {
@@ -487,28 +586,31 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         }
       } else if (!needAskUnwind) {
         const edge = input.edgeCents
-        if (edge == null || -edge < cfg.minEdgeCents) {
+        if (edge == null || -edge < openMin) {
           if (!askActive) {
             askActive = false
-            askReason = 'ask OFF: no edge'
+            askReason =
+              edge == null || -edge < cfg.minEdgeCents
+                ? 'ask OFF: no edge'
+                : `ask OFF: open min ${openMin.toFixed(1)}¢`
           }
         } else {
           const shortPenalty =
-            input.inventory < 0 ? Math.abs(input.inventory) * cfg.inventorySkewCentsPerUnit : 0
-          if (-edge < cfg.minEdgeCents + shortPenalty) {
+            input.inventory < 0
+              ? Math.abs(input.inventory) * cfg.inventorySkewCentsPerUnit
+              : 0
+          if (-edge < openMin + shortPenalty) {
             if (!askActive) {
               askActive = false
               askReason = 'ask OFF: inventory skew'
             }
           } else {
-            askActive = true
-            askReason = `ask ON: ${fmtEdge(edge)}`
+            askEdgeCandidate = true
           }
         }
       }
     } else if (!askActive) {
-      askActive = true
-      askReason = 'ask ON: mid mode'
+      askEdgeCandidate = true
     }
   } else if (atMaxShort || needBidUnwind) {
     if (!askActive) {
@@ -517,23 +619,128 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     }
   }
 
-  // After toxic buy: inventory may be long — unwind ask already forced above.
-  // Ensure toxic bid pull does not also kill the unwind ask (it doesn't).
+  // ========== 3. EDGE PERSISTENCE (anti-flicker) ==========
+  // Qualify → count up; flip / lose threshold / sanity → drop immediately.
+  if (sanityBroken) {
+    nextPersist = emptyEdgePersistState()
+    bidEdgeCandidate = false
+    askEdgeCandidate = false
+  } else if (bidEdgeCandidate) {
+    nextPersist = { bidTicks: prevPersist.bidTicks + 1, askTicks: 0 }
+    if (nextPersist.bidTicks < persistNeeded) {
+      bidReason = `bid OFF: edge flicker ${nextPersist.bidTicks}/${persistNeeded}`
+      bidEdgeCandidate = false
+    }
+  } else if (askEdgeCandidate) {
+    nextPersist = { bidTicks: 0, askTicks: prevPersist.askTicks + 1 }
+    if (nextPersist.askTicks < persistNeeded) {
+      askReason = `ask OFF: edge flicker ${nextPersist.askTicks}/${persistNeeded}`
+      askEdgeCandidate = false
+    }
+  } else {
+    nextPersist = emptyEdgePersistState()
+  }
 
-  // Maker-only: clamp any live quote to never cross BBO (FV/unwind safe)
+  // Promote persisted edge candidates (unwind already set active)
+  if (bidEdgeCandidate && !bidActive) {
+    bidActive = true
+    const edge = input.edgeCents ?? 0
+    bidReason =
+      persistNeeded > 1
+        ? `bid ON: ${fmtEdge(edge)} persist`
+        : `bid ON: ${fmtEdge(edge)}`
+  }
+  if (askEdgeCandidate && !askActive) {
+    askActive = true
+    const edge = input.edgeCents ?? 0
+    askReason =
+      persistNeeded > 1
+        ? `ask ON: ${fmtEdge(edge)} persist`
+        : `ask ON: ${fmtEdge(edge)}`
+  }
+
+  // ========== 4. ONE-SIDED DISCIPLINE ==========
+  // Never quote both sides when |edge| ≥ minEdge (favored side only).
+  // Allow both only when |edge| < twoSidedEdgeBand AND inventory flat (and not unwind).
+  const flatInv = input.inventory === 0
+  const twoSidedBand = Math.max(0, cfg.twoSidedEdgeBandCents || 0)
+  const edgeForSide = input.edgeCents
+  if (bidActive && askActive && !unwindActive) {
+    const allowTwoSided =
+      flatInv &&
+      edgeForSide != null &&
+      Math.abs(edgeForSide) < twoSidedBand &&
+      twoSidedBand > 0
+    if (!allowTwoSided) {
+      if (edgeForSide != null && edgeForSide >= openMin) {
+        askActive = false
+        askReason = 'ask OFF: one-sided (bid edge)'
+      } else if (edgeForSide != null && -edgeForSide >= openMin) {
+        bidActive = false
+        bidReason = 'bid OFF: one-sided (ask edge)'
+      } else if (edgeForSide != null && edgeForSide > 0) {
+        askActive = false
+        askReason = 'ask OFF: one-sided (bid edge)'
+      } else if (edgeForSide != null && edgeForSide < 0) {
+        bidActive = false
+        bidReason = 'bid OFF: one-sided (ask edge)'
+      } else {
+        bidActive = false
+        askActive = false
+        bidReason = 'both OFF: one-sided discipline'
+        askReason = 'both OFF: one-sided discipline'
+      }
+    }
+  }
+  // When |edge| ≥ minEdge, hard-ensure the wrong side is off (except unwind)
+  if (cfg.fvQuoting && edgeForSide != null && Math.abs(edgeForSide) >= cfg.minEdgeCents) {
+    if (edgeForSide > 0 && askActive && !needAskUnwind) {
+      askActive = false
+      askReason = 'ask OFF: one-sided (bid edge)'
+    }
+    if (edgeForSide < 0 && bidActive && !needBidUnwind) {
+      bidActive = false
+      bidReason = 'bid OFF: one-sided (ask edge)'
+    }
+  }
+
+  // Maker-only: clamp any live quote to never cross BBO
   if (bidActive || askActive) {
     const clamped = clampQuotesMakerOnly(bid, ask, input.bookBestBid, input.bookBestAsk)
     bid = clamped.bid
     ask = clamped.ask
     if (!(ask > bid)) {
-      return parkBoth('incoherent quote after maker clamp', {
-        yesBid: 0.01,
-        yesAsk: 0.99,
-        size,
-        skewCents,
-        halfSpreadCents: half,
-        centerMode,
-      })
+      return parkBoth(
+        'incoherent quote after maker clamp',
+        {
+          yesBid: 0.01,
+          yesAsk: 0.99,
+          size,
+          skewCents,
+          halfSpreadCents: half,
+          centerMode,
+        },
+        nextPersist,
+      )
+    }
+  }
+
+  // ========== 5. MAKER CAPTURE CHECK (opening sides only; unwind exempt) ==========
+  const minCap = Number.isFinite(cfg.minCaptureCents) ? Math.max(0, cfg.minCaptureCents) : 1
+  if (cfg.fvQuoting && input.fairValue != null) {
+    if (bidActive && !needBidUnwind && !/unwind/i.test(bidReason)) {
+      const cap = makerCaptureCents('bid', bid, input.fairValue)
+      if (cap == null || cap < minCap) {
+        bidActive = false
+        bidReason = 'bid OFF: clamp killed edge'
+      }
+    }
+    if (askActive && !needAskUnwind && !/unwind/i.test(askReason)) {
+      const cap = makerCaptureCents('ask', ask, input.fairValue)
+      if (cap == null || cap < minCap) {
+        askActive = false
+        askReason = 'ask OFF: clamp killed edge'
+      }
     }
   }
 
@@ -545,11 +752,17 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   if (!bidActive && !askActive) {
     if (sanityBroken) {
       bothOffReason = 'edge sanity'
+    } else if (/flicker/i.test(bidReason) || /flicker/i.test(askReason)) {
+      bothOffReason = 'edge flicker'
+      bidReason = 'both OFF: edge flicker'
+      askReason = 'both OFF: edge flicker'
     } else if (
       cfg.fvQuoting &&
-      (input.edgeCents == null || Math.abs(input.edgeCents) < cfg.minEdgeCents)
+      (input.edgeCents == null || Math.abs(input.edgeCents) < openMin)
     ) {
       bothOffReason = 'no edge'
+    } else if (/clamp killed/i.test(bidReason) || /clamp killed/i.test(askReason)) {
+      bothOffReason = 'clamp killed edge'
     } else {
       bothOffReason = 'parked'
     }
@@ -569,5 +782,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     centerMode: unwindActive && !useFv ? 'mid' : centerMode,
     active: bidActive || askActive,
     unwindActive,
+    edgePersist: nextPersist,
   }
 }

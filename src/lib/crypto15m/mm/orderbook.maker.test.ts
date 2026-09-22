@@ -153,6 +153,11 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         sizeUpEdgeMult: DEFAULT_DECISION_POLICY.sizeUpEdgeMult,
         unwindThreshold: 1,
         maxSaneEdgeCents: 50,
+        minCaptureCents: DEFAULT_DECISION_POLICY.minCaptureCents,
+        edgePersistTicks: 1,
+        twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
+        openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
+        openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
       },
     })
     expect(d.bidActive).toBe(true)
@@ -193,6 +198,11 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         sizeUpEdgeMult: DEFAULT_DECISION_POLICY.sizeUpEdgeMult,
         unwindThreshold: 1,
         maxSaneEdgeCents: 25,
+        minCaptureCents: DEFAULT_DECISION_POLICY.minCaptureCents,
+        edgePersistTicks: 1,
+        twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
+        openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
+        openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
       },
     })
     expect(d.askActive).toBe(true)
