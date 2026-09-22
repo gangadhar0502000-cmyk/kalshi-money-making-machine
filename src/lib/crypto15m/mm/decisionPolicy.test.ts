@@ -35,6 +35,7 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
     hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
     minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
+    stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
     ...partial,
   }
 }

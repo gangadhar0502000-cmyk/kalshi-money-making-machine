@@ -91,13 +91,13 @@ describe('PaperMmPortfolio', () => {
       mk({
         ticker: `${asset}-OPEN`,
         asset,
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
-        minutesRemaining: 2,
+        minutesRemaining: 10,
       }),
     )
     for (const a of ['BTC', 'ETH', 'SOL', 'DOGE', 'ADA']) {
-      portfolio.seedSpot(a, 120)
+      portfolio.seedSpot(a, 100.05)
     }
     portfolio.syncMarketUniverse(markets)
     portfolio.start()
@@ -118,11 +118,11 @@ describe('PaperMmPortfolio', () => {
     const high = mk({
       ticker: 'BTC-EDGE',
       asset: 'BTC',
-      midYes: 0.35,
+      midYes: 0.48,
       floorStrike: 100_000,
-      minutesRemaining: 2,
+      minutesRemaining: 12,
     })
-    portfolio.seedSpot('BTC', 102_000)
+    portfolio.seedSpot('BTC', 100_100)
     portfolio.seedSpot('ETH', 3_000)
     portfolio.setConfig({ maxActiveMarkets: 1 })
     portfolio.syncMarketUniverse([low, high])
@@ -139,17 +139,17 @@ describe('PaperMmPortfolio', () => {
       asset: 'BTC',
       midYes: 0.5,
       floorStrike: 100_000,
-      minutesRemaining: 5,
+      minutesRemaining: 12,
     })
     const eth = mk({
       ticker: 'ETH-A',
       asset: 'ETH',
       midYes: 0.5,
       floorStrike: 3_000,
-      minutesRemaining: 5,
+      minutesRemaining: 12,
     })
-    portfolio.seedSpot('BTC', 102_000)
-    portfolio.seedSpot('ETH', 2_900)
+    portfolio.seedSpot('BTC', 100_100)
+    portfolio.seedSpot('ETH', 3_002)
     portfolio.setConfig({ maxActiveMarkets: 2 })
     portfolio.syncMarketUniverse([btc, eth])
     portfolio.start()
@@ -167,32 +167,32 @@ describe('PaperMmPortfolio', () => {
       status: 'closed',
       closeTime: new Date(Date.now() - 1000).toISOString(),
       minutesRemaining: 0,
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
     })
     const eth = mk({
       ticker: 'ETH-LIVE',
       asset: 'ETH',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
     const sol = mk({
       ticker: 'SOL-LIVE',
       asset: 'SOL',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
-    portfolio.seedSpot('BTC', 120)
-    portfolio.seedSpot('ETH', 120)
-    portfolio.seedSpot('SOL', 120)
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
+    portfolio.seedSpot('SOL', 100.05)
     portfolio.setConfig({ maxActiveMarkets: 2 })
 
     const btcLive = mk({
       ticker: 'BTC-DEAD',
       asset: 'BTC',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
@@ -213,19 +213,19 @@ describe('PaperMmPortfolio', () => {
     const btc = mk({
       ticker: 'BTC-HOLD',
       asset: 'BTC',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
     const eth = mk({
       ticker: 'ETH-HOLD',
       asset: 'ETH',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
-    portfolio.seedSpot('BTC', 120)
-    portfolio.seedSpot('ETH', 120)
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
     portfolio.setConfig({ maxActiveMarkets: 5 })
     portfolio.syncMarketUniverse([btc, eth])
     portfolio.start()
@@ -246,7 +246,7 @@ describe('PaperMmPortfolio', () => {
         status: 'closed',
         closeTime: new Date(Date.now() - 60_000).toISOString(),
         minutesRemaining: 0,
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
       }),
       mk({
@@ -255,7 +255,7 @@ describe('PaperMmPortfolio', () => {
         status: 'closed',
         closeTime: new Date(Date.now() - 60_000).toISOString(),
         minutesRemaining: 0,
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
       }),
     ]
@@ -270,12 +270,12 @@ describe('PaperMmPortfolio', () => {
     const oldWin = mk({
       ticker: 'KXBNB15M-OLD',
       asset: 'BNB',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
       closeTime: new Date(Date.now() + 2 * 60_000).toISOString(),
     })
-    portfolio.seedSpot('BNB', 120)
+    portfolio.seedSpot('BNB', 100.05)
     portfolio.setConfig({ maxActiveMarkets: 1 })
     portfolio.syncMarketUniverse([oldWin])
     portfolio.start()
@@ -290,7 +290,7 @@ describe('PaperMmPortfolio', () => {
     const nextWin = mk({
       ticker: 'KXBNB15M-NEW',
       asset: 'BNB',
-      midYes: 0.42,
+      midYes: 0.48,
       floorStrike: 101,
       minutesRemaining: 14,
       closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
@@ -306,20 +306,20 @@ describe('PaperMmPortfolio', () => {
     const btc = mk({
       ticker: 'BTC-PNL',
       asset: 'BTC',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
     const eth = mk({
       ticker: 'ETH-PNL',
       asset: 'ETH',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
-    portfolio.seedSpot('BTC', 120)
-    portfolio.seedSpot('ETH', 120)
-    portfolio.seedSpot('SOL', 120)
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
+    portfolio.seedSpot('SOL', 100.05)
     portfolio.setConfig({ maxActiveMarkets: 2 })
     portfolio.syncMarketUniverse([btc, eth])
     portfolio.start()
@@ -350,7 +350,7 @@ describe('PaperMmPortfolio', () => {
     const btcNext = mk({
       ticker: 'BTC-PNL-NEXT',
       asset: 'BTC',
-      midYes: 0.41,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 14,
       closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
@@ -399,19 +399,19 @@ describe('PaperMmPortfolio', () => {
     const only = mk({
       ticker: 'BTC-FILLS',
       asset: 'BTC',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
     const eth = mk({
       ticker: 'ETH-TAKE',
       asset: 'ETH',
-      midYes: 0.35,
+      midYes: 0.48,
       floorStrike: 100,
-      minutesRemaining: 2,
+      minutesRemaining: 10,
     })
-    portfolio.seedSpot('BTC', 120)
-    portfolio.seedSpot('ETH', 120)
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
     portfolio.setConfig({ maxActiveMarkets: 1 })
     portfolio.syncMarketUniverse([only])
     portfolio.start()
@@ -430,7 +430,7 @@ describe('PaperMmPortfolio', () => {
       status: 'closed',
       minutesRemaining: 0,
       closeTime: new Date(Date.now() - 1000).toISOString(),
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
     })
     portfolio.syncMarketUniverse([btcDead, eth])

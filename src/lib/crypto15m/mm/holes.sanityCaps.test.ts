@@ -104,6 +104,7 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
         hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
+        stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
       },
     })
     expect(d.bidActive).toBe(false)
@@ -159,7 +160,7 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
     expect(fake.sanityPark).toBe(true)
   })
 
-  it('pickActiveMarkets: mid_fallback never selects FV markets; sanity may hold edge slot', () => {
+  it('pickActiveMarkets: mid_fallback never selects FV markets; S5.1 evicts sanity+flat', () => {
     const now = Date.now()
     const insane = mk({
       ticker: 'BTC-INSANE',
@@ -198,13 +199,15 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
     )
     expect(midOnly.find((m) => m.ticker === 'BTC-INSANE')).toBeUndefined()
 
-    // Edge mode may hold the insane slot (engine parks as sanity, not mid fb)
+    // S5.1: sanity+flat must NOT hold an active edge slot
     const withEdge = pickActiveMarkets(ranked, {
       maxActive: 3,
       requireEdge: true,
       fillMidFallback: false,
+      inventoryByTicker: { 'BTC-INSANE': 0 },
+      evictSanityFlat: true,
     })
-    expect(withEdge.some((m) => m.ticker === 'BTC-INSANE')).toBe(true)
+    expect(withEdge.some((m) => m.ticker === 'BTC-INSANE')).toBe(false)
   })
 })
 

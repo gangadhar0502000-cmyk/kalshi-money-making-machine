@@ -4,7 +4,7 @@
  * Paper research only — never places live orders; positive P&L not guaranteed.
  *
  * Only profitable scenarios may open/close (see profitableScenarios.ts + RULES.md):
- *   S1 OPEN_BID · S2 OPEN_ASK · S3 CLOSE_PROFIT · S4 CLOSE_RISK · S5 NO_TRADE
+ *   S1 OPEN_BID · S2 OPEN_ASK · S3 CLOSE_PROFIT · S4 CLOSE_RISK · S4.1 STUCK_UNWIND · S5 NO_TRADE
  *
  * Priority (hard → smart):
  * 1. Hard parks (money printer / not running / settled / feed / bad mid)
@@ -18,6 +18,7 @@ import { clampPx, isValidQuoteMid } from './prices'
 import { allowAskAtMid, allowBidAtMid } from './toxicity'
 import {
   type ScenarioId,
+  DEFAULT_SCENARIO_THRESHOLDS,
   evaluateClose,
   formatOpenOn,
   pickActiveScenario,
@@ -81,6 +82,11 @@ export interface DecisionPolicyConfig {
   hardFlatMinutes: number
   /** S3 voluntary close min signed capture vs avgEntry (default 1¢). */
   minCloseProfitCents: number
+  /**
+   * S4.1: consecutive quote ticks with S3 reduce blocked by minCloseProfit
+   * before break-even (≥0¢) escalate. Default 30 (~45s @ 1.5s refresh).
+   */
+  stuckUnwindTicks: number
 }
 
 export const DEFAULT_DECISION_POLICY: Pick<
@@ -98,6 +104,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   | 'openMinEdgeCents'
   | 'hardFlatMinutes'
   | 'minCloseProfitCents'
+  | 'stuckUnwindTicks'
 > = {
   expiryPullMinutes: 0.5,
   sizeDownEdgeMult: 1.5,
@@ -112,6 +119,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   openMinEdgeCents: 4,
   hardFlatMinutes: 2,
   minCloseProfitCents: 1.0,
+  stuckUnwindTicks: 30,
 }
 
 /** Mutable edge-persistence counters carried across quote rebuilds. */
@@ -122,6 +130,18 @@ export interface EdgePersistState {
 
 export function emptyEdgePersistState(): EdgePersistState {
   return { bidTicks: 0, askTicks: 0 }
+}
+
+/** Per-book counter for S4.1 STUCK_UNWIND escalation. */
+export interface StuckUnwindState {
+  /** Consecutive ticks where reduce was blocked by S3 minCloseProfit. */
+  ticks: number
+  /** Inventory sign while counting: 1 long, -1 short, 0 flat. */
+  invSign: number
+}
+
+export function emptyStuckUnwindState(): StuckUnwindState {
+  return { ticks: 0, invSign: 0 }
 }
 
 /** Effective minimum |edge| to *open* (add inventory). Unwind ignores this. */
@@ -162,6 +182,8 @@ export interface DecisionPolicyInput {
   edgePersist?: EdgePersistState | null
   /** Avg entry of open inventory (dollars 0–1) — required for S3 CLOSE_PROFIT. */
   avgEntry?: number | null
+  /** Prior S4.1 stuck-unwind counters (from last rebuild). */
+  stuckUnwind?: StuckUnwindState | null
 }
 
 export interface DecisionPolicyResult {
@@ -182,6 +204,8 @@ export interface DecisionPolicyResult {
   unwindActive: boolean
   /** Updated persist counters for the next rebuild. */
   edgePersist: EdgePersistState
+  /** Updated S4.1 stuck counters for the next rebuild. */
+  stuckUnwind: StuckUnwindState
   bidScenario: ScenarioId
   askScenario: ScenarioId
   /** Dominant scenario for UI ("Active scenario"). */
@@ -196,6 +220,7 @@ function parkBoth(
       'yesBid' | 'yesAsk' | 'size' | 'skewCents' | 'halfSpreadCents' | 'centerMode'
     >,
   persist: EdgePersistState = emptyEdgePersistState(),
+  stuck: StuckUnwindState = emptyStuckUnwindState(),
 ): DecisionPolicyResult {
   return {
     bidActive: false,
@@ -206,6 +231,7 @@ function parkBoth(
     active: false,
     unwindActive: false,
     edgePersist: persist,
+    stuckUnwind: stuck,
     bidScenario: 'S5',
     askScenario: 'S5',
     activeScenario: 'S5',
@@ -368,6 +394,8 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   const persistNeeded = resolvePersistNeeded(cfg)
   const prevPersist = input.edgePersist ?? emptyEdgePersistState()
   let nextPersist: EdgePersistState = { ...prevPersist }
+  const prevStuck = input.stuckUnwind ?? emptyStuckUnwindState()
+  let nextStuck: StuckUnwindState = { ...prevStuck }
 
   const blank = {
     yesBid: 0.01,
@@ -536,17 +564,48 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   const unwindAskPx = priceUnwindAsk(input.mid, half, input.bookBestBid, input.bookBestAsk)
   const unwindBidPx = priceUnwindBid(input.mid, half, input.bookBestBid, input.bookBestAsk)
 
+  // S4.1 stuck counter: same-sign inventory only; reset on flat / flip / allow
+  const invSign =
+    input.inventory > 0 ? 1 : input.inventory < 0 ? -1 : 0
+  const stuckThresh =
+    Number.isFinite(cfg.stuckUnwindTicks) && cfg.stuckUnwindTicks > 0
+      ? Math.max(1, Math.floor(cfg.stuckUnwindTicks))
+      : DEFAULT_SCENARIO_THRESHOLDS.stuckUnwindTicks
+  const baseStuckTicks =
+    invSign !== 0 && prevStuck.invSign === invSign ? prevStuck.ticks : 0
+
+  const applyStuckAfterClose = (closeDec: ReturnType<typeof evaluateClose>) => {
+    if (invSign === 0) {
+      nextStuck = emptyStuckUnwindState()
+      return
+    }
+    if (closeDec.allow) {
+      // S3 / S4 / S4.1 succeeded — clear stuck counter
+      nextStuck = { ticks: 0, invSign }
+      return
+    }
+    // Only escalate on S3 profit-bar blocks (CLOSE blocked: capture …)
+    if (/CLOSE blocked:\s*capture/i.test(closeDec.reason)) {
+      nextStuck = { ticks: baseStuckTicks + 1, invSign }
+    } else {
+      nextStuck = { ticks: 0, invSign }
+    }
+  }
+
   if (input.inventory > 0) {
     // Long → only ask can reduce
     if (!midOkAsk) {
       askActive = false
       askReason = 'ask OFF: toxic mid'
       askScenario = 'S5'
+      nextStuck = { ticks: 0, invSign }
     } else if (toxicAskPull) {
       askActive = false
       askReason = 'ask OFF: toxic fill pull'
       askScenario = 'S5'
+      nextStuck = { ticks: 0, invSign }
     } else {
+      const candidateStuck = baseStuckTicks + 1
       const closeDec = evaluateClose({
         side: 'ask',
         price: unwindAskPx,
@@ -554,7 +613,10 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         inventory: input.inventory,
         minCloseProfitCents: minClose,
         risk: { ...riskInputBase, holdingSide: 'long' },
+        stuckBlockedTicks: candidateStuck,
+        stuckUnwindTicks: stuckThresh,
       })
+      applyStuckAfterClose(closeDec)
       if (closeDec.allow) {
         askActive = true
         askReason = closeDec.reason
@@ -568,18 +630,19 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         askScenario = 'S5'
       }
     }
-  }
-
-  if (input.inventory < 0) {
+  } else if (input.inventory < 0) {
     if (!midOkBid) {
       bidActive = false
       bidReason = 'bid OFF: toxic mid'
       bidScenario = 'S5'
+      nextStuck = { ticks: 0, invSign }
     } else if (toxicBidPull) {
       bidActive = false
       bidReason = 'bid OFF: toxic fill pull'
       bidScenario = 'S5'
+      nextStuck = { ticks: 0, invSign }
     } else {
+      const candidateStuck = baseStuckTicks + 1
       const closeDec = evaluateClose({
         side: 'bid',
         price: unwindBidPx,
@@ -587,7 +650,10 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         inventory: input.inventory,
         minCloseProfitCents: minClose,
         risk: { ...riskInputBase, holdingSide: 'short' },
+        stuckBlockedTicks: candidateStuck,
+        stuckUnwindTicks: stuckThresh,
       })
+      applyStuckAfterClose(closeDec)
       if (closeDec.allow) {
         bidActive = true
         bidReason = closeDec.reason
@@ -601,6 +667,8 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         bidScenario = 'S5'
       }
     }
+  } else {
+    nextStuck = emptyStuckUnwindState()
   }
 
   // Unwind-only flags for inventory-adding suppression
@@ -914,6 +982,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     active: bidActive || askActive,
     unwindActive,
     edgePersist: nextPersist,
+    stuckUnwind: nextStuck,
     bidScenario,
     askScenario,
     activeScenario,

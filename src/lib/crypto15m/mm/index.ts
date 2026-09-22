@@ -41,6 +41,7 @@ export {
   scoreMarketEdge,
   rankMarketsByAbsEdge,
   pickActiveMarkets,
+  shouldEvictSanityFlat,
   isMmQuoteUniverseMarket,
   type RankedMarket,
   type PickActiveOptions,
@@ -72,12 +73,14 @@ export {
   clampQuotesMakerOnly,
   makerCaptureCents,
   emptyEdgePersistState,
+  emptyStuckUnwindState,
   effectiveOpeningMinEdgeCents,
   DEFAULT_DECISION_POLICY,
   type DecisionPolicyInput,
   type DecisionPolicyResult,
   type DecisionPolicyConfig,
   type EdgePersistState,
+  type StuckUnwindState,
 } from './decisionPolicy'
 
 export {
@@ -99,6 +102,7 @@ export {
   evaluateClose,
   closeCaptureCents,
   isRiskFlat,
+  isRiskFlatFamily,
   scenarioTag,
   activeScenarioLabel,
   pickActiveScenario,

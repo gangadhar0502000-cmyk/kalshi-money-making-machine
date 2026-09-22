@@ -212,16 +212,24 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
     for (const [asset, px] of Object.entries(DEMO_FIXTURE_SPOTS)) {
       portfolio.seedSpot(asset, px)
     }
-    // Strict: no mid-fb for toxic-mid / no-edge demo rows; expect quoteable+sanity slots.
+    // Strict: no mid-fb; S5.1 evicts sanity+flat — only quoteEligible occupy slots.
     portfolio.setConfig({ fillMidFallback: false, minEdgeCents: 0 })
     portfolio.syncMarketUniverse(markets)
     portfolio.start()
     const st = portfolio.getState()
     expect(st.scan.length).toBe(5)
     expect(st.scan.every((r) => r.fairValue != null)).toBe(true)
-    // BNB extreme-mid demo is not mid-tradeable → not activated under strict mid-fb=off
-    expect(st.aggregate.activeBooks).toBeGreaterThanOrEqual(4)
+    const quoteable = st.scan.filter((r) => r.quoteEligible).length
+    // S5.1: sanity-parked flats do not take/keep slots
+    expect(st.aggregate.activeBooks).toBe(Math.min(5, quoteable))
     expect(st.aggregate.activeBooks).toBeLessThanOrEqual(5)
+    // Sanity rows may appear in scan but must not occupy active books when flat
+    for (const b of st.books) {
+      const row = st.scan.find((r) => r.ticker === b.snapshot.marketTicker)
+      if (row?.sanityPark) {
+        expect(b.snapshot.inventory).not.toBe(0)
+      }
+    }
   })
 
   it('never shows slot-gated semantics on an active ticker (book is assigned)', () => {
@@ -229,12 +237,12 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
       mk({
         ticker: `${asset}-OPEN`,
         asset,
-        midYes: 0.45,
+        midYes: 0.48,
         floorStrike: 100,
         minutesRemaining: 8,
       }),
     )
-    for (const a of ['BTC', 'ETH', 'SOL']) portfolio.seedSpot(a, 120)
+    for (const a of ['BTC', 'ETH', 'SOL']) portfolio.seedSpot(a, 100.05)
     portfolio.setConfig({ maxActiveMarkets: 3 })
     portfolio.syncMarketUniverse(markets)
     portfolio.start()
@@ -257,19 +265,19 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
     const btc = mk({
       ticker: 'BTC-HOLD2',
       asset: 'BTC',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
     const eth = mk({
       ticker: 'ETH-HOLD2',
       asset: 'ETH',
-      midYes: 0.4,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 2,
     })
-    portfolio.seedSpot('BTC', 120)
-    portfolio.seedSpot('ETH', 120)
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
     portfolio.syncMarketUniverse([btc, eth])
     portfolio.start()
     expect(portfolio.getState().aggregate.activeBooks).toBe(2)
@@ -281,13 +289,13 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
 
   it('session P&L retained after 3 roll/release cycles', () => {
     portfolio.setConfig({ maxActiveMarkets: 1 })
-    portfolio.seedSpot('BTC', 120)
-    portfolio.seedSpot('ETH', 120)
-    portfolio.seedSpot('SOL', 120)
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
+    portfolio.seedSpot('SOL', 100.05)
 
     let ticker = 'BTC-C0'
     portfolio.syncMarketUniverse([
-      mk({ ticker, asset: 'BTC', midYes: 0.4, floorStrike: 100, minutesRemaining: 2 }),
+      mk({ ticker, asset: 'BTC', midYes: 0.48, floorStrike: 100, minutesRemaining: 2 }),
     ])
     portfolio.start()
     portfolio.seedBookStats(ticker, {
@@ -304,13 +312,13 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
         status: 'closed',
         minutesRemaining: 0,
         closeTime: new Date(Date.now() - 1000).toISOString(),
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
       }),
       mk({
         ticker: 'BTC-C1',
         asset: 'BTC',
-        midYes: 0.41,
+        midYes: 0.48,
         floorStrike: 100,
         minutesRemaining: 14,
         closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
@@ -334,7 +342,7 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
         status: 'closed',
         minutesRemaining: 0,
         closeTime: new Date(Date.now() - 1000).toISOString(),
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
       }),
       mk({
@@ -365,7 +373,7 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
         status: 'closed',
         minutesRemaining: 0,
         closeTime: new Date(Date.now() - 1000).toISOString(),
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
       }),
       mk({

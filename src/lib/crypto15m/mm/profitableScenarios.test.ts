@@ -41,6 +41,7 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     openMinEdgeCents: 4,
     hardFlatMinutes: 2,
     minCloseProfitCents: 1.0,
+    stuckUnwindTicks: 30,
     ...partial,
   }
 }
@@ -327,5 +328,118 @@ describe('isRiskFlat helpers', () => {
       }),
     ).toBe(true)
     expect(scenarioTag('S3')).toBe('S3 CLOSE_PROFIT')
+  })
+})
+
+describe('S4.1 STUCK_UNWIND', () => {
+  it('escalates to ≥0¢ reduce after stuckUnwindTicks blocked ticks', () => {
+    const cfg = baseConfig({ stuckUnwindTicks: 3, minCloseProfitCents: 1 })
+    // Long, join ask at entry → 0¢ capture (< 1¢ S3 bar)
+    const inputBase = {
+      inventory: 2,
+      avgEntry: 0.5,
+      mid: 0.5,
+      fairValue: 0.5,
+      edgeCents: 0,
+      minutesRemaining: 8,
+      bookBestBid: 0.48,
+      bookBestAsk: 0.5,
+      config: cfg,
+    }
+
+    // Tick 1–2: still blocked
+    let stuck = { ticks: 0, invSign: 0 as number }
+    for (let i = 0; i < 2; i++) {
+      const d = decideQuoteSides(baseInput({ ...inputBase, stuckUnwind: stuck }))
+      expect(d.askActive).toBe(false)
+      expect(d.askReason).toMatch(/CLOSE blocked: capture/)
+      stuck = d.stuckUnwind
+      expect(stuck.ticks).toBe(i + 1)
+      expect(stuck.invSign).toBe(1)
+    }
+
+    // Tick 3: escalate S4.1 at 0¢
+    const d3 = decideQuoteSides(baseInput({ ...inputBase, stuckUnwind: stuck }))
+    expect(d3.askActive).toBe(true)
+    expect(d3.askScenario).toBe('S4.1')
+    expect(d3.askReason).toMatch(/S4\.1 STUCK_UNWIND/)
+    expect(d3.activeScenario).toBe('S4.1')
+    expect(d3.stuckUnwind.ticks).toBe(0) // reset on allow
+  })
+
+  it('still blocks −0.5¢ even after stuck threshold (no voluntary loss)', () => {
+    const cfg = baseConfig({ stuckUnwindTicks: 2, minCloseProfitCents: 1 })
+    // Resting ask clearly below entry (−1¢) — S4.1 must refuse voluntary loss
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        avgEntry: 0.5,
+        mid: 0.5,
+        fairValue: 0.5,
+        edgeCents: 0,
+        minutesRemaining: 8,
+        bookBestBid: 0.48,
+        bookBestAsk: 0.49,
+        config: cfg,
+        stuckUnwind: { ticks: 10, invSign: 1 },
+      }),
+    )
+    expect(d.askActive).toBe(false)
+    expect(d.askReason).toMatch(/CLOSE blocked: capture/)
+    expect(d.askScenario).toBe('S5')
+
+    const fill = evaluateClose({
+      side: 'sell_yes',
+      price: 0.495,
+      avgEntry: 0.5,
+      inventory: 2,
+      minCloseProfitCents: 1,
+      risk: {
+        minutesRemaining: 8,
+        inventory: 2,
+        maxInventory: 10,
+        hardFlatMinutes: 2,
+        spotGuardCancel: false,
+        mid: 0.5,
+        toxicMidLow: 0.05,
+        toxicMidHigh: 0.95,
+        holdingSide: 'long',
+      },
+      stuckBlockedTicks: 99,
+      stuckUnwindTicks: 2,
+    })
+    expect(fill.allow).toBe(false)
+    expect(fill.captureCents!).toBeLessThan(0)
+    expect(fill.captureCents).toBeCloseTo(-0.5, 1)
+  })
+
+  it('resets stuck counter when flat or S3 allows', () => {
+    const cfg = baseConfig({ stuckUnwindTicks: 5 })
+    const blocked = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        avgEntry: 0.5,
+        mid: 0.5,
+        fairValue: 0.5,
+        edgeCents: 0,
+        bookBestAsk: 0.5,
+        config: cfg,
+        stuckUnwind: { ticks: 4, invSign: 1 },
+      }),
+    )
+    // 0¢ with stuck 4+1=5 → S4.1 allow → reset
+    expect(blocked.askScenario).toBe('S4.1')
+    expect(blocked.stuckUnwind.ticks).toBe(0)
+
+    const flat = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        avgEntry: null,
+        config: cfg,
+        stuckUnwind: { ticks: 9, invSign: 1 },
+      }),
+    )
+    expect(flat.stuckUnwind.ticks).toBe(0)
+    expect(flat.stuckUnwind.invSign).toBe(0)
   })
 })

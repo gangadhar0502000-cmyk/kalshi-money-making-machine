@@ -613,12 +613,19 @@ export class PaperMmPortfolio {
     }
 
     const sticky = [...this.slotOfTicker.keys()]
+    const inventoryByTicker: Record<string, number> = {}
+    for (const eng of this.books.values()) {
+      const snap = eng.getState().snapshot
+      if (snap.marketTicker) inventoryByTicker[snap.marketTicker] = snap.inventory
+    }
     const desired = pickActiveMarkets(this.lastScan, {
       maxActive: this.config.maxActiveMarkets,
       stickyTickers: sticky,
       onePerAsset: true,
       requireEdge: this.config.fvQuoting,
       fillMidFallback: this.config.fillMidFallback,
+      inventoryByTicker,
+      evictSanityFlat: true,
     })
 
     // Still nothing quoteable / pickable — hold sticky books, do not wipe
@@ -627,6 +634,7 @@ export class PaperMmPortfolio {
     }
 
     const desiredTickers = new Set(desired.map((m) => m.ticker))
+    const scanByTicker = new Map(this.lastScan.map((r) => [r.ticker, r]))
 
     // Drop books not in desired — only when replacement set is non-empty AND
     // dropping would not leave us with fewer books than we can refill.
@@ -640,9 +648,15 @@ export class PaperMmPortfolio {
     for (const slotId of pendingDrops) {
       const eng = this.books.get(slotId)
       const t = eng?.getState().snapshot.marketTicker
+      const row = t ? scanByTicker.get(t) : undefined
+      const inv = t ? inventoryByTicker[t] ?? 0 : 0
+      const s51 =
+        row?.sanityPark && inv === 0
+          ? `S5.1 SLOT_EVICT sanity+flat; `
+          : ''
       this.removeBook(
         slotId,
-        `Slot released (${t ?? '?'}) — outside top-${this.config.maxActiveMarkets} set; refilling.`,
+        `Slot released (${t ?? '?'}) — ${s51}outside top-${this.config.maxActiveMarkets} set; refilling.`,
       )
     }
 

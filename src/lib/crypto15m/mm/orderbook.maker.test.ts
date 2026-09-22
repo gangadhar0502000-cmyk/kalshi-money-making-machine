@@ -161,6 +161,7 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
         hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
+        stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
       },
     })
     expect(d.bidActive).toBe(true)
@@ -210,6 +211,7 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
         hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
+        stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
       },
     })
     expect(d.askActive).toBe(true)

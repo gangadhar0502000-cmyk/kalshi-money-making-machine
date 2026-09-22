@@ -183,6 +183,12 @@ export interface PaperMmConfig {
    * Strict default 1.0¢ (raised from 0.5¢).
    */
   minChurnCaptureCents: number
+  /**
+   * S4.1 STUCK_UNWIND: consecutive quote ticks with S3 reduce blocked by
+   * minCloseProfit before allowing break-even (≥0¢) reduce. Default 30
+   * (~45s at quoteRefreshMs=1500). Never allows voluntary −¢ closes.
+   */
+  stuckUnwindTicks: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -236,6 +242,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   hardFlatMinutes: 2,
   minCloseProfitCents: 1.0,
   minChurnCaptureCents: 1.0,
+  stuckUnwindTicks: 30,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -341,6 +348,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
       0,
       10,
     ),
+    stuckUnwindTicks: Math.round(clamp(c.stuckUnwindTicks ?? 30, 1, 600)),
   }
 }
 
@@ -435,6 +443,9 @@ export function migratePersistedScarcityConfig(
   }
   if (partial.openEdgeAddHalfSpread == null) {
     out.openEdgeAddHalfSpread = STRICT_PAPER_MM_CONFIG.openEdgeAddHalfSpread
+  }
+  if (partial.stuckUnwindTicks == null || !Number.isFinite(partial.stuckUnwindTicks)) {
+    out.stuckUnwindTicks = STRICT_PAPER_MM_CONFIG.stuckUnwindTicks
   }
   return out
 }

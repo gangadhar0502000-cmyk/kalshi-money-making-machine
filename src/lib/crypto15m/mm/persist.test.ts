@@ -132,8 +132,8 @@ describe('paper MM session persistence', () => {
   })
 
   it('restore with wasRunning → start called / running true', () => {
-    const btc = mk({ ticker: 'BTC-R', asset: 'BTC', midYes: 0.4, floorStrike: 100 })
-    portfolio.seedSpot('BTC', 120)
+    const btc = mk({ ticker: 'BTC-R', asset: 'BTC', midYes: 0.48, floorStrike: 100 })
+    portfolio.seedSpot('BTC', 100.05)
     portfolio.syncMarketUniverse([btc])
     portfolio.start()
     portfolio.seedBookStats('BTC-R', {
@@ -149,7 +149,7 @@ describe('paper MM session persistence', () => {
       closeTime: new Date(Date.now() - 1000).toISOString(),
     })
     const eth = mk({ ticker: 'ETH-R', asset: 'ETH', midYes: 0.35, floorStrike: 100 })
-    portfolio.seedSpot('ETH', 120)
+    portfolio.seedSpot('ETH', 100.05)
     portfolio.syncMarketUniverse([dead, eth])
     expect(portfolio.getState().aggregate.fillCount).toBeGreaterThanOrEqual(1)
     const realized = portfolio.getState().aggregate.realizedSpreadPnl
@@ -177,12 +177,12 @@ describe('paper MM session persistence', () => {
     )
     expect(reloaded.getState().aggregate.fillCount).toBe(snap.sessionLedger.fillCount)
 
-    reloaded.seedSpot('BTC', 120)
-    reloaded.seedSpot('ETH', 120)
+    reloaded.seedSpot('BTC', 100.05)
+    reloaded.seedSpot('ETH', 100.05)
     const nextWin = mk({
       ticker: 'BTC-R2',
       asset: 'BTC',
-      midYes: 0.42,
+      midYes: 0.48,
       floorStrike: 100,
       minutesRemaining: 14,
     })
@@ -203,13 +203,13 @@ describe('paper MM session persistence', () => {
       mk({
         ticker: `${asset}-OLD`,
         asset,
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
         minutesRemaining: 1,
         closeTime: new Date(Date.now() + 60_000).toISOString(),
       }),
     )
-    for (const a of assets) portfolio.seedSpot(a, 120)
+    for (const a of assets) portfolio.seedSpot(a, 100.05)
     portfolio.setConfig({ maxActiveMarkets: 3 })
     portfolio.syncMarketUniverse(books)
     portfolio.start()
@@ -243,7 +243,7 @@ describe('paper MM session persistence', () => {
       mk({
         ticker: `${asset}-NEW`,
         asset,
-        midYes: 0.41,
+        midYes: 0.48,
         floorStrike: 101,
         minutesRemaining: 14,
         closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
@@ -260,8 +260,8 @@ describe('paper MM session persistence', () => {
   })
 
   it('resetSession clears; refresh/sync does not', () => {
-    const btc = mk({ ticker: 'BTC-Z', asset: 'BTC', midYes: 0.4, floorStrike: 100 })
-    portfolio.seedSpot('BTC', 120)
+    const btc = mk({ ticker: 'BTC-Z', asset: 'BTC', midYes: 0.48, floorStrike: 100 })
+    portfolio.seedSpot('BTC', 100.05)
     portfolio.setPersistEnabled(true)
     portfolio.syncMarketUniverse([btc])
     portfolio.start()
@@ -278,7 +278,7 @@ describe('paper MM session persistence', () => {
       closeTime: new Date(Date.now() - 1000).toISOString(),
     })
     const eth = mk({ ticker: 'ETH-Z', asset: 'ETH', midYes: 0.35, floorStrike: 100 })
-    portfolio.seedSpot('ETH', 120)
+    portfolio.seedSpot('ETH', 100.05)
     portfolio.syncMarketUniverse([dead, eth])
     expect(portfolio.getState().aggregate.fillCount).toBe(1)
 

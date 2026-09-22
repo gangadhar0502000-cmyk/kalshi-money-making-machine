@@ -34,8 +34,10 @@ import {
   decideQuoteSides,
   DEFAULT_DECISION_POLICY,
   emptyEdgePersistState,
+  emptyStuckUnwindState,
   type DecisionPolicyConfig,
   type EdgePersistState,
+  type StuckUnwindState,
 } from './decisionPolicy'
 import { evaluateClose } from './profitableScenarios'
 import type {
@@ -140,6 +142,8 @@ export class PaperMmEngine {
   private toxicAskPullUntil = 0
   /** Edge persistence counters across quote rebuilds. */
   private edgePersistState: EdgePersistState = emptyEdgePersistState()
+  /** S4.1 stuck-unwind counters across quote rebuilds. */
+  private stuckUnwindState: StuckUnwindState = emptyStuckUnwindState()
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
@@ -396,6 +400,7 @@ export class PaperMmEngine {
       this.toxicBidPullUntil = 0
       this.toxicAskPullUntil = 0
     this.edgePersistState = emptyEdgePersistState()
+    this.stuckUnwindState = emptyStuckUnwindState()
       if (prevTicker && market) {
         this.message =
           `Rolled to ${market.ticker} (from ${prevTicker}) · close ${market.closeTime} · ` +
@@ -521,6 +526,7 @@ export class PaperMmEngine {
     this.toxicBidPullUntil = 0
     this.toxicAskPullUntil = 0
     this.edgePersistState = emptyEdgePersistState()
+    this.stuckUnwindState = emptyStuckUnwindState()
     this.lastFillAt = 0
     if (this.ownsFillCapStore) {
       this.fillCapStore = new TickerFillCapStore(Date.now())
@@ -979,6 +985,7 @@ export class PaperMmEngine {
       openMinEdgeCents: this.config.openMinEdgeCents,
       hardFlatMinutes: this.config.hardFlatMinutes,
       minCloseProfitCents: this.config.minCloseProfitCents,
+      stuckUnwindTicks: this.config.stuckUnwindTicks ?? 30,
     }
 
     const decision = decideQuoteSides({
@@ -1000,8 +1007,10 @@ export class PaperMmEngine {
       config: policyCfg,
       edgePersist: this.edgePersistState,
       avgEntry: this.avgEntry,
+      stuckUnwind: this.stuckUnwindState,
     })
     this.edgePersistState = decision.edgePersist
+    this.stuckUnwindState = decision.stuckUnwind
 
     this.lastFvCenterActive = decision.centerMode === 'fv'
 
@@ -1230,6 +1239,11 @@ export class PaperMmEngine {
           this.config.minChurnCaptureCents ?? 0,
         )
         const mins = this.market?.minutesRemaining ?? null
+        const invSign = this.inventory > 0 ? 1 : this.inventory < 0 ? -1 : 0
+        const stuckBase =
+          invSign !== 0 && this.stuckUnwindState.invSign === invSign
+            ? this.stuckUnwindState.ticks
+            : 0
         const closeDec = evaluateClose({
           side,
           price,
@@ -1248,6 +1262,8 @@ export class PaperMmEngine {
             toxicMidHigh: this.config.toxicMidHigh,
             holdingSide: this.inventory > 0 ? 'long' : this.inventory < 0 ? 'short' : 'flat',
           },
+          stuckBlockedTicks: stuckBase + 1,
+          stuckUnwindTicks: this.config.stuckUnwindTicks ?? 30,
         })
         if (!closeDec.allow) {
           this.midCrossRejectCount += 1
@@ -1262,6 +1278,11 @@ export class PaperMmEngine {
             `(capture ${
               closeDec.captureCents == null ? 'n/a' : `${closeDec.captureCents.toFixed(1)}¢`
             }). Read-only · never places trades.`
+        }
+        if (closeDec.scenario === 'S4.1') {
+          this.message =
+            `S4.1 STUCK_UNWIND ${side} @ $${price.toFixed(4)} ` +
+            `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
         }
       }
     }

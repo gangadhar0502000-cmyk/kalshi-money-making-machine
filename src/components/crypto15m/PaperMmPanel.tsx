@@ -297,7 +297,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           ⚠ Fills rising but flat P&amp;L — likely round-trip churn at ~avgEntry (last 15m realized
           delta {formatDollars(realizedDelta15m)}, avg {avgCaptureCents15m.toFixed(2)}¢/fill). Churn
           filter requires ≥{cfg.minCloseProfitCents ?? cfg.minChurnCaptureCents}¢ signed close
-          profit (S3) unless S4 risk flat.
+          profit (S3) unless S4 risk flat / S4.1 stuck unwind (≥0¢).
         </div>
       )}
 
@@ -310,9 +310,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
           Default <span className="font-mono text-slate-200">S5 NO_TRADE</span>. Opens only via{' '}
           <span className="font-mono">S1 OPEN_BID</span> / <span className="font-mono">S2 OPEN_ASK</span>{' '}
           (≥{draft.openMinEdgeCents}¢ edge, ≥{draft.minCaptureCents}¢ capture). Closes via{' '}
-          <span className="font-mono">S3 CLOSE_PROFIT</span> (≥{draft.minCloseProfitCents}¢ vs entry) or{' '}
-          <span className="font-mono">S4 CLOSE_RISK</span> (risk flat). Scarce fills + portfolio caps on.
-          Paper research — not live profits.
+          <span className="font-mono">S3 CLOSE_PROFIT</span> (≥{draft.minCloseProfitCents}¢ vs entry),{' '}
+          <span className="font-mono">S4 CLOSE_RISK</span> (risk flat), or{' '}
+          <span className="font-mono">S4.1 STUCK_UNWIND</span> (≥0¢ after {draft.stuckUnwindTicks} blocked
+          ticks). <span className="font-mono">S5.1 SLOT_EVICT</span> frees sanity+flat active slots.
+          Scarce fills + portfolio caps on. Paper research — not live profits.
         </p>
       </div>
 
@@ -750,8 +752,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                               title={`${book?.snapshot.quote?.bidReason ?? ''} / ${book?.snapshot.quote?.askReason ?? ''}`}
                             >
                               {book?.snapshot.quote?.activeScenario === 'S4' ||
+                              book?.snapshot.quote?.activeScenario === 'S4.1' ||
                               book?.snapshot.quote?.askReason?.includes('CLOSE_RISK') ||
-                              book?.snapshot.quote?.bidReason?.includes('CLOSE_RISK')
+                              book?.snapshot.quote?.bidReason?.includes('CLOSE_RISK') ||
+                              book?.snapshot.quote?.askReason?.includes('STUCK_UNWIND') ||
+                              book?.snapshot.quote?.bidReason?.includes('STUCK_UNWIND')
                                 ? 'Y risk'
                                 : book?.snapshot.quote?.activeScenario === 'S3' ||
                                     book?.snapshot.quote?.askReason?.includes('CLOSE_PROFIT') ||
@@ -858,7 +863,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                                       ? ' CLOSE_PROFIT'
                                       : snap.quote.activeScenario === 'S4'
                                         ? ' CLOSE_RISK'
-                                        : ' NO_TRADE'
+                                        : snap.quote.activeScenario === 'S4.1'
+                                          ? ' STUCK_UNWIND'
+                                          : snap.quote.activeScenario === 'S5.1'
+                                            ? ' SLOT_EVICT'
+                                            : ' NO_TRADE'
                               }`
                             : 'S5 NO_TRADE'}
                         </span>

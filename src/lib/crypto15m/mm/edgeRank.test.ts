@@ -274,3 +274,76 @@ describe('edgeRank', () => {
   })
 
 })
+
+describe('S5.1 SLOT_EVICT', () => {
+  const now = Date.parse('2026-09-21T19:50:00.000Z')
+
+  it('evicts sanity+flat from sticky active set', () => {
+    const insane = mk({
+      ticker: 'BNB-INSANE',
+      asset: 'BNB',
+      midYes: 0.2,
+      floorStrike: 100,
+      minutesRemaining: 10,
+      closeTime: '2026-09-21T20:00:00.000Z',
+    })
+    const sane = mk({
+      ticker: 'BTC-SANE',
+      asset: 'BTC',
+      midYes: 0.48,
+      floorStrike: 100,
+      minutesRemaining: 10,
+      closeTime: '2026-09-21T20:01:00.000Z',
+    })
+    // BNB far ITM → sanity park; BTC mild ITM → quote eligible
+    const ranked = rankMarketsByAbsEdge(
+      [insane, sane],
+      { BNB: 150, BTC: 100.05 },
+      0.7,
+      2,
+      now,
+      25,
+    )
+    const bnb = ranked.find((r) => r.ticker === 'BNB-INSANE')!
+    expect(bnb.sanityPark).toBe(true)
+
+    const picked = pickActiveMarkets(ranked, {
+      maxActive: 2,
+      stickyTickers: ['BNB-INSANE'],
+      inventoryByTicker: { 'BNB-INSANE': 0 },
+      requireEdge: true,
+      evictSanityFlat: true,
+    })
+    expect(picked.find((m) => m.ticker === 'BNB-INSANE')).toBeUndefined()
+    expect(picked.some((m) => m.ticker === 'BTC-SANE')).toBe(true)
+  })
+
+  it('does NOT evict sanity book when inventory ≠ 0', () => {
+    const insane = mk({
+      ticker: 'BNB-HOLD',
+      asset: 'BNB',
+      midYes: 0.2,
+      floorStrike: 100,
+      minutesRemaining: 10,
+      closeTime: '2026-09-21T20:00:00.000Z',
+    })
+    const ranked = rankMarketsByAbsEdge(
+      [insane],
+      { BNB: 150 },
+      0.7,
+      2,
+      now,
+      25,
+    )
+    expect(ranked[0]!.sanityPark).toBe(true)
+
+    const picked = pickActiveMarkets(ranked, {
+      maxActive: 2,
+      stickyTickers: ['BNB-HOLD'],
+      inventoryByTicker: { 'BNB-HOLD': 3 },
+      requireEdge: true,
+      evictSanityFlat: true,
+    })
+    expect(picked.some((m) => m.ticker === 'BNB-HOLD')).toBe(true)
+  })
+})
