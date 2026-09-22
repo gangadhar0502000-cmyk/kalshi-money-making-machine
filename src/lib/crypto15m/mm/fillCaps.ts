@@ -182,12 +182,61 @@ export class TickerFillCapStore {
     return count
   }
 
-  /** Harsh-era fills/hour from epoch (legacy fills before epoch excluded). */
+  /**
+   * Harsh-era fills/hour from epoch (legacy fills before epoch excluded).
+   * Denominator floors at 15 minutes so tiny elapsed windows do not annualize
+   * into hundreds/hr false alarms (e.g. 9 fills in ~40s → 36/hr, not ~700+/hr).
+   */
   harshFillsPerHour(now = Date.now(), ticker?: string | null): number {
-    const epoch = this.harshPolicyEpochMs
-    const hours = Math.max(1 / 3600, (now - epoch) / 3_600_000)
-    return this.countHarshEraFills(now, ticker) / hours
+    return harshFillsPerHourFromCounts(
+      this.countHarshEraFills(now, ticker),
+      this.harshPolicyEpochMs,
+      now,
+    )
   }
+
+  /** True once harsh-era clock has at least 15m — safe to surface /hour in UI. */
+  harshFillsPerHourReady(now = Date.now()): boolean {
+    return isHarshFillsPerHourReady(this.harshPolicyEpochMs, now)
+  }
+}
+
+/** Minimum elapsed hours used when annualizing harsh fills (15 minutes). */
+export const HARSH_RATE_MIN_HOURS = 15 / 60
+
+/** Annualize harsh fill count with a 15m floor on the clock. */
+export function harshFillsPerHourFromCounts(
+  harshFillCount: number,
+  epochMs: number,
+  now = Date.now(),
+): number {
+  const elapsedHours = Math.max(0, (now - epochMs) / 3_600_000)
+  const hours = Math.max(HARSH_RATE_MIN_HOURS, elapsedHours, 1 / 3600)
+  return harshFillCount / hours
+}
+
+/** Whether /hour is based on a full ≥15m harsh-era clock. */
+export function isHarshFillsPerHourReady(epochMs: number, now = Date.now()): boolean {
+  return now - epochMs >= FILL_CAP_WINDOW_MS
+}
+
+/**
+ * Soft research warning from rolling 15m harsh fills — never from short-session /hr.
+ * Threshold: max(12, activeBooks * maxFillsPerMarketPer15m * 0.75).
+ */
+export function isHarshFillRateSoftWarn(
+  harshFillsLast15m: number,
+  opts: {
+    strictRealism: boolean
+    activeBooks: number
+    maxFillsPerMarketPer15m: number
+  },
+): boolean {
+  if (!opts.strictRealism) return false
+  const books = Math.max(1, opts.activeBooks | 0)
+  const perBook = Math.max(1, opts.maxFillsPerMarketPer15m)
+  const threshold = Math.max(12, books * perBook * 0.75)
+  return harshFillsLast15m > threshold
 }
 
 export function sanitizeFillCapSnapshot(

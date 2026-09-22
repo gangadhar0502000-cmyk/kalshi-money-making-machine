@@ -123,7 +123,8 @@ export interface MmSnapshot {
   fillsLast15m: number
   /**
    * Harsh-policy-era fills/hour only (excludes legacy persisted fills before
-   * the migration/reset marker).
+   * the migration/reset marker). Annualized with a ≥15m clock floor so tiny
+   * windows do not inflate into false hundreds/hr.
    */
   harshFillsPerHour: number
   /** Harsh-era fills in the rolling 15m window (this ticker). */
@@ -131,8 +132,8 @@ export interface MmSnapshot {
   /** Epoch ms when harsh fill-cap policy became active for this session. */
   harshPolicyEpochMs: number
   /**
-   * True when harsh-era fill rate still looks soft for strict paper research
-   * (e.g. >20 fills/hour under strictRealism).
+   * True when rolling 15m harsh fills exceed a realistic soft threshold under
+   * strictRealism (not short-session extrapolated /hr).
    */
   fillRateUnrealistic: boolean
 }

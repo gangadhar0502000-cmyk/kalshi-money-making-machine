@@ -78,6 +78,10 @@ export {
   TickerFillCapStore,
   HARSH_FILL_POLICY_MARKER,
   emptyFillCapSnapshot,
+  harshFillsPerHourFromCounts,
+  isHarshFillsPerHourReady,
+  isHarshFillRateSoftWarn,
+  HARSH_RATE_MIN_HOURS,
   type FillCapSnapshot,
 } from './fillCaps'
 export { parkStatusLabel } from './parkStatus'

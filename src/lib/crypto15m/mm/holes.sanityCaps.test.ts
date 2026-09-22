@@ -19,7 +19,13 @@ import {
   emptySessionLedger,
 } from './persist'
 import { PaperMmPortfolio } from './portfolio'
-import { HARSH_FILL_POLICY_MARKER, TickerFillCapStore } from './fillCaps'
+import {
+  HARSH_FILL_POLICY_MARKER,
+  TickerFillCapStore,
+  harshFillsPerHourFromCounts,
+  isHarshFillRateSoftWarn,
+  isHarshFillsPerHourReady,
+} from './fillCaps'
 import { parkStatusLabel } from './parkStatus'
 
 function mk(
@@ -401,5 +407,75 @@ describe('hole: fill caps persist per ticker across sync/rebuild/restore', () =>
     p2.setPersistEnabled(false)
     p2.applySerializedSession(ser)
     expect(p2.getFillCapStore().canAccept('BTC-P', Date.now(), 1, 4).ok).toBe(false)
+  })
+})
+
+describe('harsh fills/hour rate math (no tiny-window annualize)', () => {
+  it('9 fills in ~40s must NOT report ~700+/hr as the alert metric', () => {
+    const epoch = 1_000_000
+    const now = epoch + 40_000 // 40s
+    const fph = harshFillsPerHourFromCounts(9, epoch, now)
+    // Floor at 15m → 9 / 0.25h = 36/hr, not 9 / (40/3600) ≈ 810
+    expect(fph).toBeCloseTo(36, 5)
+    expect(fph).toBeLessThan(100)
+    expect(isHarshFillsPerHourReady(epoch, now)).toBe(false)
+
+    const store = new TickerFillCapStore(epoch)
+    for (let i = 0; i < 9; i++) store.record('BTC-A', epoch + 1000 + i * 1000)
+    expect(store.countHarshInWindow(now, 15 * 60_000)).toBe(9)
+    expect(store.harshFillsPerHour(now)).toBeCloseTo(36, 5)
+    expect(store.harshFillsPerHourReady(now)).toBe(false)
+
+    // Soft warn: 9/15m across 5 books under portfolio ceiling — no panic
+    expect(
+      isHarshFillRateSoftWarn(9, {
+        strictRealism: true,
+        activeBooks: 5,
+        maxFillsPerMarketPer15m: 4,
+      }),
+    ).toBe(false)
+  })
+
+  it('9 fills in 15m reports ~36/hr and no soft panic under portfolio cap', () => {
+    const epoch = 2_000_000
+    const now = epoch + 15 * 60_000
+    const fph = harshFillsPerHourFromCounts(9, epoch, now)
+    expect(fph).toBeCloseTo(36, 5)
+    expect(isHarshFillsPerHourReady(epoch, now)).toBe(true)
+
+    expect(
+      isHarshFillRateSoftWarn(9, {
+        strictRealism: true,
+        activeBooks: 5,
+        maxFillsPerMarketPer15m: 4, // ceiling max(12, 15)=15
+      }),
+    ).toBe(false)
+
+    // Over soft threshold → warn
+    expect(
+      isHarshFillRateSoftWarn(16, {
+        strictRealism: true,
+        activeBooks: 5,
+        maxFillsPerMarketPer15m: 4,
+      }),
+    ).toBe(true)
+  })
+
+  it('TickerFillCapStore still blocks >1/min and >4/15m per ticker', () => {
+    const store = new TickerFillCapStore()
+    const t = 'ETH-CAP'
+    const now = Date.now()
+    expect(store.canAccept(t, now, 1, 4).ok).toBe(true)
+    store.record(t, now)
+    expect(store.canAccept(t, now + 1, 1, 4).ok).toBe(false) // >1/min
+    // Advance past minute but stay in 15m window; allow up to 4
+    const t2 = now + 61_000
+    expect(store.canAccept(t, t2, 1, 4).ok).toBe(true)
+    store.record(t, t2)
+    store.record(t, t2 + 61_000)
+    store.record(t, t2 + 122_000)
+    // 4 fills in 15m → 5th blocked
+    expect(store.canAccept(t, t2 + 183_000, 1, 4).ok).toBe(false)
+    expect(store.countInWindow(t, t2 + 183_000, 15 * 60_000)).toBe(4)
   })
 })

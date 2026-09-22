@@ -47,6 +47,7 @@ import {
   FILL_CAP_MINUTE_MS,
   FILL_CAP_WINDOW_MS,
   TickerFillCapStore,
+  isHarshFillRateSoftWarn,
 } from './fillCaps'
 
 let idSeq = 0
@@ -299,10 +300,17 @@ export class PaperMmEngine {
   }
 
   private isFillRateUnrealistic(): boolean {
-    if (!this.config.strictRealism) return false
-    // Use harsh-era rate so legacy persisted fills do not inflate the warning.
-    const fph = this.harshFillsPerHourNow()
-    return fph >= 20
+    // Soft warn from rolling 15m harsh fills only — never short-session /hr.
+    const last15 = this.fillCapStore.countHarshInWindow(
+      Date.now(),
+      FILL_CAP_WINDOW_MS,
+      this.activeTicker(),
+    )
+    return isHarshFillRateSoftWarn(last15, {
+      strictRealism: this.config.strictRealism,
+      activeBooks: 1,
+      maxFillsPerMarketPer15m: this.config.maxFillsPerMarketPer15m,
+    })
   }
 
   setMarket(market: Crypto15mMarket | null): void {

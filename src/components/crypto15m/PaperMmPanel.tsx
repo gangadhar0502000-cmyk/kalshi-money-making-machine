@@ -9,6 +9,10 @@ import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
 import type { PortfolioState } from '../../lib/crypto15m/mm/portfolio'
 import { parkStatusLabel } from '../../lib/crypto15m/mm/parkStatus'
+import {
+  isHarshFillRateSoftWarn,
+  isHarshFillsPerHourReady,
+} from '../../lib/crypto15m/mm/fillCaps'
 
 interface Props {
   markets: Crypto15mMarket[]
@@ -47,20 +51,21 @@ function isUnrealisticallyFastPnl(
   return (totalPnl >= 10 && ageSec < 180) || perMin >= 5 || totalPnl >= 25
 }
 
-/** Fills/hour still soft for serious paper MM research under strict realism. */
+/**
+ * Soft fill-rate warning from rolling 15m harsh fills only.
+ * Short-session extrapolated /hr must never drive this banner.
+ */
 function isUnrealisticFillRate(
-  fillsPerHour: number,
-  fillCount: number,
-  sessionStartedAt: number | null,
+  harshFillsLast15m: number,
   strictRealism: boolean,
+  activeBooks: number,
+  maxFillsPerMarketPer15m: number,
 ): boolean {
-  if (!strictRealism) return false
-  if (fillCount < 8) return false
-  if (sessionStartedAt == null) return fillsPerHour >= 20
-  const ageMin = (Date.now() - sessionStartedAt) / 60_000
-  // Need a few minutes of session before rate is meaningful
-  if (ageMin < 3) return fillCount >= 12
-  return fillsPerHour >= 20
+  return isHarshFillRateSoftWarn(harshFillsLast15m, {
+    strictRealism,
+    activeBooks,
+    maxFillsPerMarketPer15m,
+  })
 }
 
 
@@ -182,26 +187,23 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     sessionFees > 0.01 && Math.abs(totalPnl) > 0 && sessionFees >= Math.abs(totalPnl) * 0.5
   const sessionStartedAt = multiBook ? portfolioState.sessionStartedAt : s.sessionStartedAt
   const cfg = multiBook ? portfolioState.config : s.config
-  // Harsh-policy-era fills/hour — legacy persisted fills must not inflate this.
+  // Harsh-policy metrics — primary = rolling 15m; /hr gated until ≥15m clock.
   const harshFillsPerHour = multiBook
     ? portfolioState.aggregate.harshFillsPerHour
     : s.harshFillsPerHour
   const harshFillsLast15m = multiBook
     ? portfolioState.aggregate.harshFillsLast15m
     : s.harshFillsLast15m
-  const fillsPerHour = harshFillsPerHour
-  const harshFillCount = multiBook
-    ? Math.round(
-        portfolioState.aggregate.harshFillsPerHour *
-          Math.max(
-            1 / 3600,
-            (Date.now() - portfolioState.aggregate.harshPolicyEpochMs) / 3_600_000,
-          ),
-      )
-    : Math.round(
-        s.harshFillsPerHour *
-          Math.max(1 / 3600, (Date.now() - s.harshPolicyEpochMs) / 3_600_000),
-      )
+  const harshPolicyEpochMs = multiBook
+    ? portfolioState.aggregate.harshPolicyEpochMs
+    : s.harshPolicyEpochMs
+  const harshHourReady = isHarshFillsPerHourReady(harshPolicyEpochMs)
+  const portfolioCap15m =
+    Math.max(1, multiBook ? portfolioState.aggregate.activeBooks : 1) *
+    cfg.maxFillsPerMarketPer15m
+  const activeBookCount = multiBook
+    ? Math.max(1, portfolioState.aggregate.activeBooks)
+    : 1
   const showSoftWarn = isUnrealisticallyFastPnl(
     totalPnl,
     sessionStartedAt,
@@ -210,7 +212,12 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   )
   const showFillRateWarn =
     (multiBook ? false : s.fillRateUnrealistic) ||
-    isUnrealisticFillRate(fillsPerHour, harshFillCount, sessionStartedAt, cfg.strictRealism)
+    isUnrealisticFillRate(
+      harshFillsLast15m,
+      cfg.strictRealism,
+      activeBookCount,
+      cfg.maxFillsPerMarketPer15m,
+    )
   const message = multiBook ? portfolioState.message : s.message
   const activeTickers = multiBook
     ? new Set(
@@ -268,9 +275,11 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
 
       {showFillRateWarn && !moneyPrinterBug && (
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
-          ⚠ Fill rate still high for paper research ({fillsPerHour.toFixed(1)} harsh fills/hour ·{' '}
-          {harshFillsLast15m}/15m · {harshFillCount} harsh-era). Legacy fills excluded. Tighten depth /
-          touch / cooldown — or keep iterating MM decision quality. Paper green ≠ live edge.
+          ⚠ Fill rate still high for paper research ({harshFillsLast15m} fills / last 15m · portfolio
+          cap ≤{portfolioCap15m}
+          {harshHourReady ? ` · ${harshFillsPerHour.toFixed(1)}/hr` : ''}). Legacy fills excluded.
+          Tighten depth / touch / cooldown — or keep iterating MM decision quality. Paper green ≠ live
+          edge.
         </div>
       )}
 
@@ -555,13 +564,15 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               sub={`${portfolioState.aggregate.cancelCount} cancels · session ledger`}
             />
             <Stat
-              label="Harsh fills / hour"
-              value={fillsPerHour.toFixed(1)}
+              label="Harsh fills / last 15m"
+              value={String(harshFillsLast15m)}
               tone={showFillRateWarn ? 'warn' : 'neutral'}
               sub={
                 showFillRateWarn
-                  ? '⚠ still soft · legacy fills excluded'
-                  : `${harshFillsLast15m}/15m · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m`
+                  ? `⚠ still soft · cap ≤${portfolioCap15m}/15m portfolio`
+                  : harshHourReady
+                    ? `${harshFillsPerHour.toFixed(1)}/hr · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m · portfolio cap ≤${portfolioCap15m}`
+                    : `cap ≤${portfolioCap15m}/15m · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m · /hr after 15m clock`
               }
             />
           </div>
@@ -894,13 +905,15 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               sub={`${s.fillsLastMinute}/min · ${s.fillsLast15m}/15m rolling`}
             />
             <Stat
-              label="Harsh fills / hour"
-              value={s.harshFillsPerHour.toFixed(1)}
+              label="Harsh fills / last 15m"
+              value={String(s.harshFillsLast15m)}
               tone={showFillRateWarn ? 'warn' : 'neutral'}
               sub={
                 showFillRateWarn
-                  ? '⚠ still soft · legacy excluded'
-                  : `${s.harshFillsLast15m}/15m harsh · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/15m`
+                  ? `⚠ still soft · cap ≤${cfg.maxFillsPerMarketPer15m}/15m`
+                  : harshHourReady
+                    ? `${s.harshFillsPerHour.toFixed(1)}/hr · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/15m`
+                    : `≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/15m · /hr after 15m clock`
               }
             />
           </div>
