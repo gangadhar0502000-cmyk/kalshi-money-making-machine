@@ -132,59 +132,61 @@ describe('strictRealism scarce book fills', () => {
     expect(signals).toEqual([])
   })
 
-  it('book_depth requires minTouchPolls + large depth consume', () => {
+  it('book_depth requires minTouchPolls + queue ahead cleared + large attributed consume', () => {
     const walk: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
-    let prev: OrderBookSnapshot | null = null
     const bid = 0.48
     const ask = 0.52
-    let got = 0
+    const q = { yesBid: bid, yesAsk: ask, size: 1, active: true as const }
 
-    // Poll 0: no prev → no fill, touch counter stays 0
-    // Polls 1..3: touch polls = 1..3 (strict needs 4) — even with large consume, no fill
-    const sizes = [100, 90, 80, 70]
-    for (let i = 0; i < 4; i++) {
-      const next = book({
-        bestBid: bid,
-        bestAsk: ask,
-        yesBids: [{ price: bid, size: sizes[i]! }],
-        yesAsks: [{ price: ask, size: 100 }],
-        t: i,
-      })
-      const sigs = detectBookFills(
-        prev,
-        next,
-        { yesBid: bid, yesAsk: ask, size: 1, active: true },
-        0,
-        10,
-        walk,
-        strictOpts(i),
-      )
-      got += sigs.length
+    const emptyAt = (t: number): OrderBookSnapshot => ({
+      ticker: 'KXBTC15M-T',
+      t,
+      yesBids: [],
+      yesAsks: [{ price: ask, size: 100 }],
+      bestBid: bid,
+      bestAsk: ask,
+      mid: (bid + ask) / 2,
+      authenticated: false,
+    })
+    const depthAt = (t: number, size: number): OrderBookSnapshot => ({
+      ticker: 'KXBTC15M-T',
+      t,
+      yesBids: [{ price: bid, size }],
+      yesAsks: [{ price: ask, size: 100 }],
+      bestBid: bid,
+      bestAsk: ask,
+      mid: (bid + ask) / 2,
+      authenticated: false,
+    })
+
+    // Seed + join at depth 0 → queueAhead 0
+    const seed = emptyAt(0)
+    detectBookFills(null, seed, q, 0, 10, walk, strictOpts(0))
+    let prev = seed
+    let next = emptyAt(1)
+    expect(detectBookFills(prev, next, q, 0, 10, walk, strictOpts(1))).toEqual([])
+    expect(walk.bidQueueAhead).toBe(0)
+    prev = next
+
+    // Depth arrives behind us; build touch polls (strict needs 4). No fill yet.
+    let got = 0
+    for (let i = 2; i <= 4; i++) {
+      next = depthAt(i, 100)
+      got += detectBookFills(prev, next, q, 0, 10, walk, strictOpts(i)).length
       prev = next
     }
     expect(got).toBe(0)
-    expect(walk.bidTouchPolls).toBe(3)
+    expect(walk.bidQueueAhead).toBe(0)
+    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(3)
 
-    // 5th poll: touch polls become 4 AND consume ≥ 8 → fill
-    const next5 = book({
-      bestBid: bid,
-      bestAsk: ask,
-      yesBids: [{ price: bid, size: 20 }], // prev 70 → consume 50
-      yesAsks: [{ price: ask, size: 100 }],
-      t: 4,
-    })
-    const sigs = detectBookFills(
-      prev,
-      next5,
-      { yesBid: bid, yesAsk: ask, size: 1, active: true },
-      0,
-      10,
-      walk,
-      strictOpts(4),
-    )
+    // Large consume at touch with polls satisfied → fill (attributed ≥ minBookDepthConsumed)
+    next = depthAt(5, 20) // consume 80 from 100
+    const sigs = detectBookFills(prev, next, q, 0, 10, walk, strictOpts(5))
+    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(4)
     expect(sigs).toHaveLength(1)
     expect(sigs[0]!.reason).toBe('book_depth')
     expect(sigs[0]!.side).toBe('buy_yes')
+    expect(sigs[0]!.size).toBe(1)
   })
 })
 

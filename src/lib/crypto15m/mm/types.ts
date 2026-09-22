@@ -63,6 +63,10 @@ export interface MmFill {
    * Stamped before post-fill requote so digests are not polluted by post-flat S5.
    */
   scenarioId?: string
+  /** Remaining size-ahead queue after fill attribution (book_depth). */
+  queueAhead?: number
+  /** Explicit fill size for journal/telemetry (same as size). */
+  fillSize?: number
 }
 
 export interface MmCancelEvent {

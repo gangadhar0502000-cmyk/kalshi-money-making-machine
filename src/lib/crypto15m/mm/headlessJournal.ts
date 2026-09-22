@@ -33,6 +33,10 @@ export interface JournalEvent {
    * captureGapCents = minCloseProfitCents − captureCents when both known.
    */
   captureGapCents?: number | null
+  /** Remaining size-ahead queue after book_depth fill attribution. */
+  queueAhead?: number
+  /** Contracts filled on this event (mirrors size when present). */
+  fillSize?: number
 }
 
 export interface ScenarioDigestRow {
@@ -246,6 +250,8 @@ export function buildFillEvent(input: {
   captureCents?: number | null
   reason?: string
   realizedDelta?: number
+  queueAhead?: number
+  fillSize?: number
 }): JournalEvent {
   const t = input.t ?? Date.now()
   return {
@@ -263,6 +269,8 @@ export function buildFillEvent(input: {
     captureCents: input.captureCents ?? null,
     reason: input.reason,
     realizedDelta: input.realizedDelta,
+    queueAhead: input.queueAhead,
+    fillSize: input.fillSize,
   }
 }
 

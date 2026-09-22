@@ -655,69 +655,67 @@ export class PaperMmEngine {
     if (this.quote?.active && !this.moneyPrinterBug) {
       const now = Date.now()
       const cooling = now - this.lastFillAt < this.config.fillCooldownMs
-      if (!cooling) {
-        const rate = this.canAcceptFillByRateCaps(now)
-        if (!rate.ok) {
-          this.message =
-            `FILL RATE CAP — ${rate.reason}. Harsh paper discipline · read-only.`
-          // Keep mid-walk arming fresh while capped
-          const bid = this.quote.yesBid
-          const ask = this.quote.yesAsk
-          if (mid > bid + 1e-9) this.midWalkState.midWalkBidArmed = true
-          if (mid < ask - 1e-9) this.midWalkState.midWalkAskArmed = true
-        } else {
-          const signals = detectBookFills(
-            this.prevBook,
-            book,
-            this.quote,
-            this.inventory,
-            this.config.maxInventory,
-            this.midWalkState,
-            {
-              // Strict realism (default): maker-only — never emit taker_cross fee bleed.
-              allowTakerCross: !this.config.strictRealism,
-              allowMidWalk: this.config.allowMidWalk,
-              minBookDepthConsumed: this.config.minBookDepthConsumed,
-              minTouchPolls: this.config.minTouchPolls,
-              // When mid_walk is enabled, still require a long post-fill cooldown.
-              midWalkCooldownMs: this.config.strictRealism
-                ? Math.max(this.config.fillCooldownMs, 15_000)
-                : 0,
-              nowMs: now,
-            },
+      const rate = cooling
+        ? { ok: false as const, reason: 'fill cooldown' }
+        : this.canAcceptFillByRateCaps(now)
+      if (!rate.ok && !cooling) {
+        this.message =
+          `FILL RATE CAP — ${rate.reason}. Harsh paper discipline · read-only.`
+      }
+      // Always run detectBookFills so size-ahead queue tracks depth while cooling / capped.
+      const signals = detectBookFills(
+        this.prevBook,
+        book,
+        this.quote,
+        this.inventory,
+        this.config.maxInventory,
+        this.midWalkState,
+        {
+          // Strict realism (default): maker-only — never emit taker_cross fee bleed.
+          allowTakerCross: !this.config.strictRealism,
+          allowMidWalk: this.config.allowMidWalk,
+          minBookDepthConsumed: this.config.minBookDepthConsumed,
+          minTouchPolls: this.config.minTouchPolls,
+          // When mid_walk is enabled, still require a long post-fill cooldown.
+          midWalkCooldownMs: this.config.strictRealism
+            ? Math.max(this.config.fillCooldownMs, 15_000)
+            : 0,
+          nowMs: now,
+        },
+      )
+      // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
+      const sig = signals[0]
+      if (sig && rate.ok && !cooling) {
+        if (
+          isToxicExtremeMid(
+            sig.side,
+            mid,
+            this.config.toxicMidLow,
+            this.config.toxicMidHigh,
           )
-          // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
-          const sig = signals[0]
-          if (sig) {
-            if (
-              isToxicExtremeMid(
-                sig.side,
-                mid,
-                this.config.toxicMidLow,
-                this.config.toxicMidHigh,
-              )
-            ) {
-              this.midCrossRejectCount += 1
-              this.message =
-                `TOXIC SKIP ${sig.reason} ${sig.side} @ mid $${mid.toFixed(4)} — adverse side pulled.`
-              this.rebuildQuote(true)
-            } else {
-              const stats = this.spotHist.stats(this.config.spotWindowSec)
-              const toxic =
-                (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
-                (sig.side === 'sell_yes' && stats.signedPct > 0.02)
-              this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
-              this.lastFillAt = now
-              this.rebuildQuote(true)
-            }
-          }
+        ) {
+          this.midCrossRejectCount += 1
+          this.message =
+            `TOXIC SKIP ${sig.reason} ${sig.side} @ mid $${mid.toFixed(4)} — adverse side pulled.`
+          this.rebuildQuote(true)
+        } else {
+          const stats = this.spotHist.stats(this.config.spotWindowSec)
+          const toxic =
+            (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
+            (sig.side === 'sell_yes' && stats.signedPct > 0.02)
+          this.applyFill(
+            sig.side,
+            sig.price,
+            sig.size,
+            mid,
+            toxic,
+            sig.reason,
+            sig.taker,
+            { queueAhead: sig.queueAhead, fillSize: sig.fillSize ?? sig.size },
+          )
+          this.lastFillAt = now
+          this.rebuildQuote(true)
         }
-      } else {
-        // Keep mid-walk arming fresh while cooling; do not detect fills
-        const bid = this.quote.yesBid
-        const ask = this.quote.yesAsk
-        if (mid > bid + 1e-9) this.midWalkState.midWalkBidArmed = true
-        if (mid < ask - 1e-9) this.midWalkState.midWalkAskArmed = true
       }
     }
 
@@ -1171,6 +1169,7 @@ export class PaperMmEngine {
     toxic: boolean,
     reason: MmFill['reason'],
     taker: boolean,
+    extras?: { queueAhead?: number; fillSize?: number },
   ): void {
     const price = asDollarPrice(priceRaw, `fill.${reason}.price`)
     const mid = asDollarPrice(midRaw, `fill.${reason}.mid`)
@@ -1391,6 +1390,8 @@ export class PaperMmEngine {
       ticker: this.activeTicker(),
       captureDollars,
       scenarioId: fillScenarioId,
+      queueAhead: extras?.queueAhead,
+      fillSize: extras?.fillSize ?? size,
     })
     if (reason !== 'settlement') {
       this.fillCapStore.record(this.activeTicker(), fillAt)

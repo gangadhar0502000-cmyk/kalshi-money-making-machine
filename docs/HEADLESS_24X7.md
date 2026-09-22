@@ -70,6 +70,11 @@ Paper-only telemetry — does **not** change trading knobs (`openMinEdge`, `mark
 | `blocked_close.captureGapCents` | journal | `minCloseProfitCents − captureCents` (¢ short of the S3 bar). |
 | Digest `openFills` / `closeFills` | `digest-*.json` | Split vs blended `avgCentsPerFill`. |
 | Digest `avgCentsPerRoundTrip` | `digest-*.json` | `totalCaptureCents / closeFills` (¢ per completed close / RT). Blended `avgCentsPerFill` kept for backward compatibility. |
+| `fill.queueAhead` / `fill.fillSize` | journal `fill` | Size-ahead: contracts still ahead after L2 consume attribution; filled size. Reason stays `book_depth`. |
+
+### Size-ahead queue (paper fills)
+
+When a quote **joins** a bid/ask price, paper MM snapshots L2 depth at/better that price as `queueAhead` (we are last). Later depth drops burn the ahead queue first; only consumption **past** ahead=0 can fill us (`fillSize = min(our size, attributed)`). Depth that arrives while we rest joins **behind** us. Requote / leave-touch resets from the new join depth. Strict: no `mid_walk` / `taker_cross`; `minTouchPolls` still applies.
 
 See also `src/lib/crypto15m/mm/RULES.md` measurement notes.
 

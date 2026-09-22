@@ -3,8 +3,13 @@
  * Prices in dollars 0–1. Does not place orders.
  *
  * Hard realism: at most ONE fill per poll (never buy+sell same tick),
- * book_depth only at touch (±0.5¢) after minTouchPolls + min depth consumed,
+ * book_depth only at touch (±0.5¢) after minTouchPolls + size-ahead queue cleared,
  * mid_walk opt-in (disabled under strict) and requires arm + cooldown.
+ *
+ * Size-ahead queue: on join at a price we snapshot depth at/better as queueAhead
+ * (we are last). Later depth drops burn ahead first; only excess after ahead=0
+ * may fill us. Depth adds while resting join behind us (do not increase ahead).
+ * Requote / leave-touch resets the queue from the new join depth.
  */
 
 import { asDollarPrice } from './prices'
@@ -120,6 +125,10 @@ export type BookFillSignal = {
   reason: 'book_depth' | 'mid_walk' | 'taker_cross'
   /** true if our quote crossed the spread (immediate take) */
   taker: boolean
+  /** Remaining size-ahead queue after this poll's consumption (0 when we can fill). */
+  queueAhead?: number
+  /** Same as size — explicit for journal/telemetry. */
+  fillSize?: number
 }
 
 /** Touch tolerance: 0.5¢ = $0.005 */
@@ -136,6 +145,17 @@ export type DetectBookFillsState = {
   askTouchPolls: number
   /** Ms of last mid_walk fill (either side) — used for post-walk cooldown. */
   lastMidWalkAt: number
+  /**
+   * Bid price we joined the L2 queue at (null = not resting / need rejoin).
+   * Requote to a new price or leave-touch clears this.
+   */
+  bidQueuePrice: number | null
+  /** Contracts still ahead of us at/better our bid (FIFO). */
+  bidQueueAhead: number
+  /** Ask join price (null = not resting). */
+  askQueuePrice: number | null
+  /** Contracts still ahead of us at/better our ask. */
+  askQueueAhead: number
 }
 
 export const DEFAULT_DETECT_STATE: DetectBookFillsState = {
@@ -144,6 +164,20 @@ export const DEFAULT_DETECT_STATE: DetectBookFillsState = {
   bidTouchPolls: 0,
   askTouchPolls: 0,
   lastMidWalkAt: 0,
+  bidQueuePrice: null,
+  bidQueueAhead: 0,
+  askQueuePrice: null,
+  askQueueAhead: 0,
+}
+
+function resetBidQueue(walkState: DetectBookFillsState): void {
+  walkState.bidQueuePrice = null
+  walkState.bidQueueAhead = 0
+}
+
+function resetAskQueue(walkState: DetectBookFillsState): void {
+  walkState.askQueuePrice = null
+  walkState.askQueueAhead = 0
 }
 
 /**
@@ -162,7 +196,7 @@ export type DetectBookFillsOpts = {
    * full cross + prior uncross + midWalkCooldownMs.
    */
   allowMidWalk?: boolean
-  /** Min contracts consumed at touch to count as book_depth (default 1). */
+  /** Min contracts consumed past the ahead queue to count as book_depth (default 1). */
   minBookDepthConsumed?: number
   /** Min consecutive at-touch polls before book_depth can fire (default 1). */
   minTouchPolls?: number
@@ -191,7 +225,13 @@ export function detectBookFills(
   walkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE },
   opts: DetectBookFillsOpts = {},
 ): BookFillSignal[] {
-  if (!quote.active) return []
+  if (!quote.active) {
+    resetBidQueue(walkState)
+    resetAskQueue(walkState)
+    walkState.bidTouchPolls = 0
+    walkState.askTouchPolls = 0
+    return []
+  }
 
   const bid = asDollarPrice(quote.yesBid, 'quote.bid')
   const ask = asDollarPrice(quote.yesAsk, 'quote.ask')
@@ -240,6 +280,8 @@ export function detectBookFills(
     if (mid < ask - 1e-9) walkState.midWalkAskArmed = true
     walkState.bidTouchPolls = 0
     walkState.askTouchPolls = 0
+    resetBidQueue(walkState)
+    resetAskQueue(walkState)
     return []
   }
 
@@ -310,55 +352,106 @@ export function detectBookFills(
     ]
   }
 
-  // Depth consumption at our price — ONLY if we are at the touch (±0.5¢)
-  // for minTouchPolls consecutive polls AND consumed depth ≥ minDepth.
-  const bidDepthPrev = depthBidAtOrAbove(prev, bid)
-  const bidDepthNext = depthBidAtOrAbove(next, bid)
-  const bidConsumed = bidDepthPrev - bidDepthNext
-  if (
-    bidOn &&
-    bidJoined &&
-    walkState.bidTouchPolls >= minTouch &&
-    bidConsumed >= minDepth &&
-    inventory < maxInventory
-  ) {
-    const fillSz = Math.min(size, Math.floor(bidConsumed))
-    if (fillSz >= 1) {
-      return [
-        {
-          side: 'buy_yes',
-          price: bid,
-          size: fillSz,
-          reason: 'book_depth',
-          taker: false,
-        },
-      ]
+  // --- Size-ahead queue + book_depth (maker) ---
+  // Update both sides' queue state every poll; emit at most one fill.
+  let bidFill: BookFillSignal | null = null
+  let askFill: BookFillSignal | null = null
+
+  if (bidOn && bidJoined) {
+    const depthNext = depthBidAtOrAbove(next, bid)
+    const depthPrev = depthBidAtOrAbove(prev, bid)
+    const samePrice =
+      walkState.bidQueuePrice != null &&
+      Math.abs(walkState.bidQueuePrice - bid) <= 1e-9
+
+    if (!samePrice) {
+      // First poll at this bid price (join) — we are last; snapshot ahead.
+      // Do not attribute prev→next consume on the join poll (we weren't in line).
+      walkState.bidQueuePrice = bid
+      walkState.bidQueueAhead = Math.max(0, Math.floor(depthNext))
+    } else {
+      // Depth increase → new contracts join behind us (ahead unchanged).
+      const rawConsumed = Math.max(0, depthPrev - depthNext)
+      if (rawConsumed > 0) {
+        let remaining = rawConsumed
+        if (walkState.bidQueueAhead > 0) {
+          const burn = Math.min(walkState.bidQueueAhead, remaining)
+          walkState.bidQueueAhead -= burn
+          remaining -= burn
+        }
+        const attributed = Math.floor(remaining)
+        if (
+          walkState.bidQueueAhead <= 0 &&
+          walkState.bidTouchPolls >= minTouch &&
+          attributed >= minDepth &&
+          inventory < maxInventory
+        ) {
+          const fillSz = Math.min(size, attributed)
+          if (fillSz >= 1) {
+            bidFill = {
+              side: 'buy_yes',
+              price: bid,
+              size: fillSz,
+              reason: 'book_depth',
+              taker: false,
+              queueAhead: walkState.bidQueueAhead,
+              fillSize: fillSz,
+            }
+          }
+        }
+      }
     }
+  } else {
+    resetBidQueue(walkState)
   }
 
-  const askDepthPrev = depthAskAtOrBelow(prev, ask)
-  const askDepthNext = depthAskAtOrBelow(next, ask)
-  const askConsumed = askDepthPrev - askDepthNext
-  if (
-    askOn &&
-    askJoined &&
-    walkState.askTouchPolls >= minTouch &&
-    askConsumed >= minDepth &&
-    inventory > -maxInventory
-  ) {
-    const fillSz = Math.min(size, Math.floor(askConsumed))
-    if (fillSz >= 1) {
-      return [
-        {
-          side: 'sell_yes',
-          price: ask,
-          size: fillSz,
-          reason: 'book_depth',
-          taker: false,
-        },
-      ]
+  if (askOn && askJoined) {
+    const depthNext = depthAskAtOrBelow(next, ask)
+    const depthPrev = depthAskAtOrBelow(prev, ask)
+    const samePrice =
+      walkState.askQueuePrice != null &&
+      Math.abs(walkState.askQueuePrice - ask) <= 1e-9
+
+    if (!samePrice) {
+      walkState.askQueuePrice = ask
+      walkState.askQueueAhead = Math.max(0, Math.floor(depthNext))
+    } else {
+      const rawConsumed = Math.max(0, depthPrev - depthNext)
+      if (rawConsumed > 0) {
+        let remaining = rawConsumed
+        if (walkState.askQueueAhead > 0) {
+          const burn = Math.min(walkState.askQueueAhead, remaining)
+          walkState.askQueueAhead -= burn
+          remaining -= burn
+        }
+        const attributed = Math.floor(remaining)
+        if (
+          walkState.askQueueAhead <= 0 &&
+          walkState.askTouchPolls >= minTouch &&
+          attributed >= minDepth &&
+          inventory > -maxInventory
+        ) {
+          const fillSz = Math.min(size, attributed)
+          if (fillSz >= 1) {
+            askFill = {
+              side: 'sell_yes',
+              price: ask,
+              size: fillSz,
+              reason: 'book_depth',
+              taker: false,
+              queueAhead: walkState.askQueueAhead,
+              fillSize: fillSz,
+            }
+          }
+        }
+      }
     }
+  } else {
+    resetAskQueue(walkState)
   }
 
+  // At most one fill per poll — prefer bid if both fire (same as prior depth-first order).
+  if (bidFill) return [bidFill]
+  if (askFill) return [askFill]
   return []
 }

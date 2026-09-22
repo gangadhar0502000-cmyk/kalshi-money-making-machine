@@ -207,6 +207,8 @@ async function runPaperMmLoop(): Promise<void> {
           captureCents: f.captureDollars != null ? f.captureDollars * 100 : undefined,
           reason: f.reason,
           realizedDelta: f.captureDollars,
+          queueAhead: f.queueAhead,
+          fillSize: f.fillSize ?? f.size,
         })
         hourEvents.push(ev)
         appendJournal(ev, journalStream)
