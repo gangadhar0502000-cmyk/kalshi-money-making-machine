@@ -15,9 +15,13 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Old Crypto 15m Lab + Edge Finder demoted to recovery via `?legacy=1` or `#legacy` (`src/v1/LegacyApp.tsx`). Not primary tabs.
 - Feed spine unchanged: `continuousFeed` + mm-proxy cache remain infrastructure.
 
+## U1c — polished feed UI
+
+- Product-grade dark trading layout for the feed-only homepage: header with live pulse, metric strip (markets / feed age / proxy / next close), refined markets table (asset badge + name, ticker, time left with urgency, bid/ask/mid/spread/spot), designed empty states, minimal footer.
+
 ## Upcoming
 
-- **U2** — UI polish / layout (beyond the minimal U1b table).
+- **U2** — further layout / density tweaks if needed.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
