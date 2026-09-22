@@ -30,6 +30,7 @@ export interface ScenarioDigestRow {
   totalCaptureCents: number
   avgCentsPerFill: number
   stuckS41: number
+  markBleedS42: number
   s51Evictions: number
   blockedCloses: number
   totalRealizedDelta: number
@@ -50,6 +51,7 @@ const EMPTY_ROW = (): ScenarioDigestRow => ({
   totalCaptureCents: 0,
   avgCentsPerFill: 0,
   stuckS41: 0,
+  markBleedS42: 0,
   s51Evictions: 0,
   blockedCloses: 0,
   totalRealizedDelta: 0,
@@ -93,6 +95,7 @@ function bump(row: ScenarioDigestRow, patch: Partial<ScenarioDigestRow>): void {
   if (patch.fills) row.fills += patch.fills
   if (patch.totalCaptureCents) row.totalCaptureCents += patch.totalCaptureCents
   if (patch.stuckS41) row.stuckS41 += patch.stuckS41
+  if (patch.markBleedS42) row.markBleedS42 += patch.markBleedS42
   if (patch.s51Evictions) row.s51Evictions += patch.s51Evictions
   if (patch.blockedCloses) row.blockedCloses += patch.blockedCloses
   if (patch.totalRealizedDelta) row.totalRealizedDelta += patch.totalRealizedDelta
@@ -144,6 +147,10 @@ export function aggregateDigest(
       if (sid === 'S4.1' || /S4\.1|STUCK_UNWIND/i.test(ev.reason ?? '')) {
         bump(row, { stuckS41: 1 })
         bump(totals, { stuckS41: 1 })
+      }
+      if (sid === 'S4.2' || /S4\.2|MARK_BLEED/i.test(ev.reason ?? '')) {
+        bump(row, { markBleedS42: 1 })
+        bump(totals, { markBleedS42: 1 })
       }
     } else if (ev.type === 'blocked_close') {
       bump(row, { blockedCloses: 1 })

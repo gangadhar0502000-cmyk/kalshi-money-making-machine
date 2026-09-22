@@ -36,6 +36,7 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
     minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
     stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
+    markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
     ...partial,
   }
 }

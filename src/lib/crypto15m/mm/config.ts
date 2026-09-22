@@ -189,6 +189,11 @@ export interface PaperMmConfig {
    * (~45s at quoteRefreshMs=1500). Never allows voluntary −¢ closes.
    */
   stuckUnwindTicks: number
+  /**
+   * S4.2 MARK_BLEED: after stuckUnwindTicks, allow lossy reduce when capture
+   * ≤ −markBleedCents. Default 5¢. Never opens; S4.1 still preferred at ≥0¢.
+   */
+  markBleedCents: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -243,6 +248,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   minCloseProfitCents: 1.0,
   minChurnCaptureCents: 1.0,
   stuckUnwindTicks: 30,
+  markBleedCents: 5,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -349,6 +355,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
       10,
     ),
     stuckUnwindTicks: Math.round(clamp(c.stuckUnwindTicks ?? 30, 1, 600)),
+    markBleedCents: clamp(c.markBleedCents ?? 5, 0, 50),
   }
 }
 
@@ -446,6 +453,9 @@ export function migratePersistedScarcityConfig(
   }
   if (partial.stuckUnwindTicks == null || !Number.isFinite(partial.stuckUnwindTicks)) {
     out.stuckUnwindTicks = STRICT_PAPER_MM_CONFIG.stuckUnwindTicks
+  }
+  if (partial.markBleedCents == null || !Number.isFinite(partial.markBleedCents)) {
+    out.markBleedCents = STRICT_PAPER_MM_CONFIG.markBleedCents
   }
   return out
 }

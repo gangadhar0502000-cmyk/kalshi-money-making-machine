@@ -7,11 +7,12 @@
  * S3 CLOSE_PROFIT — reduce inventory only with ≥ minCloseProfitCents vs avgEntry
  * S4 CLOSE_RISK — forced flatten without profit (hard flat / max inv / guard / toxic)
  * S4.1 STUCK_UNWIND — after N blocked S3 reduces, allow reduce at ≥ 0¢ (break-even), never loss
+ * S4.2 MARK_BLEED — after same stuck ticks, allow reduce when capture ≤ −markBleedCents (lossy OK)
  * S5 NO_TRADE — default; both sides OFF
  * S5.1 SLOT_EVICT — portfolio: evict sanity-parked flat books from active slots
  */
 
-export type ScenarioId = 'S1' | 'S2' | 'S3' | 'S4' | 'S4.1' | 'S5' | 'S5.1'
+export type ScenarioId = 'S1' | 'S2' | 'S3' | 'S4' | 'S4.1' | 'S4.2' | 'S5' | 'S5.1'
 
 export const SCENARIO_LABEL: Record<ScenarioId, string> = {
   S1: 'OPEN_BID',
@@ -19,6 +20,7 @@ export const SCENARIO_LABEL: Record<ScenarioId, string> = {
   S3: 'CLOSE_PROFIT',
   S4: 'CLOSE_RISK',
   'S4.1': 'STUCK_UNWIND',
+  'S4.2': 'MARK_BLEED',
   S5: 'NO_TRADE',
   'S5.1': 'SLOT_EVICT',
 }
@@ -38,10 +40,15 @@ export interface ScenarioThresholds {
   toxicMidLow: number
   toxicMidHigh: number
   /**
-   * S4.1: consecutive decision ticks where S3 reduce is blocked by minCloseProfit
-   * before escalating to break-even (≥0¢) unwind. Default 30 (~45s at 1.5s refresh).
+   * S4.1 / S4.2: consecutive decision ticks where S3 reduce is blocked by minCloseProfit
+   * before escalating. Default 30 (~45s at 1.5s refresh).
    */
   stuckUnwindTicks: number
+  /**
+   * S4.2 MARK_BLEED: after stuckUnwindTicks, allow lossy reduce when capture ≤ −this (¢).
+   * Default 5 → fires at ≤ −5¢. Never opens.
+   */
+  markBleedCents: number
 }
 
 export const DEFAULT_SCENARIO_THRESHOLDS: ScenarioThresholds = {
@@ -54,6 +61,7 @@ export const DEFAULT_SCENARIO_THRESHOLDS: ScenarioThresholds = {
   toxicMidLow: 0.05,
   toxicMidHigh: 0.95,
   stuckUnwindTicks: 30,
+  markBleedCents: 5,
 }
 
 export function scenarioTag(id: ScenarioId): string {
@@ -127,12 +135,15 @@ export type CloseDecision =
   | { allow: true; scenario: 'S3'; captureCents: number; reason: string }
   | { allow: true; scenario: 'S4'; captureCents: number | null; reason: string }
   | { allow: true; scenario: 'S4.1'; captureCents: number; reason: string }
+  | { allow: true; scenario: 'S4.2'; captureCents: number; reason: string }
   | { allow: false; scenario: 'S5'; captureCents: number | null; reason: string }
 
 /**
- * Decide whether a reducing fill / reduce quote is allowed (S3, S4, or S4.1).
+ * Decide whether a reducing fill / reduce quote is allowed (S3, S4, S4.1, or S4.2).
  * Lossy / sub-1¢ voluntary unwinds → S5 refuse (fixes −0.88¢/fill churn).
  * S4.1: after stuckUnwindTicks consecutive S3 profit-bar blocks, allow ≥0¢ only.
+ * S4.2: after same stuck ticks, allow when capture ≤ −markBleedCents (lossy OK).
+ * Ladder: S3 → S4 riskOn → S4.1 (≥0) → S4.2 (≤ −bleed) → S5 block.
  */
 export function evaluateClose(args: {
   side: 'buy_yes' | 'sell_yes' | 'bid' | 'ask'
@@ -143,8 +154,10 @@ export function evaluateClose(args: {
   risk: RiskFlatInput
   /** Consecutive ticks already blocked by S3 minClose (incl. this tick if blocked). */
   stuckBlockedTicks?: number
-  /** Escalate to S4.1 break-even after this many blocked ticks. Default 30. */
+  /** Escalate to S4.1 / S4.2 after this many blocked ticks. Default 30. */
   stuckUnwindTicks?: number
+  /** S4.2: allow lossy reduce when capture ≤ −this (¢). Default 5. */
+  markBleedCents?: number
 }): CloseDecision {
   const reducing =
     (args.side === 'sell_yes' || args.side === 'ask') && args.inventory > 0
@@ -177,6 +190,10 @@ export function evaluateClose(args: {
     args.stuckBlockedTicks != null && Number.isFinite(args.stuckBlockedTicks)
       ? Math.max(0, Math.floor(args.stuckBlockedTicks))
       : 0
+  const markBleed =
+    args.markBleedCents != null && Number.isFinite(args.markBleedCents)
+      ? Math.max(0, args.markBleedCents)
+      : DEFAULT_SCENARIO_THRESHOLDS.markBleedCents
 
   if (cap != null && cap >= minP - 1e-9) {
     return {
@@ -203,6 +220,16 @@ export function evaluateClose(args: {
       scenario: 'S4.1',
       captureCents: cap,
       reason: `${fillSide === 'sell_yes' ? 'ask' : 'bid'} ON: ${scenarioTag('S4.1')} +${cap.toFixed(1)}¢`,
+    }
+  }
+
+  // S4.2 MARK_BLEED — stuck + marked loser ≤ −markBleedCents (lossy OK, never opens)
+  if (stuckTicks >= stuckThresh && cap != null && cap <= -markBleed + 1e-9) {
+    return {
+      allow: true,
+      scenario: 'S4.2',
+      captureCents: cap,
+      reason: `${fillSide === 'sell_yes' ? 'ask' : 'bid'} ON: ${scenarioTag('S4.2')} ${cap.toFixed(1)}¢`,
     }
   }
 
@@ -239,8 +266,8 @@ export function pickActiveScenario(args: {
   bidScenario: ScenarioId
   askScenario: ScenarioId
 }): ScenarioId {
-  const preferAsk = new Set<ScenarioId>(['S2', 'S3', 'S4', 'S4.1'])
-  const preferBid = new Set<ScenarioId>(['S1', 'S3', 'S4', 'S4.1'])
+  const preferAsk = new Set<ScenarioId>(['S2', 'S3', 'S4', 'S4.1', 'S4.2'])
+  const preferBid = new Set<ScenarioId>(['S1', 'S3', 'S4', 'S4.1', 'S4.2'])
   if (args.askActive && preferAsk.has(args.askScenario)) {
     return args.askScenario
   }
@@ -252,9 +279,9 @@ export function pickActiveScenario(args: {
   return 'S5'
 }
 
-/** True when scenario is risk-flat family (S4 / S4.1) for UI badges. */
+/** True when scenario is risk-flat family (S4 / S4.1 / S4.2) for UI badges. */
 export function isRiskFlatFamily(id: ScenarioId | string | undefined | null): boolean {
-  return id === 'S4' || id === 'S4.1'
+  return id === 'S4' || id === 'S4.1' || id === 'S4.2'
 }
 
 export function activeScenarioLabel(id: ScenarioId): string {

@@ -4,7 +4,7 @@
  * Paper research only — never places live orders; positive P&L not guaranteed.
  *
  * Only profitable scenarios may open/close (see profitableScenarios.ts + RULES.md):
- *   S1 OPEN_BID · S2 OPEN_ASK · S3 CLOSE_PROFIT · S4 CLOSE_RISK · S4.1 STUCK_UNWIND · S5 NO_TRADE
+ *   S1 OPEN_BID · S2 OPEN_ASK · S3 CLOSE_PROFIT · S4 CLOSE_RISK · S4.1 STUCK_UNWIND · S4.2 MARK_BLEED · S5 NO_TRADE
  *
  * Priority (hard → smart):
  * 1. Hard parks (money printer / not running / settled / feed / bad mid)
@@ -83,10 +83,15 @@ export interface DecisionPolicyConfig {
   /** S3 voluntary close min signed capture vs avgEntry (default 1¢). */
   minCloseProfitCents: number
   /**
-   * S4.1: consecutive quote ticks with S3 reduce blocked by minCloseProfit
-   * before break-even (≥0¢) escalate. Default 30 (~45s @ 1.5s refresh).
+   * S4.1 / S4.2: consecutive quote ticks with S3 reduce blocked by minCloseProfit
+   * before escalate. Default 30 (~45s @ 1.5s refresh).
    */
   stuckUnwindTicks: number
+  /**
+   * S4.2 MARK_BLEED: after stuck ticks, allow lossy reduce when capture ≤ −this (¢).
+   * Default 5.
+   */
+  markBleedCents: number
 }
 
 export const DEFAULT_DECISION_POLICY: Pick<
@@ -105,6 +110,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   | 'hardFlatMinutes'
   | 'minCloseProfitCents'
   | 'stuckUnwindTicks'
+  | 'markBleedCents'
 > = {
   expiryPullMinutes: 0.5,
   sizeDownEdgeMult: 1.5,
@@ -120,6 +126,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   hardFlatMinutes: 2,
   minCloseProfitCents: 1.0,
   stuckUnwindTicks: 30,
+  markBleedCents: 5,
 }
 
 /** Mutable edge-persistence counters carried across quote rebuilds. */
@@ -132,7 +139,7 @@ export function emptyEdgePersistState(): EdgePersistState {
   return { bidTicks: 0, askTicks: 0 }
 }
 
-/** Per-book counter for S4.1 STUCK_UNWIND escalation. */
+/** Per-book counter for S4.1 / S4.2 stuck escalation. */
 export interface StuckUnwindState {
   /** Consecutive ticks where reduce was blocked by S3 minCloseProfit. */
   ticks: number
@@ -182,7 +189,7 @@ export interface DecisionPolicyInput {
   edgePersist?: EdgePersistState | null
   /** Avg entry of open inventory (dollars 0–1) — required for S3 CLOSE_PROFIT. */
   avgEntry?: number | null
-  /** Prior S4.1 stuck-unwind counters (from last rebuild). */
+  /** Prior S4.1 / S4.2 stuck-unwind counters (from last rebuild). */
   stuckUnwind?: StuckUnwindState | null
 }
 
@@ -204,7 +211,7 @@ export interface DecisionPolicyResult {
   unwindActive: boolean
   /** Updated persist counters for the next rebuild. */
   edgePersist: EdgePersistState
-  /** Updated S4.1 stuck counters for the next rebuild. */
+  /** Updated S4.1 / S4.2 stuck counters for the next rebuild. */
   stuckUnwind: StuckUnwindState
   bidScenario: ScenarioId
   askScenario: ScenarioId
@@ -564,13 +571,17 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   const unwindAskPx = priceUnwindAsk(input.mid, half, input.bookBestBid, input.bookBestAsk)
   const unwindBidPx = priceUnwindBid(input.mid, half, input.bookBestBid, input.bookBestAsk)
 
-  // S4.1 stuck counter: same-sign inventory only; reset on flat / flip / allow
+  // S4.1 / S4.2 stuck counter: same-sign inventory only; reset on flat / flip / allow
   const invSign =
     input.inventory > 0 ? 1 : input.inventory < 0 ? -1 : 0
   const stuckThresh =
     Number.isFinite(cfg.stuckUnwindTicks) && cfg.stuckUnwindTicks > 0
       ? Math.max(1, Math.floor(cfg.stuckUnwindTicks))
       : DEFAULT_SCENARIO_THRESHOLDS.stuckUnwindTicks
+  const markBleed =
+    Number.isFinite(cfg.markBleedCents) && cfg.markBleedCents >= 0
+      ? cfg.markBleedCents
+      : DEFAULT_SCENARIO_THRESHOLDS.markBleedCents
   const baseStuckTicks =
     invSign !== 0 && prevStuck.invSign === invSign ? prevStuck.ticks : 0
 
@@ -580,7 +591,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       return
     }
     if (closeDec.allow) {
-      // S3 / S4 / S4.1 succeeded — clear stuck counter
+      // S3 / S4 / S4.1 / S4.2 succeeded — clear stuck counter
       nextStuck = { ticks: 0, invSign }
       return
     }
@@ -615,6 +626,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         risk: { ...riskInputBase, holdingSide: 'long' },
         stuckBlockedTicks: candidateStuck,
         stuckUnwindTicks: stuckThresh,
+        markBleedCents: markBleed,
       })
       applyStuckAfterClose(closeDec)
       if (closeDec.allow) {
@@ -652,6 +664,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
         risk: { ...riskInputBase, holdingSide: 'short' },
         stuckBlockedTicks: candidateStuck,
         stuckUnwindTicks: stuckThresh,
+        markBleedCents: markBleed,
       })
       applyStuckAfterClose(closeDec)
       if (closeDec.allow) {

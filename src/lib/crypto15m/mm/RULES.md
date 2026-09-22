@@ -13,12 +13,13 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 | **S3** | `CLOSE_PROFIT` | Reducing quote/fill | Capture vs `avgEntry` ≥ `minCloseProfitCents` (**1.0¢**). Main fix for −0.88¢/fill unwind churn. Reason: `ask ON: S3 CLOSE_PROFIT +1.2¢`. |
 | **S4** | `CLOSE_RISK` | Forced flatten | May close **without** profit only if: `minutesRemaining < hardFlatMinutes` **OR** `\|inventory\| ≥ maxInventory` **OR** spot-guard cancel / extreme widen **OR** toxic mid on holding side. Reason **must** include `risk flat`. |
 | **S4.1** | `STUCK_UNWIND` | Break-even reduce | After `stuckUnwindTicks` (default **30**, ~45–60s) consecutive S3 profit-bar blocks, allow reduce at capture **≥ 0¢** vs avgEntry. Reason **must** include `S4.1 STUCK_UNWIND`. Never voluntary −¢. Risk-flat family for UI. |
+| **S4.2** | `MARK_BLEED` | Lossy stuck flatten | After the **same** `stuckUnwindTicks`, if capture ≤ `−markBleedCents` (default **5** → ≤ −5¢), allow reducing quote/fill at any capture (lossy OK). Reason **must** include `S4.2 MARK_BLEED`. Never opens. S4.1 still wins when stuck and capture ≥ 0. Risk-flat family for UI. |
 | **S5** | `NO_TRADE` | Both OFF | Everything else. Includes `CLOSE blocked: capture 0.3¢ < 1¢`. |
 | **S5.1** | `SLOT_EVICT` | Free active slot | Sanity-parked (`|FV−mid| > maxSaneEdgeCents` or reason has edge sanity) **and** flat inventory → **evict** from `maxActiveMarkets` set so next |FV−mid| candidate can enter. Do **not** evict if inventory ≠ 0 (needs unwind). |
 
 ## Explicitly NOT profitable (must refuse)
 
-1. **Open then unwind at ≤0 capture** — churn loss (screenshot-style −0.88¢/fill). Blocked unless S4. S4.1 may allow **exactly ≥0¢** after stuck ticks — still blocks −¢.
+1. **Open then unwind at ≤0 capture** — churn loss (screenshot-style −0.88¢/fill). Blocked unless S4. S4.1 may allow **exactly ≥0¢** after stuck ticks. S4.2 may allow **≤ −markBleedCents** after the same stuck ticks (cuts marked losers that never reached S4.1). Mid-loss (−1…−4¢ with default bleed) stays blocked until S4 risk-flat.
 2. **Quote both sides into a one-sided edge** — one-sided discipline; favored side only.
 3. **Mid-fallback when FV insane** — park on edge sanity; never spam mid-centered opens.
 4. **Open with edge < openMin after clamp** — `clamp killed edge` / open min gate.
@@ -36,6 +37,7 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 - `CLOSE blocked: capture 0.3¢ < 1¢`
 - `ask ON: S4 CLOSE_RISK risk flat`
 - `ask ON: S4.1 STUCK_UNWIND +0.0¢`
+- `ask ON: S4.2 MARK_BLEED -5.0¢`
 - `Slot released (BNB) — S5.1 SLOT_EVICT sanity+flat; …`
 
 ## Config defaults (strict paper)
@@ -49,3 +51,4 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 | `edgePersistTicks` | 3 |
 | `maxSaneEdgeCents` | 25 |
 | `stuckUnwindTicks` | 30 |
+| `markBleedCents` | 5 |

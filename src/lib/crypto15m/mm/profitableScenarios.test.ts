@@ -42,6 +42,7 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     hardFlatMinutes: 2,
     minCloseProfitCents: 1.0,
     stuckUnwindTicks: 30,
+    markBleedCents: 5,
     ...partial,
   }
 }
@@ -367,9 +368,9 @@ describe('S4.1 STUCK_UNWIND', () => {
     expect(d3.stuckUnwind.ticks).toBe(0) // reset on allow
   })
 
-  it('still blocks −0.5¢ even after stuck threshold (no voluntary loss)', () => {
-    const cfg = baseConfig({ stuckUnwindTicks: 2, minCloseProfitCents: 1 })
-    // Resting ask clearly below entry (−1¢) — S4.1 must refuse voluntary loss
+  it('still blocks −0.5¢ after stuck when above −markBleed (S4.2 not yet)', () => {
+    const cfg = baseConfig({ stuckUnwindTicks: 2, minCloseProfitCents: 1, markBleedCents: 5 })
+    // Resting ask −1¢ vs entry — S4.1 refuses; S4.2 needs ≤ −5¢
     const d = decideQuoteSides(
       baseInput({
         inventory: 2,
@@ -441,5 +442,127 @@ describe('S4.1 STUCK_UNWIND', () => {
     )
     expect(flat.stuckUnwind.ticks).toBe(0)
     expect(flat.stuckUnwind.invSign).toBe(0)
+  })
+})
+
+describe('S4.2 MARK_BLEED', () => {
+  const riskOk = {
+    minutesRemaining: 8,
+    inventory: 2,
+    maxInventory: 10,
+    hardFlatMinutes: 2,
+    spotGuardCancel: false,
+    mid: 0.5,
+    toxicMidLow: 0.05,
+    toxicMidHigh: 0.95,
+    holdingSide: 'long' as const,
+  }
+
+  it('allows −5¢ after stuckUnwindTicks (lossy OK)', () => {
+    const fill = evaluateClose({
+      side: 'sell_yes',
+      price: 0.45, // −5¢ vs entry 0.50
+      avgEntry: 0.5,
+      inventory: 2,
+      minCloseProfitCents: 1,
+      risk: riskOk,
+      stuckBlockedTicks: 30,
+      stuckUnwindTicks: 30,
+      markBleedCents: 5,
+    })
+    expect(fill.allow).toBe(true)
+    expect(fill.scenario).toBe('S4.2')
+    expect(fill.reason).toMatch(/S4\.2 MARK_BLEED/)
+    expect(fill.captureCents).toBeCloseTo(-5, 1)
+
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        avgEntry: 0.5,
+        mid: 0.5,
+        fairValue: 0.5,
+        edgeCents: 0,
+        minutesRemaining: 8,
+        bookBestBid: 0.44,
+        bookBestAsk: 0.45,
+        config: baseConfig({ stuckUnwindTicks: 2, markBleedCents: 5 }),
+        stuckUnwind: { ticks: 10, invSign: 1 },
+      }),
+    )
+    expect(d.askActive).toBe(true)
+    expect(d.askScenario).toBe('S4.2')
+    expect(d.askReason).toMatch(/S4\.2 MARK_BLEED/)
+    expect(d.activeScenario).toBe('S4.2')
+    expect(d.stuckUnwind.ticks).toBe(0)
+  })
+
+  it('refuses −4¢ after stuck (not yet ≤ −markBleedCents)', () => {
+    const fill = evaluateClose({
+      side: 'sell_yes',
+      price: 0.46, // −4¢
+      avgEntry: 0.5,
+      inventory: 2,
+      minCloseProfitCents: 1,
+      risk: riskOk,
+      stuckBlockedTicks: 99,
+      stuckUnwindTicks: 2,
+      markBleedCents: 5,
+    })
+    expect(fill.allow).toBe(false)
+    expect(fill.scenario).toBe('S5')
+    expect(fill.reason).toMatch(/CLOSE blocked: capture/)
+    expect(fill.captureCents).toBeCloseTo(-4, 1)
+
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        avgEntry: 0.5,
+        mid: 0.5,
+        fairValue: 0.5,
+        edgeCents: 0,
+        minutesRemaining: 8,
+        bookBestBid: 0.45,
+        bookBestAsk: 0.46,
+        config: baseConfig({ stuckUnwindTicks: 2, markBleedCents: 5 }),
+        stuckUnwind: { ticks: 10, invSign: 1 },
+      }),
+    )
+    expect(d.askActive).toBe(false)
+    expect(d.askScenario).toBe('S5')
+    expect(d.askReason).not.toMatch(/S4\.2/)
+  })
+
+  it('S4.1 still preferred at 0¢ when stuck', () => {
+    const fill = evaluateClose({
+      side: 'sell_yes',
+      price: 0.5,
+      avgEntry: 0.5,
+      inventory: 2,
+      minCloseProfitCents: 1,
+      risk: riskOk,
+      stuckBlockedTicks: 99,
+      stuckUnwindTicks: 2,
+      markBleedCents: 5,
+    })
+    expect(fill.allow).toBe(true)
+    expect(fill.scenario).toBe('S4.1')
+    expect(fill.reason).toMatch(/S4\.1 STUCK_UNWIND/)
+  })
+
+  it('does not open — only reducing paths', () => {
+    const openish = evaluateClose({
+      side: 'buy_yes',
+      price: 0.4,
+      avgEntry: 0.5,
+      inventory: 0, // flat — not reducing
+      minCloseProfitCents: 1,
+      risk: { ...riskOk, inventory: 0, holdingSide: 'flat' },
+      stuckBlockedTicks: 99,
+      stuckUnwindTicks: 2,
+      markBleedCents: 5,
+    })
+    expect(openish.allow).toBe(false)
+    expect(openish.scenario).toBe('S5')
+    expect(openish.reason).toMatch(/not reducing/)
   })
 })

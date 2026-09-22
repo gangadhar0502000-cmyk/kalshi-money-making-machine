@@ -92,6 +92,15 @@ describe('headlessJournal digest', () => {
         realizedDelta: 0.001,
         reason: 'S4.1 STUCK_UNWIND',
       }),
+      buildFillEvent({
+        t: t0 + 3500,
+        scenarioId: 'S4.2',
+        side: 'sell_yes',
+        price: 0.35,
+        captureCents: -5,
+        realizedDelta: -0.05,
+        reason: 'S4.2 MARK_BLEED',
+      }),
       buildBlockedCloseEvent({
         t: t0 + 4000,
         scenarioId: 'S5',
@@ -119,12 +128,15 @@ describe('headlessJournal digest', () => {
     expect(digest.byScenario.S3?.avgCentsPerFill).toBeCloseTo(3.2, 5)
     expect(digest.byScenario['S4.1']?.fills).toBe(1)
     expect(digest.byScenario['S4.1']?.stuckS41).toBe(1)
+    expect(digest.byScenario['S4.2']?.fills).toBe(1)
+    expect(digest.byScenario['S4.2']?.markBleedS42).toBe(1)
     expect(digest.byScenario.S5?.blockedCloses).toBe(1)
     expect(digest.byScenario['S5.1']?.s51Evictions).toBe(1)
-    expect(digest.totals.fills).toBe(3)
+    expect(digest.totals.fills).toBe(4)
+    expect(digest.totals.markBleedS42).toBe(1)
     expect(digest.totals.s51Evictions).toBe(1)
     expect(digest.totals.blockedCloses).toBe(1)
-    expect(digest.totals.events).toBe(5)
+    expect(digest.totals.events).toBe(6)
   })
 
   it('hourKeyFromMs returns YYYY-MM-DD-HH', () => {

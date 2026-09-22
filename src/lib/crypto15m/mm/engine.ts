@@ -142,7 +142,7 @@ export class PaperMmEngine {
   private toxicAskPullUntil = 0
   /** Edge persistence counters across quote rebuilds. */
   private edgePersistState: EdgePersistState = emptyEdgePersistState()
-  /** S4.1 stuck-unwind counters across quote rebuilds. */
+  /** S4.1 / S4.2 stuck-unwind counters across quote rebuilds. */
   private stuckUnwindState: StuckUnwindState = emptyStuckUnwindState()
 
   subscribe(fn: () => void): () => void {
@@ -986,6 +986,7 @@ export class PaperMmEngine {
       hardFlatMinutes: this.config.hardFlatMinutes,
       minCloseProfitCents: this.config.minCloseProfitCents,
       stuckUnwindTicks: this.config.stuckUnwindTicks ?? 30,
+      markBleedCents: this.config.markBleedCents ?? 5,
     }
 
     const decision = decideQuoteSides({
@@ -1264,6 +1265,7 @@ export class PaperMmEngine {
           },
           stuckBlockedTicks: stuckBase + 1,
           stuckUnwindTicks: this.config.stuckUnwindTicks ?? 30,
+          markBleedCents: this.config.markBleedCents ?? 5,
         })
         if (!closeDec.allow) {
           this.midCrossRejectCount += 1
@@ -1282,6 +1284,11 @@ export class PaperMmEngine {
         if (closeDec.scenario === 'S4.1') {
           this.message =
             `S4.1 STUCK_UNWIND ${side} @ $${price.toFixed(4)} ` +
+            `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
+        }
+        if (closeDec.scenario === 'S4.2') {
+          this.message =
+            `S4.2 MARK_BLEED ${side} @ $${price.toFixed(4)} ` +
             `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
         }
       }
