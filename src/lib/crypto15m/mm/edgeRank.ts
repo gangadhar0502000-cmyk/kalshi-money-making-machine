@@ -44,13 +44,15 @@ export interface RankedMarket {
   strikeSource: 'floor_strike' | 'spot_reference' | 'none'
   /** Why FV is blank when inputs incomplete. */
   fvMissingReason: FvMissingReason
-  /** True when FV exists and |edge| ≥ minEdgeCents (at least one side could quote). */
+  /** True when FV exists, |edge| ≥ minEdge, and |edge| ≤ maxSane (quoteable). */
   quoteEligible: boolean
   /**
-   * True when FV/edge path is unavailable but mid is non-toxic —
-   * multi-book may still fill the slot via mid-centered quoting.
+   * True when FV is genuinely unavailable and mid is non-toxic.
+   * Never true when FV exists — insane |FV−mid| must park as sanity, not mid fb.
    */
   midFallbackEligible: boolean
+  /** True when FV exists and |edge| exceeds maxSaneEdgeCents. */
+  sanityPark: boolean
 }
 
 /**
@@ -64,6 +66,7 @@ export function scoreMarketEdge(
   minEdgeCents: number,
   toxicMidLow = 0.05,
   toxicMidHigh = 0.95,
+  maxSaneEdgeCents = 25,
 ): RankedMarket {
   const midRaw = market.midYes
   const midOk = isValidQuoteMid(midRaw)
@@ -106,8 +109,15 @@ export function scoreMarketEdge(
 
   const absEdgeCents = edgeCents != null ? Math.abs(edgeCents) : 0
   const midTradeable = midOk && mid > toxicMidLow && mid < toxicMidHigh
+  const sanityPark =
+    fairValue != null && edgeCents != null && absEdgeCents > maxSaneEdgeCents
+  // Never treat insane |FV−mid| as quote-eligible — parks as sanity, not mid fb.
   const quoteEligible =
-    midTradeable && edgeCents != null && absEdgeCents >= minEdgeCents
+    midTradeable &&
+    edgeCents != null &&
+    absEdgeCents >= minEdgeCents &&
+    !sanityPark
+  // Mid fallback ONLY when FV genuinely unavailable (not when FV exists but insane).
   const midFallbackEligible =
     midOk && fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
 
@@ -125,6 +135,7 @@ export function scoreMarketEdge(
     fvMissingReason,
     quoteEligible,
     midFallbackEligible,
+    sanityPark,
   }
 }
 
@@ -138,6 +149,7 @@ export function rankMarketsByAbsEdge(
   annualVol: number,
   minEdgeCents: number,
   nowMs = Date.now(),
+  maxSaneEdgeCents = 25,
 ): RankedMarket[] {
   const open = markets.filter(
     (m) => isMarketOpen(m, nowMs) && isMmQuoteUniverseMarket(m),
@@ -150,12 +162,22 @@ export function rankMarketsByAbsEdge(
       spotKey != null
         ? (spotsByAsset[spotKey] ?? spotsByAsset[canon])
         : spotsByAsset[canon]
-    return scoreMarketEdge(m, spot, annualVol, minEdgeCents)
+    return scoreMarketEdge(
+      m,
+      spot,
+      annualVol,
+      minEdgeCents,
+      0.05,
+      0.95,
+      maxSaneEdgeCents,
+    )
   })
   scored.sort((a, b) => {
+    // Still rank by |FV−mid| so scan shows insane edges; quoting parks them as sanity.
     if (b.absEdgeCents !== a.absEdgeCents) return b.absEdgeCents - a.absEdgeCents
-    // Prefer quoteEligible over mid-fallback when abs edge ties at 0
+    // Prefer quoteEligible over mid-fallback / empty-FV when abs edge ties
     if (a.quoteEligible !== b.quoteEligible) return a.quoteEligible ? -1 : 1
+    if (a.sanityPark !== b.sanityPark) return a.sanityPark ? 1 : -1
     const ac = Date.parse(a.market.closeTime)
     const bc = Date.parse(b.market.closeTime)
     if (Number.isFinite(ac) && Number.isFinite(bc) && ac !== bc) return ac - bc
@@ -173,11 +195,13 @@ export interface PickActiveOptions {
   onePerAsset?: boolean
   /**
    * Prefer quoteEligible (edge) markets for *new* slots (default true).
-   * When under-filled, remaining slots fill via midFallbackEligible so we never
-   * leave empty slots while open markets remain.
+   * When under-filled and fillMidFallback, remaining slots use midFallbackEligible.
    */
   requireEdge?: boolean
-  /** Fill remaining slots with mid-fallback markets (default true). */
+  /**
+   * Fill remaining slots with mid-fallback markets (default false).
+   * Prefer empty slots over books without FV; mid fb must never bypass sanity.
+   */
   fillMidFallback?: boolean
 }
 
@@ -197,7 +221,8 @@ export function pickActiveMarkets(
 
   const onePerAsset = opts.onePerAsset !== false
   const requireEdge = opts.requireEdge !== false
-  const fillMidFallback = opts.fillMidFallback !== false
+  // Default OFF — prefer empty slots over no-FV / mid-fallback books.
+  const fillMidFallback = opts.fillMidFallback === true
   const sticky = new Set(opts.stickyTickers ?? [])
   const byTicker = new Map(ranked.map((r) => [r.ticker, r]))
 
@@ -212,11 +237,15 @@ export function pickActiveMarkets(
     if (chosen.length >= maxActive) return false
     if (usedTickers.has(r.ticker)) return false
     if (onePerAsset && usedAssets.has(r.asset)) return false
-    if (mode === 'edge' && requireEdge && !r.quoteEligible) return false
-    if (mode === 'mid_fallback' && !r.midFallbackEligible && !r.quoteEligible) {
-      // Still allow any open ranked market as last resort fill (but not mid=0 junk)
-      if (!Number.isFinite(r.mid) || r.mid <= 0 || r.mid >= 1) return false
+    if (mode === 'edge' && requireEdge) {
+      // Quote-eligible OR sanity-park (FV exists, |edge|>maxSane → slot parks as sanity).
+      if (!r.quoteEligible && !r.sanityPark) return false
     }
+    if (mode === 'mid_fallback') {
+      // Mid fallback ONLY when FV genuinely unavailable — never for FV+insane edge.
+      if (!r.midFallbackEligible || r.sanityPark || r.fairValue != null) return false
+    }
+    // Sticky: keep ranked tickers (including sanity-parked FV books).
     chosen.push(r.market)
     usedTickers.add(r.ticker)
     usedAssets.add(r.asset)
@@ -235,7 +264,7 @@ export function pickActiveMarkets(
     tryAdd(r, 'edge')
   }
 
-  // Mid-fallback / open-set fill — never leave empty slots while open markets remain
+  // Mid-fallback only when explicitly enabled (FV unavailable markets only)
   if (fillMidFallback && chosen.length < maxActive) {
     for (const r of ranked) {
       if (chosen.length >= maxActive) break

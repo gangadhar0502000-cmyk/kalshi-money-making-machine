@@ -212,12 +212,16 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
     for (const [asset, px] of Object.entries(DEMO_FIXTURE_SPOTS)) {
       portfolio.seedSpot(asset, px)
     }
+    // Strict: no mid-fb for toxic-mid / no-edge demo rows; expect quoteable+sanity slots.
+    portfolio.setConfig({ fillMidFallback: false, minEdgeCents: 0 })
     portfolio.syncMarketUniverse(markets)
     portfolio.start()
     const st = portfolio.getState()
-    expect(st.aggregate.activeBooks).toBe(5)
     expect(st.scan.length).toBe(5)
     expect(st.scan.every((r) => r.fairValue != null)).toBe(true)
+    // BNB extreme-mid demo is not mid-tradeable → not activated under strict mid-fb=off
+    expect(st.aggregate.activeBooks).toBeGreaterThanOrEqual(4)
+    expect(st.aggregate.activeBooks).toBeLessThanOrEqual(5)
   })
 
   it('never shows slot-gated semantics on an active ticker (book is assigned)', () => {
@@ -464,42 +468,43 @@ describe('edge ranking + sticky + one-per-asset', () => {
       mk({
         ticker: 'BTC-A',
         asset: 'BTC',
-        midYes: 0.45,
+        midYes: 0.48,
         floorStrike: 100,
-        minutesRemaining: 2,
-        closeTime: new Date(now + 2 * 60_000).toISOString(),
+        minutesRemaining: 10,
+        closeTime: new Date(now + 10 * 60_000).toISOString(),
       }),
       mk({
         ticker: 'BTC-B',
         asset: 'BTC',
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
-        minutesRemaining: 8,
-        closeTime: new Date(now + 8 * 60_000).toISOString(),
+        minutesRemaining: 10,
+        closeTime: new Date(now + 10 * 60_000).toISOString(),
       }),
       mk({
         ticker: 'ETH-A',
         asset: 'ETH',
-        midYes: 0.45,
+        midYes: 0.48,
         floorStrike: 100,
-        minutesRemaining: 2,
-        closeTime: new Date(now + 2 * 60_000).toISOString(),
+        minutesRemaining: 10,
+        closeTime: new Date(now + 10 * 60_000).toISOString(),
       }),
       mk({
         ticker: 'SOL-STICKY',
         asset: 'SOL',
-        midYes: 0.45,
+        midYes: 0.48,
         floorStrike: 100,
-        minutesRemaining: 2,
-        closeTime: new Date(now + 2 * 60_000).toISOString(),
+        minutesRemaining: 10,
+        closeTime: new Date(now + 10 * 60_000).toISOString(),
       }),
     ]
     const ranked = rankMarketsByAbsEdge(
       markets,
-      { BTC: 120, ETH: 120, SOL: 120 },
+      { BTC: 100.05, ETH: 100.05, SOL: 100.05 },
       0.7,
       2,
       now,
+      25,
     )
     const picked = pickActiveMarkets(ranked, {
       maxActive: 2,

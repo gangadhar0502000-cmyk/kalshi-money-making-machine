@@ -45,6 +45,8 @@ export interface MmFill {
   feeDollars: number
   /** True when sim crossed the spread (taker). */
   taker: boolean
+  /** Market ticker at fill (for per-ticker caps / restore). */
+  ticker?: string | null
 }
 
 export interface MmCancelEvent {
@@ -113,14 +115,23 @@ export interface MmSnapshot {
   minutesRemaining: number | null
   /** Whether this rebuild centered on FV (vs mid fallback). */
   fvCenterActive: boolean
-  /** Annualized fill rate from session age (fills / hour). */
+  /** @deprecated Prefer harshFillsPerHour — may include legacy session fills. */
   fillsPerHour: number
-  /** Fills in the last rolling 60s (this market). */
+  /** Fills in the last rolling 60s (this market / ticker cap window). */
   fillsLastMinute: number
-  /** Fills in the last rolling 15m (this market). */
+  /** Fills in the last rolling 15m (this market / ticker cap window). */
   fillsLast15m: number
   /**
-   * True when fill rate still looks soft for strict paper research
+   * Harsh-policy-era fills/hour only (excludes legacy persisted fills before
+   * the migration/reset marker).
+   */
+  harshFillsPerHour: number
+  /** Harsh-era fills in the rolling 15m window (this ticker). */
+  harshFillsLast15m: number
+  /** Epoch ms when harsh fill-cap policy became active for this session. */
+  harshPolicyEpochMs: number
+  /**
+   * True when harsh-era fill rate still looks soft for strict paper research
    * (e.g. >20 fills/hour under strictRealism).
    */
   fillRateUnrealistic: boolean

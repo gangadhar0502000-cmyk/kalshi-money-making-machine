@@ -124,13 +124,20 @@ export interface PaperMmConfig {
    */
   allowMidWalk: boolean
   /**
-   * Max paper fills per market in any rolling 15-minute window.
+   * Max paper fills per ticker in any rolling 15-minute window.
+   * Strict default 4. Caps persist across sync/rebuild/restore.
    */
   maxFillsPerMarketPer15m: number
   /**
-   * Max paper fills per market in any rolling 60-second window.
+   * Max paper fills per ticker in any rolling 60-second window.
+   * Strict default 1. Caps persist across sync/rebuild/restore.
    */
   maxFillsPerMinute: number
+  /**
+   * When true, multi-book may fill remaining slots with mid-fallback markets
+   * (FV unavailable). Strict default false — prefer empty slots over no-FV books.
+   */
+  fillMidFallback: boolean
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -172,8 +179,9 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   minBookDepthConsumed: 8,
   minTouchPolls: 4,
   allowMidWalk: false,
-  maxFillsPerMarketPer15m: 8,
-  maxFillsPerMinute: 2,
+  maxFillsPerMarketPer15m: 4,
+  maxFillsPerMinute: 1,
+  fillMidFallback: false,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -192,6 +200,7 @@ export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
   allowMidWalk: true,
   maxFillsPerMarketPer15m: 60,
   maxFillsPerMinute: 12,
+  fillMidFallback: true,
 }
 
 /** @deprecated Prefer STRICT_PAPER_MM_CONFIG — kept as alias for imports. */
@@ -212,6 +221,7 @@ export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
     allowMidWalk: src.allowMidWalk,
     maxFillsPerMarketPer15m: src.maxFillsPerMarketPer15m,
     maxFillsPerMinute: src.maxFillsPerMinute,
+    fillMidFallback: src.fillMidFallback,
   }
 }
 
@@ -257,6 +267,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     allowMidWalk: Boolean(c.allowMidWalk),
     maxFillsPerMarketPer15m: Math.round(clamp(c.maxFillsPerMarketPer15m, 1, 500)),
     maxFillsPerMinute: Math.round(clamp(c.maxFillsPerMinute, 1, 120)),
+    fillMidFallback: Boolean(c.fillMidFallback),
   }
 }
 

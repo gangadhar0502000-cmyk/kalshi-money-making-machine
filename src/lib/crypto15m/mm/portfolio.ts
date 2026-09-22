@@ -35,6 +35,7 @@ import {
   type PersistedPaperMmSession,
   type SessionLedgerPersisted,
 } from './persist'
+import { TickerFillCapStore, type FillCapSnapshot } from './fillCaps'
 
 export interface PortfolioBookView {
   slotId: string
@@ -53,6 +54,11 @@ export interface PortfolioAggregate {
   inventoryNet: number
   activeBooks: number
   moneyPrinterBug: boolean
+  /** Harsh-policy-era fills/hour (excludes legacy persisted fills). */
+  harshFillsPerHour: number
+  /** Rolling 15m fills across active ticker caps (harsh-era). */
+  harshFillsLast15m: number
+  harshPolicyEpochMs: number
 }
 
 export interface PortfolioState {
@@ -68,6 +74,8 @@ export interface PortfolioState {
   /** Session-level fill journal (survives rolls/releases). */
   sessionFills: MmFill[]
   sessionCancels: MmCancelEvent[]
+  /** Shared per-ticker fill caps snapshot (diagnostics). */
+  fillCaps: FillCapSnapshot
 }
 
 /** Banked stats from released books — preserved across rolls/releases. */
@@ -107,6 +115,8 @@ export class PaperMmPortfolio {
   private unsubs: Array<() => void> = []
   /** Realized / fees / fills banked when books are released (session totals). */
   private sessionLedger: SessionLedger = emptyLedger()
+  /** Shared per-ticker fill caps — survives sync/rebuild/restore. */
+  private fillCapStore = new TickerFillCapStore()
   /** Set when localStorage said we were RUNNING — auto-start after first universe sync. */
   private pendingAutoResume = false
   private persistEnabled = true
@@ -148,7 +158,13 @@ export class PaperMmPortfolio {
       sessionLedger: this.getSessionLedger(),
       sessionStartedAt: this.sessionStartedAt,
       activeTickers,
+      fillCaps: this.fillCapStore.exportSnapshot(),
     })
+  }
+
+  /** Test/helper access to shared fill-cap store. */
+  getFillCapStore(): TickerFillCapStore {
+    return this.fillCapStore
   }
 
   /** Apply a previously serialized session (ledger + knobs + wasRunning). Does not start engines. */
@@ -169,6 +185,7 @@ export class PaperMmPortfolio {
     }
     this.sessionStartedAt = parsed.sessionStartedAt
     this.pendingAutoResume = parsed.running
+    this.fillCapStore.importSnapshot(parsed.fillCaps)
     // Do NOT set this.running yet — start({ resume: true }) after universe sync.
     this.running = false
     this.message =
@@ -326,6 +343,7 @@ export class PaperMmPortfolio {
       inv += b.snapshot.inventory
       if (b.snapshot.moneyPrinterBug) moneyPrinter = true
     }
+    const now = Date.now()
 
     return {
       running: this.running,
@@ -342,12 +360,16 @@ export class PaperMmPortfolio {
         inventoryNet: inv,
         activeBooks: books.length,
         moneyPrinterBug: moneyPrinter,
+        harshFillsPerHour: this.fillCapStore.harshFillsPerHour(now),
+        harshFillsLast15m: this.fillCapStore.countHarshInWindow(now, 15 * 60_000),
+        harshPolicyEpochMs: this.fillCapStore.getHarshPolicyEpochMs(),
       },
       message: this.message,
       spotsByAsset: { ...this.spotsByAsset },
       sessionStartedAt: this.sessionStartedAt,
       sessionFills: [...this.sessionLedger.fills].slice(-200).reverse(),
       sessionCancels: [...this.sessionLedger.cancels].slice(-100).reverse(),
+      fillCaps: this.fillCapStore.exportSnapshot(now),
     }
   }
 
@@ -554,7 +576,7 @@ export class PaperMmPortfolio {
       stickyTickers: sticky,
       onePerAsset: true,
       requireEdge: this.config.fvQuoting,
-      fillMidFallback: true,
+      fillMidFallback: this.config.fillMidFallback,
     })
 
     // Still nothing quoteable / pickable — hold sticky books, do not wipe
@@ -596,6 +618,7 @@ export class PaperMmPortfolio {
 
     const slotId = nextSlotId()
     const eng = new PaperMmEngine()
+    eng.setFillCapStore(this.fillCapStore)
     eng.setConfig(this.config)
     eng.setMarket(market)
     // New book: cash/inventory start fresh; session ledger keeps historical realized/fills
@@ -630,6 +653,8 @@ export class PaperMmPortfolio {
       this.spotsByAsset,
       this.config.annualVol,
       this.config.minEdgeCents,
+      Date.now(),
+      this.config.maxSaneEdgeCents,
     )
   }
 
@@ -694,6 +719,7 @@ export class PaperMmPortfolio {
     this.sessionLedger = emptyLedger()
     this.sessionStartedAt = null
     this.pendingAutoResume = false
+    this.fillCapStore = new TickerFillCapStore(Date.now())
     this.message =
       'Multi-book session reset. Paper books cleared. Read-only · never places trades.'
     if (this.lastMarkets.length > 0) {

@@ -43,6 +43,11 @@ import type {
   MmQuote,
   MmSnapshot,
 } from './types'
+import {
+  FILL_CAP_MINUTE_MS,
+  FILL_CAP_WINDOW_MS,
+  TickerFillCapStore,
+} from './fillCaps'
 
 let idSeq = 0
 function nextId(prefix: string): string {
@@ -111,8 +116,13 @@ export class PaperMmEngine {
   private unitsWarning: string | null = null
   private lastUnrealizedAbs = 0
   private lastFillAt = 0
-  /** Epoch ms of each accepted fill (excl. settlement) for rate caps. */
-  private fillTimestamps: number[] = []
+  /**
+   * Per-ticker fill caps (shared with portfolio when multi-book).
+   * Survives sync/rebuild/start; keyed by ticker across 15m windows.
+   */
+  private fillCapStore: TickerFillCapStore = new TickerFillCapStore()
+  /** When true, resetSession clears the store; portfolio may own the store. */
+  private ownsFillCapStore = true
   private midWalkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
   private moneyPrinterBug = false
   private lastFairValue: number | null = null
@@ -155,6 +165,16 @@ export class PaperMmEngine {
     this.setConfig({ strictRealism: strict })
   }
 
+  /** Inject shared portfolio fill-cap store (multi-book). */
+  setFillCapStore(store: TickerFillCapStore): void {
+    this.fillCapStore = store
+    this.ownsFillCapStore = false
+  }
+
+  getFillCapStore(): TickerFillCapStore {
+    return this.fillCapStore
+  }
+
   getState(): MmEngineState {
     return {
       snapshot: this.snapshot(),
@@ -164,38 +184,36 @@ export class PaperMmEngine {
   }
 
 
-  /** Drop timestamps older than 15m, then count those in `windowMs`. */
+  private activeTicker(): string | null {
+    return this.market?.ticker ?? null
+  }
+
   private countFillsInWindow(now: number, windowMs: number): number {
-    const keepFrom = now - 15 * 60_000
-    this.fillTimestamps = this.fillTimestamps.filter((t) => t >= keepFrom)
-    const cut = now - windowMs
-    return this.fillTimestamps.filter((t) => t >= cut).length
+    const t = this.activeTicker()
+    if (!t) return 0
+    return this.fillCapStore.countInWindow(t, now, windowMs)
   }
 
   private canAcceptFillByRateCaps(now: number): { ok: boolean; reason?: string } {
-    const perMin = this.countFillsInWindow(now, 60_000)
-    if (perMin >= this.config.maxFillsPerMinute) {
-      return {
-        ok: false,
-        reason: `rate cap ${perMin}/${this.config.maxFillsPerMinute} fills/min`,
-      }
-    }
-    const per15 = this.countFillsInWindow(now, 15 * 60_000)
-    if (per15 >= this.config.maxFillsPerMarketPer15m) {
-      return {
-        ok: false,
-        reason: `rate cap ${per15}/${this.config.maxFillsPerMarketPer15m} fills/15m`,
-      }
-    }
-    return { ok: true }
+    return this.fillCapStore.canAccept(
+      this.activeTicker(),
+      now,
+      this.config.maxFillsPerMinute,
+      this.config.maxFillsPerMarketPer15m,
+    )
   }
 
+  /** Legacy session fills/hour (may include pre-migration fills in journal). */
   private fillsPerHourNow(now = Date.now()): number {
     const started = this.sessionStartedAt
     const n = this.fills.filter((f) => f.reason !== 'settlement').length
     if (started == null) return 0
     const hours = Math.max(1 / 3600, (now - started) / 3_600_000)
     return n / hours
+  }
+
+  private harshFillsPerHourNow(now = Date.now()): number {
+    return this.fillCapStore.harshFillsPerHour(now, this.activeTicker())
   }
 
   private midDollars(): number {
@@ -267,16 +285,23 @@ export class PaperMmEngine {
       minutesRemaining: this.market?.minutesRemaining ?? null,
       fvCenterActive: this.lastFvCenterActive,
       fillsPerHour: this.fillsPerHourNow(),
-      fillsLastMinute: this.countFillsInWindow(Date.now(), 60_000),
-      fillsLast15m: this.countFillsInWindow(Date.now(), 15 * 60_000),
+      fillsLastMinute: this.countFillsInWindow(Date.now(), FILL_CAP_MINUTE_MS),
+      fillsLast15m: this.countFillsInWindow(Date.now(), FILL_CAP_WINDOW_MS),
+      harshFillsPerHour: this.harshFillsPerHourNow(),
+      harshFillsLast15m: this.fillCapStore.countHarshInWindow(
+        Date.now(),
+        FILL_CAP_WINDOW_MS,
+        this.activeTicker(),
+      ),
+      harshPolicyEpochMs: this.fillCapStore.getHarshPolicyEpochMs(),
       fillRateUnrealistic: this.isFillRateUnrealistic(),
     }
   }
 
   private isFillRateUnrealistic(): boolean {
     if (!this.config.strictRealism) return false
-    const fph = this.fillsPerHourNow()
-    // Serious paper MM research: >20 fills/hour still looks soft vs live maker scarcity.
+    // Use harsh-era rate so legacy persisted fills do not inflate the warning.
+    const fph = this.harshFillsPerHourNow()
     return fph >= 20
   }
 
@@ -305,7 +330,8 @@ export class PaperMmEngine {
       this.liveBook = false
       this.midWalkState = { ...DEFAULT_DETECT_STATE }
       this.lastFillAt = 0
-      this.fillTimestamps = []
+      // Do NOT clear fillCapStore — per-ticker caps must survive roll/rebuild.
+      // Fresh ticker naturally has an empty window; old ticker stays capped.
       // New contract → clear paper inventory/quotes (cash + realized kept)
       this.inventory = 0
       this.avgEntry = null
@@ -393,7 +419,7 @@ export class PaperMmEngine {
     this.lastTotalPnl = 0
     this.lastTotalPnlAt = 0
     this.lastFillAt = 0
-    this.fillTimestamps = []
+    // Keep fillCapStore — caps must survive start/rebuild/sync.
     this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = this.config.strictRealism
       ? 'Paper MM running (strict realism). Read-only API · never places trades.'
@@ -445,7 +471,12 @@ export class PaperMmEngine {
     this.toxicBidPullUntil = 0
     this.toxicAskPullUntil = 0
     this.lastFillAt = 0
-    this.fillTimestamps = []
+    if (this.ownsFillCapStore) {
+      this.fillCapStore = new TickerFillCapStore(Date.now())
+    } else {
+      // Shared store: reset harsh-era marker; ticker caps cleared by portfolio reset.
+      this.fillCapStore.resetHarshPolicyEpoch(Date.now())
+    }
     this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = 'Session reset. Paper cash restored. Read-only API · never places trades.'
     this.emit()
@@ -1061,6 +1092,18 @@ export class PaperMmEngine {
       return
     }
 
+    // Enforce per-ticker fill caps immediately before accepting any non-settlement fill.
+    if (reason !== 'settlement') {
+      const nowCap = Date.now()
+      const rate = this.canAcceptFillByRateCaps(nowCap)
+      if (!rate.ok) {
+        this.midCrossRejectCount += 1
+        this.message =
+          `FILL RATE CAP — ${rate.reason}. Harsh paper discipline · read-only.`
+        return
+      }
+    }
+
     // Hard refuse: do not accumulate into near-certain settlement loss at extreme mids
     if (
       reason !== 'settlement' &&
@@ -1177,12 +1220,10 @@ export class PaperMmEngine {
       reason,
       feeDollars: fee,
       taker,
+      ticker: this.activeTicker(),
     })
     if (reason !== 'settlement') {
-      this.fillTimestamps.push(fillAt)
-      if (this.fillTimestamps.length > 500) {
-        this.fillTimestamps.splice(0, this.fillTimestamps.length - 500)
-      }
+      this.fillCapStore.record(this.activeTicker(), fillAt)
       this.lastFillAt = fillAt
     }
     if (this.fills.length > 500) this.fills.splice(0, this.fills.length - 500)

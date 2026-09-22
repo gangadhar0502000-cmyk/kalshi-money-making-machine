@@ -8,6 +8,7 @@ import { formatPnlDual, isValidQuoteMid } from '../../lib/crypto15m/mm/prices'
 import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
 import type { PortfolioState } from '../../lib/crypto15m/mm/portfolio'
+import { parkStatusLabel } from '../../lib/crypto15m/mm/parkStatus'
 
 interface Props {
   markets: Crypto15mMarket[]
@@ -61,6 +62,7 @@ function isUnrealisticFillRate(
   if (ageMin < 3) return fillCount >= 12
   return fillsPerHour >= 20
 }
+
 
 export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Props) {
   const singleState = useEngineState()
@@ -180,15 +182,26 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     sessionFees > 0.01 && Math.abs(totalPnl) > 0 && sessionFees >= Math.abs(totalPnl) * 0.5
   const sessionStartedAt = multiBook ? portfolioState.sessionStartedAt : s.sessionStartedAt
   const cfg = multiBook ? portfolioState.config : s.config
-  const fillsPerHour = multiBook
-    ? (() => {
-        const n = portfolioState.aggregate.fillCount
-        if (sessionStartedAt == null) return 0
-        const hours = Math.max(1 / 3600, (Date.now() - sessionStartedAt) / 3_600_000)
-        return n / hours
-      })()
-    : s.fillsPerHour
-  const fillCount = multiBook ? portfolioState.aggregate.fillCount : s.fillCount
+  // Harsh-policy-era fills/hour — legacy persisted fills must not inflate this.
+  const harshFillsPerHour = multiBook
+    ? portfolioState.aggregate.harshFillsPerHour
+    : s.harshFillsPerHour
+  const harshFillsLast15m = multiBook
+    ? portfolioState.aggregate.harshFillsLast15m
+    : s.harshFillsLast15m
+  const fillsPerHour = harshFillsPerHour
+  const harshFillCount = multiBook
+    ? Math.round(
+        portfolioState.aggregate.harshFillsPerHour *
+          Math.max(
+            1 / 3600,
+            (Date.now() - portfolioState.aggregate.harshPolicyEpochMs) / 3_600_000,
+          ),
+      )
+    : Math.round(
+        s.harshFillsPerHour *
+          Math.max(1 / 3600, (Date.now() - s.harshPolicyEpochMs) / 3_600_000),
+      )
   const showSoftWarn = isUnrealisticallyFastPnl(
     totalPnl,
     sessionStartedAt,
@@ -197,7 +210,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   )
   const showFillRateWarn =
     (multiBook ? false : s.fillRateUnrealistic) ||
-    isUnrealisticFillRate(fillsPerHour, fillCount, sessionStartedAt, cfg.strictRealism)
+    isUnrealisticFillRate(fillsPerHour, harshFillCount, sessionStartedAt, cfg.strictRealism)
   const message = multiBook ? portfolioState.message : s.message
   const activeTickers = multiBook
     ? new Set(
@@ -255,8 +268,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
 
       {showFillRateWarn && !moneyPrinterBug && (
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
-          ⚠ Fill rate still high for paper research ({fillsPerHour.toFixed(1)} fills/hour ·{' '}
-          {fillCount} fills). Under strict realism, maker fills should be scarce. Tighten depth /
+          ⚠ Fill rate still high for paper research ({fillsPerHour.toFixed(1)} harsh fills/hour ·{' '}
+          {harshFillsLast15m}/15m · {harshFillCount} harsh-era). Legacy fills excluded. Tighten depth /
           touch / cooldown — or keep iterating MM decision quality. Paper green ≠ live edge.
         </div>
       )}
@@ -542,13 +555,13 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               sub={`${portfolioState.aggregate.cancelCount} cancels · session ledger`}
             />
             <Stat
-              label="Fills / hour"
+              label="Harsh fills / hour"
               value={fillsPerHour.toFixed(1)}
               tone={showFillRateWarn ? 'warn' : 'neutral'}
               sub={
                 showFillRateWarn
-                  ? '⚠ still soft for strict paper research'
-                  : `cooldown ${cfg.fillCooldownMs}ms · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/15m`
+                  ? '⚠ still soft · legacy fills excluded'
+                  : `${harshFillsLast15m}/15m · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m`
               }
             />
           </div>
@@ -687,25 +700,15 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                               className="rounded-full bg-amber-950 px-2 py-0.5 text-[10px] font-semibold text-amber-200"
                               title={`${book?.snapshot.quote?.bidReason ?? ''} / ${book?.snapshot.quote?.askReason ?? ''}`}
                             >
-                              {(() => {
-                                const br = book?.snapshot.quote?.bidReason ?? ''
-                                const ar = book?.snapshot.quote?.askReason ?? ''
-                                const both = `${br} ${ar}`.toLowerCase()
-                                if (both.includes('edge sanity')) return 'sanity'
-                                if (both.includes('max inventory')) return 'max inv'
-                                if (both.includes('unwind-only')) return 'unwind hold'
-                                if (both.includes('no edge')) return 'no edge'
-                                if (both.includes('toxic')) return 'toxic'
-                                if (both.includes('expiry')) return 'expiry'
-                                if (book?.snapshot.quote?.centerMode === 'mid') return 'mid fb'
-                                if (both.includes('no fv')) return 'no FV'
-                                // Never opaque — surface first non-ok reason fragment
-                                const frag =
-                                  (!br.toLowerCase().includes('on:') && br) ||
-                                  (!ar.toLowerCase().includes('on:') && ar) ||
-                                  'parked'
-                                return frag.length > 18 ? frag.slice(0, 16) + '…' : frag
-                              })()}
+                              {parkStatusLabel({
+                                bidReason: book?.snapshot.quote?.bidReason,
+                                askReason: book?.snapshot.quote?.askReason,
+                                centerMode: book?.snapshot.quote?.centerMode,
+                                edgeCents:
+                                  book?.snapshot.edgeVsMidCents ?? row.edgeCents,
+                                fairValue: book?.snapshot.fairValue ?? row.fairValue,
+                                maxSaneEdgeCents: cfg.maxSaneEdgeCents,
+                              })}
                             </span>
                           ) : (
                             <span className="text-slate-600" title="Not in active multi-book slot">
@@ -888,16 +891,16 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             <Stat
               label="Fills"
               value={String(s.fillCount)}
-              sub={`${s.fillsLastMinute}/min · ${s.fillsLast15m}/15m`}
+              sub={`${s.fillsLastMinute}/min · ${s.fillsLast15m}/15m rolling`}
             />
             <Stat
-              label="Fills / hour"
-              value={s.fillsPerHour.toFixed(1)}
+              label="Harsh fills / hour"
+              value={s.harshFillsPerHour.toFixed(1)}
               tone={showFillRateWarn ? 'warn' : 'neutral'}
               sub={
                 showFillRateWarn
-                  ? '⚠ still soft for strict paper research'
-                  : `cd ${cfg.fillCooldownMs}ms · depth≥${cfg.minBookDepthConsumed} · touch≥${cfg.minTouchPolls}`
+                  ? '⚠ still soft · legacy excluded'
+                  : `${s.harshFillsLast15m}/15m harsh · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/15m`
               }
             />
           </div>

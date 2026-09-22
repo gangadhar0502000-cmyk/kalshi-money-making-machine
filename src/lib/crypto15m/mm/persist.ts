@@ -4,6 +4,12 @@
  */
 
 import { clampConfig, DEFAULT_PAPER_MM_CONFIG, type PaperMmConfig } from './config'
+import {
+  emptyFillCapSnapshot,
+  HARSH_FILL_POLICY_MARKER,
+  sanitizeFillCapSnapshot,
+  type FillCapSnapshot,
+} from './fillCaps'
 import type { MmCancelEvent, MmFill } from './types'
 
 export const PAPER_MM_SESSION_KEY = 'kalshi-paper-mm-session-v1'
@@ -18,7 +24,8 @@ export interface SessionLedgerPersisted {
 }
 
 export interface PersistedPaperMmSession {
-  v: 1
+  /** v2 adds fillCaps + harsh-policy migration marker. v1 still deserializes. */
+  v: 1 | 2
   running: boolean
   config: PaperMmConfig
   sessionLedger: SessionLedgerPersisted
@@ -26,6 +33,8 @@ export interface PersistedPaperMmSession {
   /** Tickers that held slots at save time (hint for restore). */
   activeTickers: string[]
   savedAt: number
+  /** Per-ticker fill timestamps + harsh-policy epoch (v2). */
+  fillCaps: FillCapSnapshot
 }
 
 export function emptySessionLedger(): SessionLedgerPersisted {
@@ -91,6 +100,18 @@ function sanitizeLedger(raw: unknown): SessionLedgerPersisted {
   }
 }
 
+/**
+ * Build fill-cap snapshot for persist. Legacy (v1 / unmarked) sessions get a
+ * fresh harshPolicyEpochMs so old fills do not inflate harsh fills/hour.
+ */
+function resolveFillCaps(raw: unknown, now: number): FillCapSnapshot {
+  if (raw == null) {
+    // Migration: no prior caps → new harsh era marker now.
+    return emptyFillCapSnapshot(now)
+  }
+  return sanitizeFillCapSnapshot(raw, now)
+}
+
 /** Pure serialize — used by portfolio + unit tests. */
 export function serializePaperMmSession(input: {
   running: boolean
@@ -99,9 +120,14 @@ export function serializePaperMmSession(input: {
   sessionStartedAt: number | null
   activeTickers?: string[]
   savedAt?: number
+  fillCaps?: FillCapSnapshot
 }): PersistedPaperMmSession {
+  const now = input.savedAt ?? Date.now()
+  const fillCaps = input.fillCaps
+    ? sanitizeFillCapSnapshot(input.fillCaps, now)
+    : emptyFillCapSnapshot(now)
   return {
-    v: 1,
+    v: 2,
     running: Boolean(input.running),
     config: clampConfig(input.config),
     sessionLedger: sanitizeLedger(input.sessionLedger),
@@ -110,17 +136,28 @@ export function serializePaperMmSession(input: {
         ? input.sessionStartedAt
         : null,
     activeTickers: (input.activeTickers ?? []).filter((t) => typeof t === 'string').slice(0, 24),
-    savedAt: input.savedAt ?? Date.now(),
+    savedAt: now,
+    fillCaps,
   }
 }
 
-/** Pure restore — returns null if missing/corrupt. */
+/** Pure restore — returns null if missing/corrupt. Migrates v1 → v2. */
 export function deserializePaperMmSession(raw: unknown): PersistedPaperMmSession | null {
   if (!raw || typeof raw !== 'object') return null
-  const o = raw as Partial<PersistedPaperMmSession>
-  if (o.v !== 1) return null
+  const o = raw as Partial<PersistedPaperMmSession> & { v?: number }
+  if (o.v !== 1 && o.v !== 2) return null
+  const now = Date.now()
+  const fillCaps = resolveFillCaps(
+    o.v === 2 ? (o as PersistedPaperMmSession).fillCaps : null,
+    now,
+  )
+  // Ensure migration marker is always stamped on restore of legacy.
+  if (o.v === 1 || fillCaps.marker !== HARSH_FILL_POLICY_MARKER) {
+    fillCaps.marker = HARSH_FILL_POLICY_MARKER
+    if (o.v === 1) fillCaps.harshPolicyEpochMs = now
+  }
   return {
-    v: 1,
+    v: 2,
     running: Boolean(o.running),
     config: clampConfig({ ...DEFAULT_PAPER_MM_CONFIG, ...(o.config ?? {}) }),
     sessionLedger: sanitizeLedger(o.sessionLedger),
@@ -129,7 +166,8 @@ export function deserializePaperMmSession(raw: unknown): PersistedPaperMmSession
     activeTickers: Array.isArray(o.activeTickers)
       ? o.activeTickers.filter((t): t is string => typeof t === 'string').slice(0, 24)
       : [],
-    savedAt: typeof o.savedAt === 'number' && Number.isFinite(o.savedAt) ? o.savedAt : Date.now(),
+    savedAt: typeof o.savedAt === 'number' && Number.isFinite(o.savedAt) ? o.savedAt : now,
+    fillCaps,
   }
 }
 

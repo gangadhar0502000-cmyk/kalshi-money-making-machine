@@ -49,13 +49,13 @@ function mk(
 describe('edgeRank', () => {
   const now = Date.parse('2026-09-21T19:50:00.000Z')
 
-  it('ranks higher |edge| markets first', () => {
+  it('ranks higher |edge| markets first (sane edges only prefer high |edge|)', () => {
     const btc = mk({
       ticker: 'BTC-HI',
       asset: 'BTC',
-      midYes: 0.4,
+      midYes: 0.55,
       floorStrike: 100_000,
-      minutesRemaining: 2,
+      minutesRemaining: 10,
       closeTime: '2026-09-21T20:00:00.000Z',
     })
     const eth = mk({
@@ -63,17 +63,19 @@ describe('edgeRank', () => {
       asset: 'ETH',
       midYes: 0.5,
       floorStrike: 3_000,
-      minutesRemaining: 10,
+      minutesRemaining: 15,
       closeTime: '2026-09-21T20:05:00.000Z',
     })
-    // BTC deep ITM → large |edge|; ETH ATM-ish → small
+    // BTC mild ITM → ~19¢ sane edge; ETH ATM → ~0
     const ranked = rankMarketsByAbsEdge(
       [eth, btc],
-      { BTC: 102_000, ETH: 3_000 },
+      { BTC: 100_200, ETH: 3_000 },
       0.7,
       2,
       now,
+      25,
     )
+    expect(ranked[0]!.sanityPark).toBe(false)
     expect(ranked[0]!.ticker).toBe('BTC-HI')
     expect(ranked[0]!.absEdgeCents).toBeGreaterThan(ranked[1]!.absEdgeCents)
     expect(ranked[0]!.quoteEligible).toBe(true)
@@ -84,15 +86,17 @@ describe('edgeRank', () => {
       mk({
         ticker: `${asset}-T`,
         asset,
-        midYes: 0.4,
+        midYes: 0.48,
         floorStrike: 100,
-        minutesRemaining: 2,
+        minutesRemaining: 10,
         closeTime: `2026-09-21T20:0${i}:00.000Z`,
       }),
     )
-    // All deep ITM with spot 120 vs strike 100
-    const spots = Object.fromEntries(markets.map((m) => [m.asset, 120]))
-    const ranked = rankMarketsByAbsEdge(markets, spots, 0.7, 2, now)
+    // Tiny ITM — ~8¢ sane edge
+    const spots = Object.fromEntries(markets.map((m) => [m.asset, 100.05]))
+    const ranked = rankMarketsByAbsEdge(markets, spots, 0.7, 2, now, 25)
+    expect(ranked.every((r) => !r.sanityPark)).toBe(true)
+    expect(ranked.every((r) => r.quoteEligible)).toBe(true)
     const picked = pickActiveMarkets(ranked, { maxActive: 4 })
     expect(picked).toHaveLength(4)
     expect(new Set(picked.map((m) => m.asset)).size).toBe(4)
@@ -124,12 +128,12 @@ describe('edgeRank', () => {
 
   it('sticky tickers kept when still open; extras fill by edge', () => {
     const markets = [
-      mk({ ticker: 'A', asset: 'BTC', midYes: 0.45, floorStrike: 100, minutesRemaining: 2 }),
-      mk({ ticker: 'B', asset: 'ETH', midYes: 0.45, floorStrike: 100, minutesRemaining: 2 }),
-      mk({ ticker: 'C', asset: 'SOL', midYes: 0.45, floorStrike: 100, minutesRemaining: 2 }),
+      mk({ ticker: 'A', asset: 'BTC', midYes: 0.48, floorStrike: 100, minutesRemaining: 10 }),
+      mk({ ticker: 'B', asset: 'ETH', midYes: 0.48, floorStrike: 100, minutesRemaining: 10 }),
+      mk({ ticker: 'C', asset: 'SOL', midYes: 0.48, floorStrike: 100, minutesRemaining: 10 }),
     ]
-    const spots = { BTC: 120, ETH: 120, SOL: 120 }
-    const ranked = rankMarketsByAbsEdge(markets, spots, 0.7, 2, now)
+    const spots = { BTC: 100.05, ETH: 100.05, SOL: 100.05 }
+    const ranked = rankMarketsByAbsEdge(markets, spots, 0.7, 2, now, 25)
     const picked = pickActiveMarkets(ranked, {
       maxActive: 2,
       stickyTickers: ['C'],
@@ -168,9 +172,9 @@ describe('edgeRank', () => {
       ticker: 'KXBTC15M-OK',
       asset: 'BTC',
       seriesTicker: 'KXBTC15M',
-      midYes: 0.4,
+      midYes: 0.55,
       floorStrike: 100_000,
-      minutesRemaining: 2,
+      minutesRemaining: 10,
     })
     expect(isMmQuoteUniverseMarket(lead)).toBe(false)
     expect(isMmQuoteUniverseMarket(comp)).toBe(false)
@@ -179,10 +183,11 @@ describe('edgeRank', () => {
 
     const ranked = rankMarketsByAbsEdge(
       [lead, comp, noStrike, real],
-      { BTC: 102_000, CRYPTO: 1 },
+      { BTC: 100_200, CRYPTO: 1 },
       0.7,
       2,
       now,
+      25,
     )
     expect(ranked.every((r) => r.ticker === 'KXBTC15M-OK')).toBe(true)
     expect(ranked).toHaveLength(1)
@@ -225,23 +230,24 @@ describe('edgeRank', () => {
     const btc = mk({
       ticker: 'KXBTC15M-1',
       asset: 'BTC',
-      midYes: 0.45,
+      midYes: 0.55,
       floorStrike: 100_000,
-      minutesRemaining: 2,
+      minutesRemaining: 10,
     })
     const zec = mk({
       ticker: 'KXZEC15M-1',
       asset: 'ZEC',
-      midYes: 0.45,
+      midYes: 0.55,
       floorStrike: 40,
-      minutesRemaining: 2,
+      minutesRemaining: 10,
     })
     const ranked = rankMarketsByAbsEdge(
       [btc, zec],
-      { BTC: 102_000, ZEC: 42 },
+      { BTC: 100_200, ZEC: 40.08 },
       0.7,
       2,
       now,
+      25,
     )
     expect(ranked.map((r) => r.asset).sort()).toEqual(['BTC', 'ZEC'])
     const picked = pickActiveMarkets(ranked, { maxActive: 2, onePerAsset: true })
