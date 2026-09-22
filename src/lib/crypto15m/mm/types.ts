@@ -113,6 +113,17 @@ export interface MmSnapshot {
   minutesRemaining: number | null
   /** Whether this rebuild centered on FV (vs mid fallback). */
   fvCenterActive: boolean
+  /** Annualized fill rate from session age (fills / hour). */
+  fillsPerHour: number
+  /** Fills in the last rolling 60s (this market). */
+  fillsLastMinute: number
+  /** Fills in the last rolling 15m (this market). */
+  fillsLast15m: number
+  /**
+   * True when fill rate still looks soft for strict paper research
+   * (e.g. >20 fills/hour under strictRealism).
+   */
+  fillRateUnrealistic: boolean
 }
 
 export interface MmEngineState {

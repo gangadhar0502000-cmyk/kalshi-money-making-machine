@@ -111,6 +111,8 @@ export class PaperMmEngine {
   private unitsWarning: string | null = null
   private lastUnrealizedAbs = 0
   private lastFillAt = 0
+  /** Epoch ms of each accepted fill (excl. settlement) for rate caps. */
+  private fillTimestamps: number[] = []
   private midWalkState: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
   private moneyPrinterBug = false
   private lastFairValue: number | null = null
@@ -159,6 +161,41 @@ export class PaperMmEngine {
       fills: [...this.fills].slice(-200).reverse(),
       cancels: [...this.cancels].slice(-100).reverse(),
     }
+  }
+
+
+  /** Drop timestamps older than 15m, then count those in `windowMs`. */
+  private countFillsInWindow(now: number, windowMs: number): number {
+    const keepFrom = now - 15 * 60_000
+    this.fillTimestamps = this.fillTimestamps.filter((t) => t >= keepFrom)
+    const cut = now - windowMs
+    return this.fillTimestamps.filter((t) => t >= cut).length
+  }
+
+  private canAcceptFillByRateCaps(now: number): { ok: boolean; reason?: string } {
+    const perMin = this.countFillsInWindow(now, 60_000)
+    if (perMin >= this.config.maxFillsPerMinute) {
+      return {
+        ok: false,
+        reason: `rate cap ${perMin}/${this.config.maxFillsPerMinute} fills/min`,
+      }
+    }
+    const per15 = this.countFillsInWindow(now, 15 * 60_000)
+    if (per15 >= this.config.maxFillsPerMarketPer15m) {
+      return {
+        ok: false,
+        reason: `rate cap ${per15}/${this.config.maxFillsPerMarketPer15m} fills/15m`,
+      }
+    }
+    return { ok: true }
+  }
+
+  private fillsPerHourNow(now = Date.now()): number {
+    const started = this.sessionStartedAt
+    const n = this.fills.filter((f) => f.reason !== 'settlement').length
+    if (started == null) return 0
+    const hours = Math.max(1 / 3600, (now - started) / 3_600_000)
+    return n / hours
   }
 
   private midDollars(): number {
@@ -229,7 +266,18 @@ export class PaperMmEngine {
       floorStrike: this.market?.floorStrike ?? null,
       minutesRemaining: this.market?.minutesRemaining ?? null,
       fvCenterActive: this.lastFvCenterActive,
+      fillsPerHour: this.fillsPerHourNow(),
+      fillsLastMinute: this.countFillsInWindow(Date.now(), 60_000),
+      fillsLast15m: this.countFillsInWindow(Date.now(), 15 * 60_000),
+      fillRateUnrealistic: this.isFillRateUnrealistic(),
     }
+  }
+
+  private isFillRateUnrealistic(): boolean {
+    if (!this.config.strictRealism) return false
+    const fph = this.fillsPerHourNow()
+    // Serious paper MM research: >20 fills/hour still looks soft vs live maker scarcity.
+    return fph >= 20
   }
 
   setMarket(market: Crypto15mMarket | null): void {
@@ -257,6 +305,7 @@ export class PaperMmEngine {
       this.liveBook = false
       this.midWalkState = { ...DEFAULT_DETECT_STATE }
       this.lastFillAt = 0
+      this.fillTimestamps = []
       // New contract → clear paper inventory/quotes (cash + realized kept)
       this.inventory = 0
       this.avgEntry = null
@@ -344,6 +393,7 @@ export class PaperMmEngine {
     this.lastTotalPnl = 0
     this.lastTotalPnlAt = 0
     this.lastFillAt = 0
+    this.fillTimestamps = []
     this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = this.config.strictRealism
       ? 'Paper MM running (strict realism). Read-only API · never places trades.'
@@ -395,6 +445,7 @@ export class PaperMmEngine {
     this.toxicBidPullUntil = 0
     this.toxicAskPullUntil = 0
     this.lastFillAt = 0
+    this.fillTimestamps = []
     this.midWalkState = { ...DEFAULT_DETECT_STATE }
     this.message = 'Session reset. Paper cash restored. Read-only API · never places trades.'
     this.emit()
@@ -512,39 +563,60 @@ export class PaperMmEngine {
       const now = Date.now()
       const cooling = now - this.lastFillAt < this.config.fillCooldownMs
       if (!cooling) {
-        const signals = detectBookFills(
-          this.prevBook,
-          book,
-          this.quote,
-          this.inventory,
-          this.config.maxInventory,
-          this.midWalkState,
-          // Strict realism (default): maker-only — never emit taker_cross fee bleed.
-          { allowTakerCross: !this.config.strictRealism },
-        )
-        // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
-        const sig = signals[0]
-        if (sig) {
-          if (
-            isToxicExtremeMid(
-              sig.side,
-              mid,
-              this.config.toxicMidLow,
-              this.config.toxicMidHigh,
-            )
-          ) {
-            this.midCrossRejectCount += 1
-            this.message =
-              `TOXIC SKIP ${sig.reason} ${sig.side} @ mid $${mid.toFixed(4)} — adverse side pulled.`
-            this.rebuildQuote(true)
-          } else {
-            const stats = this.spotHist.stats(this.config.spotWindowSec)
-            const toxic =
-              (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
-              (sig.side === 'sell_yes' && stats.signedPct > 0.02)
-            this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
-            this.lastFillAt = now
-            this.rebuildQuote(true)
+        const rate = this.canAcceptFillByRateCaps(now)
+        if (!rate.ok) {
+          this.message =
+            `FILL RATE CAP — ${rate.reason}. Harsh paper discipline · read-only.`
+          // Keep mid-walk arming fresh while capped
+          const bid = this.quote.yesBid
+          const ask = this.quote.yesAsk
+          if (mid > bid + 1e-9) this.midWalkState.midWalkBidArmed = true
+          if (mid < ask - 1e-9) this.midWalkState.midWalkAskArmed = true
+        } else {
+          const signals = detectBookFills(
+            this.prevBook,
+            book,
+            this.quote,
+            this.inventory,
+            this.config.maxInventory,
+            this.midWalkState,
+            {
+              // Strict realism (default): maker-only — never emit taker_cross fee bleed.
+              allowTakerCross: !this.config.strictRealism,
+              allowMidWalk: this.config.allowMidWalk,
+              minBookDepthConsumed: this.config.minBookDepthConsumed,
+              minTouchPolls: this.config.minTouchPolls,
+              // When mid_walk is enabled, still require a long post-fill cooldown.
+              midWalkCooldownMs: this.config.strictRealism
+                ? Math.max(this.config.fillCooldownMs, 15_000)
+                : 0,
+              nowMs: now,
+            },
+          )
+          // Hard cap: max 1 fill per book poll (detectBookFills already enforces)
+          const sig = signals[0]
+          if (sig) {
+            if (
+              isToxicExtremeMid(
+                sig.side,
+                mid,
+                this.config.toxicMidLow,
+                this.config.toxicMidHigh,
+              )
+            ) {
+              this.midCrossRejectCount += 1
+              this.message =
+                `TOXIC SKIP ${sig.reason} ${sig.side} @ mid $${mid.toFixed(4)} — adverse side pulled.`
+              this.rebuildQuote(true)
+            } else {
+              const stats = this.spotHist.stats(this.config.spotWindowSec)
+              const toxic =
+                (sig.side === 'buy_yes' && stats.signedPct < -0.02) ||
+                (sig.side === 'sell_yes' && stats.signedPct > 0.02)
+              this.applyFill(sig.side, sig.price, sig.size, mid, toxic, sig.reason, sig.taker)
+              this.lastFillAt = now
+              this.rebuildQuote(true)
+            }
           }
         }
       } else {
@@ -1093,9 +1165,10 @@ export class PaperMmEngine {
       this.inventory = newInv
     }
 
+    const fillAt = Date.now()
     this.fills.push({
       id: nextId('f'),
-      t: Date.now(),
+      t: fillAt,
       side,
       price,
       size,
@@ -1105,6 +1178,13 @@ export class PaperMmEngine {
       feeDollars: fee,
       taker,
     })
+    if (reason !== 'settlement') {
+      this.fillTimestamps.push(fillAt)
+      if (this.fillTimestamps.length > 500) {
+        this.fillTimestamps.splice(0, this.fillTimestamps.length - 500)
+      }
+      this.lastFillAt = fillAt
+    }
     if (this.fills.length > 500) this.fills.splice(0, this.fills.length - 500)
 
     if (toxic) {

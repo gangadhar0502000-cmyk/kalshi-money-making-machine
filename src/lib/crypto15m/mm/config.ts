@@ -107,6 +107,30 @@ export interface PaperMmConfig {
    * Gates absurd edges from near-zero mid vs FV≈1.
    */
   maxSaneEdgeCents: number
+  /**
+   * Minimum contracts of depth that must be consumed at our touch price
+   * between consecutive book polls to count as a book_depth fill.
+   * Strict default is high so mild flicker does not print fills.
+   */
+  minBookDepthConsumed: number
+  /**
+   * Consecutive polls our quote must sit at/inside touch before book_depth
+   * can fire. Raises queue-time cost of getting filled.
+   */
+  minTouchPolls: number
+  /**
+   * When false, mid_walk fills are disabled (strict default).
+   * Loose/debug may enable for softer research.
+   */
+  allowMidWalk: boolean
+  /**
+   * Max paper fills per market in any rolling 15-minute window.
+   */
+  maxFillsPerMarketPer15m: number
+  /**
+   * Max paper fills per market in any rolling 60-second window.
+   */
+  maxFillsPerMinute: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -121,7 +145,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   spotPollMs: 1000,
   bookPollMs: 750,
   useLiveBook: true,
-  fillCooldownMs: 5000,
+  fillCooldownMs: 20_000,
   midMoveRequoteCents: 1,
   inventorySkewCentsPerUnit: 0.15,
   guardWidenCents: 4,
@@ -145,6 +169,11 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicFillPullMs: 8000,
   unwindThreshold: 1,
   maxSaneEdgeCents: 25,
+  minBookDepthConsumed: 8,
+  minTouchPolls: 4,
+  allowMidWalk: false,
+  maxFillsPerMarketPer15m: 8,
+  maxFillsPerMinute: 2,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -158,6 +187,11 @@ export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicityBias: 0.1,
   useLiveBook: true,
   fillCooldownMs: 5000,
+  minBookDepthConsumed: 1,
+  minTouchPolls: 1,
+  allowMidWalk: true,
+  maxFillsPerMarketPer15m: 60,
+  maxFillsPerMinute: 12,
 }
 
 /** @deprecated Prefer STRICT_PAPER_MM_CONFIG — kept as alias for imports. */
@@ -172,6 +206,12 @@ export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
     applyFees: src.applyFees,
     settleOnClose: src.settleOnClose,
     toxicityBias: src.toxicityBias,
+    fillCooldownMs: src.fillCooldownMs,
+    minBookDepthConsumed: src.minBookDepthConsumed,
+    minTouchPolls: src.minTouchPolls,
+    allowMidWalk: src.allowMidWalk,
+    maxFillsPerMarketPer15m: src.maxFillsPerMarketPer15m,
+    maxFillsPerMinute: src.maxFillsPerMinute,
   }
 }
 
@@ -188,7 +228,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     spotPollMs: Math.round(clamp(c.spotPollMs, 500, 10_000)),
     bookPollMs: Math.round(clamp(c.bookPollMs, 300, 10_000)),
     useLiveBook: Boolean(c.useLiveBook),
-    fillCooldownMs: Math.round(clamp(c.fillCooldownMs, 0, 60_000)),
+    fillCooldownMs: Math.round(clamp(c.fillCooldownMs, 0, 120_000)),
     midMoveRequoteCents: clamp(c.midMoveRequoteCents, 0.25, 10),
     inventorySkewCentsPerUnit: clamp(c.inventorySkewCentsPerUnit, 0, 2),
     guardWidenCents: clamp(c.guardWidenCents, 0, 30),
@@ -212,6 +252,11 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     toxicFillPullMs: Math.round(clamp(c.toxicFillPullMs, 0, 120_000)),
     unwindThreshold: Math.round(clamp(c.unwindThreshold, 1, 500)),
     maxSaneEdgeCents: clamp(c.maxSaneEdgeCents, 5, 100),
+    minBookDepthConsumed: Math.round(clamp(c.minBookDepthConsumed, 1, 500)),
+    minTouchPolls: Math.round(clamp(c.minTouchPolls, 1, 30)),
+    allowMidWalk: Boolean(c.allowMidWalk),
+    maxFillsPerMarketPer15m: Math.round(clamp(c.maxFillsPerMarketPer15m, 1, 500)),
+    maxFillsPerMinute: Math.round(clamp(c.maxFillsPerMinute, 1, 120)),
   }
 }
 

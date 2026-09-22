@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_DETECT_STATE,
   detectBookFills,
   type DetectBookFillsState,
   type OrderBookSnapshot,
@@ -27,7 +28,7 @@ function book(partial: Partial<OrderBookSnapshot> & { bestBid: number; bestAsk: 
 describe('detectBookFills maker-only', () => {
   it('FV far from mid crossing quote does not produce taker_cross when allowTakerCross=false', () => {
     const next = book({ bestBid: 0.48, bestAsk: 0.52 })
-    const walk: DetectBookFillsState = { midWalkBidArmed: true, midWalkAskArmed: true }
+    const walk: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
     // Bid crosses bestAsk (would be taker)
     const signals = detectBookFills(
       null,
@@ -50,7 +51,7 @@ describe('detectBookFills maker-only', () => {
       { yesBid: 0.7, yesAsk: 0.75, size: 1, active: true },
       0,
       10,
-      { midWalkBidArmed: true, midWalkAskArmed: true },
+      { ...DEFAULT_DETECT_STATE },
       { allowTakerCross: true },
     )
     expect(signals).toHaveLength(1)
@@ -62,7 +63,7 @@ describe('detectBookFills maker-only', () => {
     let fees = 0
     let takerFills = 0
     let makerFills = 0
-    const walk: DetectBookFillsState = { midWalkBidArmed: true, midWalkAskArmed: true }
+    const walk: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
     let prev: OrderBookSnapshot | null = null
 
     for (let i = 0; i < 100; i++) {

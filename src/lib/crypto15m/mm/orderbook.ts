@@ -3,7 +3,8 @@
  * Prices in dollars 0–1. Does not place orders.
  *
  * Hard realism: at most ONE fill per poll (never buy+sell same tick),
- * book_depth only at touch (±0.5¢), mid_walk only on armed crossings.
+ * book_depth only at touch (±0.5¢) after minTouchPolls + min depth consumed,
+ * mid_walk opt-in (disabled under strict) and requires arm + cooldown.
  */
 
 import { asDollarPrice } from './prices'
@@ -129,11 +130,20 @@ export type DetectBookFillsState = {
   midWalkBidArmed: boolean
   /** Mid was below our ask since last ask mid_walk — armed for next up-cross. */
   midWalkAskArmed: boolean
+  /** Consecutive polls bid quote has been at/inside touch. */
+  bidTouchPolls: number
+  /** Consecutive polls ask quote has been at/inside touch. */
+  askTouchPolls: number
+  /** Ms of last mid_walk fill (either side) — used for post-walk cooldown. */
+  lastMidWalkAt: number
 }
 
 export const DEFAULT_DETECT_STATE: DetectBookFillsState = {
   midWalkBidArmed: true,
   midWalkAskArmed: true,
+  bidTouchPolls: 0,
+  askTouchPolls: 0,
+  lastMidWalkAt: 0,
 }
 
 /**
@@ -146,6 +156,23 @@ export type DetectBookFillsOpts = {
    * Crossing quotes are ignored so paper MM cannot fee-bleed as a taker.
    */
   allowTakerCross?: boolean
+  /**
+   * When false (strict default), never emit mid_walk fills.
+   * Soft/debug may enable; when enabled under harsh opts, still requires
+   * full cross + prior uncross + midWalkCooldownMs.
+   */
+  allowMidWalk?: boolean
+  /** Min contracts consumed at touch to count as book_depth (default 1). */
+  minBookDepthConsumed?: number
+  /** Min consecutive at-touch polls before book_depth can fire (default 1). */
+  minTouchPolls?: number
+  /**
+   * After a mid_walk fill, refuse another mid_walk until this many ms elapse
+   * AND mid has uncrossed (re-armed). Strict research uses a long cooldown.
+   */
+  midWalkCooldownMs?: number
+  /** Now ms — for mid_walk cooldown; defaults to Date.now(). */
+  nowMs?: number
 }
 
 export function detectBookFills(
@@ -172,6 +199,11 @@ export function detectBookFills(
   const bidOn = quote.bidActive !== false
   const askOn = quote.askActive !== false
   const allowTaker = opts.allowTakerCross === true
+  const allowMidWalk = opts.allowMidWalk !== false
+  const minDepth = Math.max(1, Math.floor(opts.minBookDepthConsumed ?? 1))
+  const minTouch = Math.max(1, Math.floor(opts.minTouchPolls ?? 1))
+  const midWalkCd = Math.max(0, Math.floor(opts.midWalkCooldownMs ?? 0))
+  const nowMs = opts.nowMs ?? Date.now()
 
   // Immediate cross → taker. Under strict realism this path is refused entirely
   // (maker-only: book_depth / mid_walk). Per-side must be active.
@@ -206,6 +238,8 @@ export function detectBookFills(
     const mid = asDollarPrice(next.mid, 'next.mid')
     if (mid > bid + 1e-9) walkState.midWalkBidArmed = true
     if (mid < ask - 1e-9) walkState.midWalkAskArmed = true
+    walkState.bidTouchPolls = 0
+    walkState.askTouchPolls = 0
     return []
   }
 
@@ -216,8 +250,26 @@ export function detectBookFills(
   if (nextMid > bid + 1e-9) walkState.midWalkBidArmed = true
   if (nextMid < ask - 1e-9) walkState.midWalkAskArmed = true
 
-  // Mid walk through resting quotes — only once per crossing (armed)
+  // Track consecutive at-touch polls (must stay at touch across polls)
+  const bidJoined =
+    Math.abs(bid - next.bestBid) <= TOUCH_TOL + 1e-9 ||
+    Math.abs(bid - prev.bestBid) <= TOUCH_TOL + 1e-9
+  const askJoined =
+    Math.abs(ask - next.bestAsk) <= TOUCH_TOL + 1e-9 ||
+    Math.abs(ask - prev.bestAsk) <= TOUCH_TOL + 1e-9
+
+  if (bidOn && bidJoined) walkState.bidTouchPolls = (walkState.bidTouchPolls || 0) + 1
+  else walkState.bidTouchPolls = 0
+  if (askOn && askJoined) walkState.askTouchPolls = (walkState.askTouchPolls || 0) + 1
+  else walkState.askTouchPolls = 0
+
+  // Mid walk through resting quotes — only once per crossing (armed).
+  // Strict realism disables this path (allowMidWalk=false). When enabled,
+  // still require cooldown since last mid_walk + prior uncross arming.
+  const midWalkReady = nowMs - (walkState.lastMidWalkAt || 0) >= midWalkCd
   if (
+    allowMidWalk &&
+    midWalkReady &&
     bidOn &&
     walkState.midWalkBidArmed &&
     prevMid > bid + 1e-9 &&
@@ -225,6 +277,7 @@ export function detectBookFills(
     inventory < maxInventory
   ) {
     walkState.midWalkBidArmed = false
+    walkState.lastMidWalkAt = nowMs
     return [
       {
         side: 'buy_yes',
@@ -236,6 +289,8 @@ export function detectBookFills(
     ]
   }
   if (
+    allowMidWalk &&
+    midWalkReady &&
     askOn &&
     walkState.midWalkAskArmed &&
     prevMid < ask - 1e-9 &&
@@ -243,6 +298,7 @@ export function detectBookFills(
     inventory > -maxInventory
   ) {
     walkState.midWalkAskArmed = false
+    walkState.lastMidWalkAt = nowMs
     return [
       {
         side: 'sell_yes',
@@ -255,13 +311,17 @@ export function detectBookFills(
   }
 
   // Depth consumption at our price — ONLY if we are at the touch (±0.5¢)
-  const bidAtTouch =
-    Math.abs(bid - next.bestBid) <= TOUCH_TOL + 1e-9 ||
-    Math.abs(bid - prev.bestBid) <= TOUCH_TOL + 1e-9
+  // for minTouchPolls consecutive polls AND consumed depth ≥ minDepth.
   const bidDepthPrev = depthBidAtOrAbove(prev, bid)
   const bidDepthNext = depthBidAtOrAbove(next, bid)
   const bidConsumed = bidDepthPrev - bidDepthNext
-  if (bidOn && bidAtTouch && bidConsumed >= 1 && inventory < maxInventory) {
+  if (
+    bidOn &&
+    bidJoined &&
+    walkState.bidTouchPolls >= minTouch &&
+    bidConsumed >= minDepth &&
+    inventory < maxInventory
+  ) {
     const fillSz = Math.min(size, Math.floor(bidConsumed))
     if (fillSz >= 1) {
       return [
@@ -276,13 +336,16 @@ export function detectBookFills(
     }
   }
 
-  const askAtTouch =
-    Math.abs(ask - next.bestAsk) <= TOUCH_TOL + 1e-9 ||
-    Math.abs(ask - prev.bestAsk) <= TOUCH_TOL + 1e-9
   const askDepthPrev = depthAskAtOrBelow(prev, ask)
   const askDepthNext = depthAskAtOrBelow(next, ask)
   const askConsumed = askDepthPrev - askDepthNext
-  if (askOn && askAtTouch && askConsumed >= 1 && inventory > -maxInventory) {
+  if (
+    askOn &&
+    askJoined &&
+    walkState.askTouchPolls >= minTouch &&
+    askConsumed >= minDepth &&
+    inventory > -maxInventory
+  ) {
     const fillSz = Math.min(size, Math.floor(askConsumed))
     if (fillSz >= 1) {
       return [

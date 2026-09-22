@@ -46,6 +46,22 @@ function isUnrealisticallyFastPnl(
   return (totalPnl >= 10 && ageSec < 180) || perMin >= 5 || totalPnl >= 25
 }
 
+/** Fills/hour still soft for serious paper MM research under strict realism. */
+function isUnrealisticFillRate(
+  fillsPerHour: number,
+  fillCount: number,
+  sessionStartedAt: number | null,
+  strictRealism: boolean,
+): boolean {
+  if (!strictRealism) return false
+  if (fillCount < 8) return false
+  if (sessionStartedAt == null) return fillsPerHour >= 20
+  const ageMin = (Date.now() - sessionStartedAt) / 60_000
+  // Need a few minutes of session before rate is meaningful
+  if (ageMin < 3) return fillCount >= 12
+  return fillsPerHour >= 20
+}
+
 export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Props) {
   const singleState = useEngineState()
   const portfolioState = usePortfolioState()
@@ -164,12 +180,24 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     sessionFees > 0.01 && Math.abs(totalPnl) > 0 && sessionFees >= Math.abs(totalPnl) * 0.5
   const sessionStartedAt = multiBook ? portfolioState.sessionStartedAt : s.sessionStartedAt
   const cfg = multiBook ? portfolioState.config : s.config
+  const fillsPerHour = multiBook
+    ? (() => {
+        const n = portfolioState.aggregate.fillCount
+        if (sessionStartedAt == null) return 0
+        const hours = Math.max(1 / 3600, (Date.now() - sessionStartedAt) / 3_600_000)
+        return n / hours
+      })()
+    : s.fillsPerHour
+  const fillCount = multiBook ? portfolioState.aggregate.fillCount : s.fillCount
   const showSoftWarn = isUnrealisticallyFastPnl(
     totalPnl,
     sessionStartedAt,
     cfg.strictRealism,
     cfg.baseFillProb,
   )
+  const showFillRateWarn =
+    (multiBook ? false : s.fillRateUnrealistic) ||
+    isUnrealisticFillRate(fillsPerHour, fillCount, sessionStartedAt, cfg.strictRealism)
   const message = multiBook ? portfolioState.message : s.message
   const activeTickers = multiBook
     ? new Set(
@@ -222,6 +250,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
           ⚠ Sim too friendly / check fill rate — not live edge. Session P&amp;L rose unrealistically
           fast for a harsh paper book (or loose mode is on).
+        </div>
+      )}
+
+      {showFillRateWarn && !moneyPrinterBug && (
+        <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
+          ⚠ Fill rate still high for paper research ({fillsPerHour.toFixed(1)} fills/hour ·{' '}
+          {fillCount} fills). Under strict realism, maker fills should be scarce. Tighten depth /
+          touch / cooldown — or keep iterating MM decision quality. Paper green ≠ live edge.
         </div>
       )}
 
@@ -353,8 +389,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               }}
             />
             <span>
-              <strong>Strict realism</strong> (default ON) — rare fills, mid-cross ~20%, fees,
-              settlement
+              <strong>Strict realism</strong> (default ON) — scarce maker fills (depth+touch,
+              mid_walk off, 20s cooldown, per-min/15m caps), fees, settlement
             </span>
           </label>
 
@@ -504,6 +540,16 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               label="SESSION Σ Fills"
               value={String(portfolioState.aggregate.fillCount)}
               sub={`${portfolioState.aggregate.cancelCount} cancels · session ledger`}
+            />
+            <Stat
+              label="Fills / hour"
+              value={fillsPerHour.toFixed(1)}
+              tone={showFillRateWarn ? 'warn' : 'neutral'}
+              sub={
+                showFillRateWarn
+                  ? '⚠ still soft for strict paper research'
+                  : `cooldown ${cfg.fillCooldownMs}ms · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/15m`
+              }
             />
           </div>
 
@@ -839,6 +885,21 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               value={s.config.baseFillProb.toFixed(4)}
               sub={s.config.applyFees ? 'fees ON' : 'fees OFF'}
             />
+            <Stat
+              label="Fills"
+              value={String(s.fillCount)}
+              sub={`${s.fillsLastMinute}/min · ${s.fillsLast15m}/15m`}
+            />
+            <Stat
+              label="Fills / hour"
+              value={s.fillsPerHour.toFixed(1)}
+              tone={showFillRateWarn ? 'warn' : 'neutral'}
+              sub={
+                showFillRateWarn
+                  ? '⚠ still soft for strict paper research'
+                  : `cd ${cfg.fillCooldownMs}ms · depth≥${cfg.minBookDepthConsumed} · touch≥${cfg.minTouchPolls}`
+              }
+            />
           </div>
 
           <div className="panel p-4">
@@ -993,6 +1054,46 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             max={1}
             onChange={(v) => setDraft((d) => ({ ...d, midCrossFillProb: v }))}
           />
+          <Knob
+            label="Fill cooldown (ms)"
+            value={draft.fillCooldownMs}
+            step={1000}
+            min={0}
+            max={120_000}
+            onChange={(v) => setDraft((d) => ({ ...d, fillCooldownMs: v }))}
+          />
+          <Knob
+            label="Min depth consumed"
+            value={draft.minBookDepthConsumed}
+            step={1}
+            min={1}
+            max={100}
+            onChange={(v) => setDraft((d) => ({ ...d, minBookDepthConsumed: v }))}
+          />
+          <Knob
+            label="Min touch polls"
+            value={draft.minTouchPolls}
+            step={1}
+            min={1}
+            max={30}
+            onChange={(v) => setDraft((d) => ({ ...d, minTouchPolls: v }))}
+          />
+          <Knob
+            label="Max fills / min"
+            value={draft.maxFillsPerMinute}
+            step={1}
+            min={1}
+            max={60}
+            onChange={(v) => setDraft((d) => ({ ...d, maxFillsPerMinute: v }))}
+          />
+          <Knob
+            label="Max fills / 15m"
+            value={draft.maxFillsPerMarketPer15m}
+            step={1}
+            min={1}
+            max={100}
+            onChange={(v) => setDraft((d) => ({ ...d, maxFillsPerMarketPer15m: v }))}
+          />
         </div>
         <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-400">
           <label className="flex items-center gap-2">
@@ -1010,6 +1111,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               onChange={(e) => setDraft((d) => ({ ...d, settleOnClose: e.target.checked }))}
             />
             Settlement risk (mark inv to 0/1 on close)
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.allowMidWalk}
+              onChange={(e) => setDraft((d) => ({ ...d, allowMidWalk: e.target.checked }))}
+            />
+            Allow mid_walk fills (OFF under strict — depth-only)
           </label>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
