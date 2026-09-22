@@ -35,32 +35,88 @@ export function Crypto15mLab() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null)
   const [entries, setEntries] = useState<PaperJournalEntry[]>(() => loadJournal())
   const [nowTick, setNowTick] = useState(0)
+  const [lastAttemptAt, setLastAttemptAt] = useState<string | undefined>()
   const lastMarketsRef = useRef<Crypto15mMarket[]>([])
   const sourceRef = useRef<'live' | 'demo' | null>(null)
   /** Single-flight: overlapping polls must not abort a healthy in-flight live fetch. */
   const inFlightRef = useRef(false)
+  const inFlightStartedAtRef = useRef(0)
   const pollGenRef = useRef(0)
+  /** AbortController for the active fetch — force refresh aborts this. */
+  const fetchAbortRef = useRef<AbortController | null>(null)
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+  const IN_FLIGHT_WATCHDOG_MS = 45_000
+
+  const countOpenMarkets = (list: Crypto15mMarket[], nowMs = Date.now()) =>
+    list.filter((m) => {
+      // Prefer live countdown from closeTime so stale minutesRemaining cannot lie.
+      const closeMs = Date.parse(m.closeTime)
+      if (Number.isFinite(closeMs)) return closeMs - nowMs > 0
+      return m.minutesRemaining > 0
+    }).length
+
+  const refresh = useCallback(async (opts?: { signal?: AbortSignal; force?: boolean }) => {
+    const force = opts?.force === true
+    const externalSignal = opts?.signal
+
+    // Invalidate + abort an in-flight generation so its finally cannot clear our mutex.
+    const abortInFlight = () => {
+      pollGenRef.current += 1 // stale finally: gen !== pollGen → skip mutex clear
+      fetchAbortRef.current?.abort()
+      fetchAbortRef.current = null
+      inFlightRef.current = false
+      inFlightStartedAtRef.current = 0
+    }
+
+    // Watchdog: wedged mutex from hung fetch / Strict Mode race → clear and continue.
+    if (
+      inFlightRef.current &&
+      inFlightStartedAtRef.current > 0 &&
+      Date.now() - inFlightStartedAtRef.current > IN_FLIGHT_WATCHDOG_MS
+    ) {
+      abortInFlight()
+    }
+
+    // Force path (Refresh now): abort any in-flight fetch, clear mutex, start fresh.
+    if (force && inFlightRef.current) {
+      abortInFlight()
+    }
+
     // Mutex / coalesce: if a fetch is already in flight, skip this poll tick.
     // Never abort a healthy in-flight live fetch just because pollIntervalMs fired.
     if (inFlightRef.current) return
     inFlightRef.current = true
+    inFlightStartedAtRef.current = Date.now()
     const gen = ++pollGenRef.current
+
+    const ac = new AbortController()
+    fetchAbortRef.current = ac
+    const onExternalAbort = () => ac.abort()
+    if (externalSignal) {
+      if (externalSignal.aborted) ac.abort()
+      else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+    }
+    const signal = ac.signal
+
     setLoading(true)
+    setLastAttemptAt(new Date().toISOString())
     try {
       const result = await fetchCrypto15mMarkets(signal)
       // Strict Mode / effect cleanup abort — never LIVE-ONLY, never wipe live universe.
-      if (signal?.aborted) return
-      // Stale completion after a newer refresh started (should not happen with mutex).
+      if (signal.aborted) return
+      // Stale completion after a newer refresh started (force/watchdog bumped gen).
       if (gen !== pollGenRef.current) return
 
+      const nowMs = Date.now()
+      const lastOpenCount = countOpenMarkets(lastMarketsRef.current, nowMs)
+
       // Never wipe a good LIVE universe with a transient empty refresh (rollover gap).
-      // LIVE-ONLY: demo fixtures are never applied.
+      // LIVE-ONLY: demo fixtures are never applied. Settled-only → apply empty.
       const decision = shouldApplyLabRefresh({
         prevSource: sourceRef.current,
         next: result,
         lastMarketsLen: lastMarketsRef.current.length,
+        lastOpenCount,
       })
       let marketsForPick = lastMarketsRef.current
       if (decision === 'ignore') {
@@ -72,6 +128,8 @@ export function Crypto15mLab() {
       }
       if (decision === 'keep-last') {
         marketsForPick = lastMarketsRef.current
+        // Still bump attempt time so UI shows polling even on keep-last.
+        setLastAttemptAt(new Date().toISOString())
         // Never paint LIVE-ONLY FAILURE for abort-only empties while keeping last.
         if (isAbortOnlyError(result.error)) {
           setError('Empty feed — keeping last markets; retrying…')
@@ -102,23 +160,33 @@ export function Crypto15mLab() {
         return pickBestOpenMarket(marketsForPick)?.ticker ?? marketsForPick[0]?.ticker ?? null
       })
     } catch (e) {
-      if (signal?.aborted || isAbortReason(e, signal)) return
+      if (signal.aborted || isAbortReason(e, signal)) return
       setError(
         `Refresh failed: ${e instanceof Error ? e.message : String(e)} — retrying…`,
       )
     } finally {
-      if (gen === pollGenRef.current) inFlightRef.current = false
-      if (!signal?.aborted) setLoading(false)
+      externalSignal?.removeEventListener('abort', onExternalAbort)
+      if (fetchAbortRef.current === ac) fetchAbortRef.current = null
+      // Always clear mutex for the active generation (force bumps gen so stale finally stays quiet).
+      if (gen === pollGenRef.current) {
+        inFlightRef.current = false
+        inFlightStartedAtRef.current = 0
+      }
+      if (!signal.aborted || force) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     const ac = new AbortController()
-    void refresh(ac.signal)
-    return () => ac.abort()
+    void refresh({ signal: ac.signal })
+    return () => {
+      ac.abort()
+      fetchAbortRef.current?.abort()
+    }
   }, [refresh])
 
-  // Poll for mid history + countdown freshness — never aborts an in-flight fetch.
+  // Poll for mid history + countdown freshness — never aborts an in-flight fetch
+  // (unless watchdog cleared a wedged mutex).
   useEffect(() => {
     const id = window.setInterval(() => {
       void refresh() // single-flight skip if busy
@@ -232,8 +300,18 @@ export function Crypto15mLab() {
               : 'Fetching markets…'}
         </span>
         {fetchedAt && <span>Updated {formatRelativeTime(fetchedAt)}</span>}
+        {!fetchedAt && lastAttemptAt && (
+          <span>Polled {formatRelativeTime(lastAttemptAt)}</span>
+        )}
+        {fetchedAt && lastAttemptAt && lastAttemptAt !== fetchedAt && (
+          <span className="text-slate-500">· polled {formatRelativeTime(lastAttemptAt)}</span>
+        )}
         {loading && <span className="text-slate-500">Refreshing…</span>}
-        <button type="button" className="btn btn-ghost !py-1 text-xs" onClick={() => void refresh()}>
+        <button
+          type="button"
+          className="btn btn-ghost !py-1 text-xs"
+          onClick={() => void refresh({ force: true })}
+        >
           Refresh now
         </button>
         {error && (

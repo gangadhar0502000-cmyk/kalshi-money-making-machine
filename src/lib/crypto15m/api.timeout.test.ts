@@ -208,6 +208,48 @@ describe('Lab live-only refresh', () => {
         prevSource: 'live',
         next: { source: 'live', markets: [] },
         lastMarketsLen: 3,
+        lastOpenCount: 3,
+      }),
+    ).toBe('keep-last')
+  })
+
+  it('settled-only keep-last → apply empty (do not glue dead books)', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: 'live',
+        next: { source: 'live', markets: [] },
+        lastMarketsLen: 14,
+        lastOpenCount: 0,
+      }),
+    ).toBe('apply')
+  })
+
+  it('settled-only abort-only empty → apply (not keep-last)', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: 'live',
+        next: {
+          source: 'live',
+          markets: [],
+          error: 'Transient abort (retrying): proxy: aborted',
+        },
+        lastMarketsLen: 14,
+        lastOpenCount: 0,
+      }),
+    ).toBe('apply')
+  })
+
+  it('open markets still keep-last on abort-only empty', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: 'live',
+        next: {
+          source: 'live',
+          markets: [],
+          error: 'Transient abort (retrying): proxy: aborted',
+        },
+        lastMarketsLen: 14,
+        lastOpenCount: 5,
       }),
     ).toBe('keep-last')
   })

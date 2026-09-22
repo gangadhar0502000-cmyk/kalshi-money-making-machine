@@ -39,25 +39,35 @@ export function isAbortOnlyError(error: string | undefined | null): boolean {
  * Decide whether a refresh should replace the Lab market universe.
  *
  * LIVE ONLY: demo fixtures are never applied from fetch. Empty live feeds keep
- * the last non-empty LIVE universe during rollover gaps. Hard empty+error on a
- * cold start applies empty so the UI can show LIVE-ONLY failure (not fixtures).
+ * the last non-empty LIVE universe during rollover gaps — but only while that
+ * universe still has open markets (minutesRemaining > 0). Settled-only keep-last
+ * would glue the UI to dead books through window rollover.
  *
  * Abort-only / quiet empties never wipe a live universe and never cold-apply
- * empty (would sticky LIVE-ONLY after Strict Mode / overlapping poll aborts).
+ * empty (would sticky LIVE-ONLY after Strict Mode / overlapping poll aborts),
+ * except when lastOpenCount is 0 (settled-only): then apply empty so the next
+ * successful poll can replace the universe.
  */
 export function shouldApplyLabRefresh(opts: {
   prevSource: LabSource
   next: Pick<FetchCrypto15mResult, 'source' | 'markets' | 'error'>
   lastMarketsLen: number
+  /** Count of last markets still open (minutesRemaining > 0). When 0, do not keep-last. */
+  lastOpenCount?: number
 }): LabRefreshDecision {
   const { prevSource, next, lastMarketsLen } = opts
+  const lastOpenCount =
+    opts.lastOpenCount !== undefined ? opts.lastOpenCount : lastMarketsLen
 
   const abortOnlyEmpty =
     next.markets.length === 0 && isAbortOnlyError(next.error)
 
-  // Abort races / timeout-labeled "aborted" — never wipe, never cold-apply empty.
+  // Abort races / timeout-labeled "aborted" — never wipe, never cold-apply empty
+  // — unless the kept universe is settled-only (nothing open to preserve).
   if (abortOnlyEmpty) {
     if (lastMarketsLen > 0 && (prevSource === 'live' || prevSource === 'demo')) {
+      // Settled-only: apply empty so UI can clear sticky dead books.
+      if (lastOpenCount <= 0) return 'apply'
       return 'keep-last'
     }
     // Cold start abort: ignore so we do not stamp source=live + empty markets.
@@ -74,8 +84,10 @@ export function shouldApplyLabRefresh(opts: {
     return 'apply'
   }
 
-  // Transient empty while we already have a live universe — keep last (rollover).
+  // Transient empty while we already have a live universe — keep last (rollover),
+  // but only if some markets are still open. Settled-only → apply empty.
   if (next.markets.length === 0 && lastMarketsLen > 0 && prevSource === 'live') {
+    if (lastOpenCount <= 0) return 'apply'
     return 'keep-last'
   }
 
