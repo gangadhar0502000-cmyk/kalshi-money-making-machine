@@ -238,16 +238,168 @@ async function mapPool(items, concurrency, fn) {
   return results
 }
 
+/** U1: in-memory crypto15m universe cache (TTL matches src/.../universeCache.ts). */
+const CRYPTO15M_CACHE_TTL_MS = 2500
+
+const universeCache = {
+  /** @type {any[] | null} null = never successfully populated */
+  markets: null,
+  fetchedAt: null,
+  lastSuccessMs: null,
+  refreshing: false,
+  /** @type {string[]} */
+  errors: [],
+  authenticated: false,
+  /** @type {Promise<void> | null} */
+  refreshPromise: null,
+}
+
+function decideUniverseRefreshApply({ lastGoodCount, nextMarketsCount, refreshFailed, seriesErrorCount }) {
+  const hadOpen = lastGoodCount > 0
+  if (refreshFailed && hadOpen) return 'keep-last'
+  if (hadOpen && nextMarketsCount === 0 && seriesErrorCount > 0) return 'keep-last'
+  return 'apply'
+}
+
+function buildCachedCrypto15mPayload() {
+  const now = Date.now()
+  const age =
+    universeCache.lastSuccessMs != null ? Math.max(0, now - universeCache.lastSuccessMs) : null
+  const markets = universeCache.markets ?? []
+  const hasGood = universeCache.markets != null
+  const fresh = age != null && age < CRYPTO15M_CACHE_TTL_MS
+  return {
+    markets,
+    fetchedAt: universeCache.fetchedAt,
+    cacheAgeMs: age,
+    refreshing: universeCache.refreshing,
+    stale: hasGood ? !fresh : universeCache.refreshing,
+    authenticated: universeCache.authenticated || Boolean(secrets.keyId),
+    readOnly: true,
+    errors: universeCache.errors.slice(0, 5),
+    banner: 'Read-only API · never places trades',
+  }
+}
+
+async function fanOutCrypto15mUniverse() {
+  const byTicker = new Map()
+  const errors = []
+  await mapPool(CRYPTO_15M_SERIES, 4, async (series) => {
+    try {
+      const q = new URLSearchParams({
+        series_ticker: series,
+        status: 'open',
+        limit: '20',
+        mve_filter: 'exclude',
+      })
+      const data = await kalshiGet(`/markets?${q}`)
+      for (const m of data.json.markets || []) {
+        if (isCrypto15m(m)) byTicker.set(m.ticker, m)
+      }
+    } catch (e) {
+      errors.push(`${series}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  })
+  return {
+    markets: [...byTicker.values()],
+    errors,
+    authenticated: Boolean(secrets.keyId),
+  }
+}
+
+function applyUniverseRefreshResult(result, refreshFailed) {
+  const lastGoodCount = Array.isArray(universeCache.markets)
+    ? universeCache.markets.length
+    : 0
+  const decision = decideUniverseRefreshApply({
+    lastGoodCount,
+    nextMarketsCount: result.markets.length,
+    refreshFailed: Boolean(refreshFailed),
+    seriesErrorCount: result.errors.length,
+  })
+  if (decision === 'keep-last') {
+    const keepMsg = refreshFailed
+      ? `refresh failed — kept last good (${lastGoodCount})`
+      : `refresh empty with series errors — kept last good (${lastGoodCount})`
+    universeCache.errors = [keepMsg, ...result.errors].slice(0, 5)
+    // Do not advance lastSuccessMs / markets
+    return
+  }
+  universeCache.markets = result.markets
+  universeCache.fetchedAt = new Date().toISOString()
+  universeCache.lastSuccessMs = Date.now()
+  universeCache.authenticated = result.authenticated
+  universeCache.errors = result.errors.slice(0, 5)
+}
+
+function kickUniverseRefresh() {
+  if (universeCache.refreshing && universeCache.refreshPromise) {
+    return universeCache.refreshPromise
+  }
+  universeCache.refreshing = true
+  universeCache.refreshPromise = (async () => {
+    try {
+      const result = await fanOutCrypto15mUniverse()
+      applyUniverseRefreshResult(result, false)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      applyUniverseRefreshResult(
+        { markets: [], errors: [msg], authenticated: Boolean(secrets.keyId) },
+        true,
+      )
+    } finally {
+      universeCache.refreshing = false
+      universeCache.refreshPromise = null
+    }
+  })()
+  return universeCache.refreshPromise
+}
+
+/**
+ * Serve cached universe immediately when fresh; otherwise kick background refresh
+ * and return last-good with stale:true. Cold start awaits first fan-out.
+ */
+async function getCrypto15mCachedResponse() {
+  const now = Date.now()
+  const age =
+    universeCache.lastSuccessMs != null ? now - universeCache.lastSuccessMs : null
+  const fresh = age != null && age < CRYPTO15M_CACHE_TTL_MS
+
+  if (universeCache.markets != null && fresh) {
+    return buildCachedCrypto15mPayload()
+  }
+
+  // Stale or empty — kick refresh (single-flight)
+  const p = kickUniverseRefresh()
+
+  if (universeCache.markets != null) {
+    // Return last good immediately while refresh runs
+    return buildCachedCrypto15mPayload()
+  }
+
+  // Cold start: must await first population
+  await p
+  return buildCachedCrypto15mPayload()
+}
+
 async function handleLocal(req, res, url) {
   const route = url.pathname
 
   if (route === '/local-api/health') {
+    const age =
+      universeCache.lastSuccessMs != null
+        ? Math.max(0, Date.now() - universeCache.lastSuccessMs)
+        : null
     return sendJson(res, 200, {
       ok: true,
       readOnly: true,
       banner: 'Read-only API · never places trades',
       credentialsLoaded: Boolean(secrets.keyId),
       credentialsSource: secrets.source,
+      cacheAgeMs: age,
+      lastSuccessAt: universeCache.fetchedAt,
+      refreshing: universeCache.refreshing,
+      marketCount: Array.isArray(universeCache.markets) ? universeCache.markets.length : 0,
     })
   }
 
@@ -317,33 +469,8 @@ async function handleLocal(req, res, url) {
   }
 
   if (route === '/local-api/crypto15m') {
-    const byTicker = new Map()
-    const errors = []
-    // Limited concurrency (not fully serial) — keeps read-only, speeds Lab universe load.
-    await mapPool(CRYPTO_15M_SERIES, 4, async (series) => {
-      try {
-        const q = new URLSearchParams({
-          series_ticker: series,
-          status: 'open',
-          limit: '20',
-          mve_filter: 'exclude',
-        })
-        const data = await kalshiGet(`/markets?${q}`)
-        for (const m of data.json.markets || []) {
-          if (isCrypto15m(m)) byTicker.set(m.ticker, m)
-        }
-      } catch (e) {
-        errors.push(`${series}: ${e instanceof Error ? e.message : String(e)}`)
-      }
-    })
-    return sendJson(res, 200, {
-      readOnly: true,
-      authenticated: Boolean(secrets.keyId),
-      markets: [...byTicker.values()],
-      errors: errors.slice(0, 5),
-      fetchedAt: new Date().toISOString(),
-      banner: 'Read-only API · never places trades',
-    })
+    const body = await getCrypto15mCachedResponse()
+    return sendJson(res, 200, body)
   }
 
   return sendJson(res, 404, {

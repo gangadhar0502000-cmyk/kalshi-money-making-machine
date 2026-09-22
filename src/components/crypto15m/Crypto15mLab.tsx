@@ -6,6 +6,11 @@ import type {
 } from '../../types/crypto15m'
 import { fetchCrypto15mMarkets, fetchMarketByTicker, isAbortReason } from '../../lib/crypto15m/api'
 import {
+  subscribeContinuousFeed,
+  feedFreshnessTone,
+  type ContinuousFeedSnapshot,
+} from '../../lib/crypto15m/mm/continuousFeed'
+import {
   clearJournal,
   computeRuleStats,
   loadJournal,
@@ -36,6 +41,8 @@ export function Crypto15mLab() {
   const [entries, setEntries] = useState<PaperJournalEntry[]>(() => loadJournal())
   const [nowTick, setNowTick] = useState(0)
   const [lastAttemptAt, setLastAttemptAt] = useState<string | undefined>()
+  const [feedSuccessAt, setFeedSuccessAt] = useState<string | undefined>()
+  const [feedStale, setFeedStale] = useState(false)
   const lastMarketsRef = useRef<Crypto15mMarket[]>([])
   const sourceRef = useRef<'live' | 'demo' | null>(null)
   /** Single-flight: overlapping polls must not abort a healthy in-flight live fetch. */
@@ -176,6 +183,68 @@ export function Crypto15mLab() {
     }
   }, [])
 
+  const applyContinuousSnap = useCallback((snap: ContinuousFeedSnapshot) => {
+    setLastAttemptAt(snap.lastAttemptAt ?? new Date().toISOString())
+    if (snap.lastSuccessAt) setFeedSuccessAt(snap.lastSuccessAt)
+    setFeedStale(snap.stale)
+    if (!snap.everSucceeded) return
+
+    const result = {
+      markets: snap.markets,
+      source: 'live' as const,
+      fetchedAt: snap.lastSuccessAt ?? snap.fetchedAt ?? new Date().toISOString(),
+      error: snap.lastError,
+      seriesTried: [] as string[],
+    }
+    const nowMs = Date.now()
+    const lastOpenCount = countOpenMarkets(lastMarketsRef.current, nowMs)
+    const decision = shouldApplyLabRefresh({
+      prevSource: sourceRef.current,
+      next: result,
+      lastMarketsLen: lastMarketsRef.current.length,
+      lastOpenCount,
+    })
+    let marketsForPick = lastMarketsRef.current
+    if (decision === 'ignore') {
+      if (result.error && !isAbortOnlyError(result.error)) {
+        setError(result.error)
+      }
+      setLoading(false)
+      return
+    }
+    if (decision === 'keep-last') {
+      marketsForPick = lastMarketsRef.current
+      if (isAbortOnlyError(result.error)) {
+        setError('Empty feed — keeping last markets; retrying…')
+      } else {
+        setError(
+          (result.error ? result.error + ' · ' : '') +
+            'Empty feed — keeping last markets; retrying…',
+        )
+      }
+    } else {
+      lastMarketsRef.current = result.markets
+      setMarkets(result.markets)
+      setSource(result.source)
+      sourceRef.current = result.source
+      setError(result.error)
+      setFetchedAt(result.fetchedAt)
+      marketsForPick = result.markets
+    }
+    setSelectedTicker((prev) => {
+      const current = prev ? marketsForPick.find((m) => m.ticker === prev) ?? null : null
+      const roll = pickRollTarget(marketsForPick, current)
+      if (roll) return roll.ticker
+      if (prev && !current) {
+        return pickBestOpenMarket(marketsForPick)?.ticker ?? prev
+      }
+      if (prev && current) return prev
+      return pickBestOpenMarket(marketsForPick)?.ticker ?? marketsForPick[0]?.ticker ?? null
+    })
+    setLoading(false)
+  }, [])
+
+
   useEffect(() => {
     const ac = new AbortController()
     void refresh({ signal: ac.signal })
@@ -185,12 +254,26 @@ export function Crypto15mLab() {
     }
   }, [refresh])
 
-  // Poll for mid history + countdown freshness — never aborts an in-flight fetch
-  // (unless watchdog cleared a wedged mutex).
+  // U1: continuous proxy feed is primary universe; Lab keeps soft abort / keep-last via applyContinuousSnap.
+  useEffect(() => {
+    const unsub = subscribeContinuousFeed((snap) => {
+      applyContinuousSnap(snap)
+    })
+    const id = window.setInterval(() => {
+      // Countdown / relative-time tick; force path still available via Refresh now.
+      setNowTick((n) => n + 1)
+    }, 1000)
+    return () => {
+      unsub()
+      window.clearInterval(id)
+    }
+  }, [applyContinuousSnap])
+
+  // Slow safety net: if continuous feed never succeeds (proxy down), fall back to legacy refresh.
   useEffect(() => {
     const id = window.setInterval(() => {
-      void refresh() // single-flight skip if busy
-      setNowTick((n) => n + 1)
+      if (sourceRef.current === 'live' && lastMarketsRef.current.length > 0) return
+      void refresh()
     }, LAB.pollIntervalMs)
     return () => window.clearInterval(id)
   }, [refresh])
@@ -301,6 +384,22 @@ export function Crypto15mLab() {
                 ? 'LIVE-ONLY FAILURE'
                 : 'Fetching markets…'}
         </span>
+        {feedSuccessAt && (
+          <span
+            className={
+              feedFreshnessTone(feedSuccessAt) === 'ok'
+                ? 'text-emerald-300'
+                : feedFreshnessTone(feedSuccessAt) === 'amber'
+                  ? 'text-amber-300'
+                  : feedFreshnessTone(feedSuccessAt) === 'red'
+                    ? 'text-rose-300'
+                    : ''
+            }
+          >
+            Feed ok {formatRelativeTime(feedSuccessAt)}
+            {feedStale ? ' · stale' : ''}
+          </span>
+        )}
         {fetchedAt && <span>Updated {formatRelativeTime(fetchedAt)}</span>}
         {!fetchedAt && lastAttemptAt && (
           <span>Polled {formatRelativeTime(lastAttemptAt)}</span>
@@ -386,7 +485,7 @@ export function Crypto15mLab() {
       </div>
 
       <div className={tab === 'mm' ? '' : 'hidden'} aria-hidden={tab !== 'mm'}>
-        {/* Paper MM polls its own market universe (~8s); Lab empty/abort must not block quoting. */}
+        {/* Paper MM continuous feed (~1s); Lab empty/abort must not block quoting. */}
         <PaperMmPanel
           markets={markets}
           selectedTicker={selectedTicker}

@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Crypto15mMarket } from '../../types/crypto15m'
 import { formatCents, formatDollars, formatRelativeTime } from '../../lib/format'
-import { fetchCrypto15mMarkets, isAbortReason } from '../../lib/crypto15m/api'
 import { isAbortOnlyError } from '../../lib/crypto15m/labRefresh'
 import { type PaperMmConfig } from '../../lib/crypto15m/mm/config'
 import { paperMmEngine } from '../../lib/crypto15m/mm/engine'
 import { paperMmPortfolio } from '../../lib/crypto15m/mm/portfolio'
 import { formatPnlDual, isValidQuoteMid } from '../../lib/crypto15m/mm/prices'
 import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
+import { pickMmUniverse, type MmFeedStatus } from '../../lib/crypto15m/mm/mmMarketFeed'
 import {
-  MM_MARKET_POLL_MS,
-  pickMmUniverse,
-  type MmFeedStatus,
-} from '../../lib/crypto15m/mm/mmMarketFeed'
+  subscribeContinuousFeed,
+  feedFreshnessTone,
+} from '../../lib/crypto15m/mm/continuousFeed'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
 import type { PortfolioState } from '../../lib/crypto15m/mm/portfolio'
 import { parkStatusLabel } from '../../lib/crypto15m/mm/parkStatus'
@@ -92,54 +91,27 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
   const fills = singleState.fills
   const cancels = singleState.cancels
 
-  // MM-owned live universe — independent of Lab markets prop / Lab abort banner.
+  // U1: continuous proxy feed (~1s) — lastOkAt updates on every successful poll incl. cache hits.
   useEffect(() => {
-    let alive = true
-    let ac: AbortController | null = null
-    const poll = async () => {
-      ac?.abort()
-      ac = new AbortController()
-      const signal = ac.signal
-      try {
-        const result = await fetchCrypto15mMarkets(signal)
-        if (!alive || signal.aborted) return
-        if (result.markets.length > 0) {
-          setMmOwnedMarkets(result.markets)
-          setMmFeed({
-            everSucceeded: true,
-            lastOkAt: result.fetchedAt,
-            lastError: undefined,
-          })
-          return
-        }
-        if (isAbortOnlyError(result.error)) {
-          setMmFeed((prev) => ({
-            ...prev,
-            lastError: result.error ?? 'Transient abort (retrying)',
-          }))
-          return
-        }
-        // Completed empty / loud failure — own the empty set (stop using Lab fallback).
-        setMmOwnedMarkets(result.markets)
-        setMmFeed({
-          everSucceeded: true,
-          lastOkAt: result.fetchedAt,
-          lastError: result.error,
-        })
-      } catch (e) {
-        if (!alive || isAbortReason(e, signal)) return
-        setMmFeed((prev) => ({
-          ...prev,
-          lastError: e instanceof Error ? e.message : String(e),
-        }))
+    const unsub = subscribeContinuousFeed((snap) => {
+      if (snap.everSucceeded) {
+        setMmOwnedMarkets(snap.markets)
       }
-    }
-    void poll()
-    const id = window.setInterval(() => void poll(), MM_MARKET_POLL_MS)
+      setMmFeed({
+        everSucceeded: snap.everSucceeded,
+        lastOkAt: snap.lastSuccessAt,
+        lastError: snap.lastError,
+        stale: snap.stale,
+        cacheAgeMs: snap.cacheAgeMs,
+      })
+    })
+    // Tick relative-time labels every second so "ok Xs ago" stays honest while RUNNING.
+    const tick = window.setInterval(() => {
+      setMmFeed((prev) => ({ ...prev }))
+    }, 1000)
     return () => {
-      alive = false
-      window.clearInterval(id)
-      ac?.abort()
+      unsub()
+      window.clearInterval(tick)
     }
   }, [])
 
@@ -463,16 +435,24 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                mmFeed.lastOkAt
-                  ? 'bg-slate-900 text-sky-300'
-                  : isAbortOnlyError(mmFeed.lastError)
-                    ? 'bg-amber-950 text-amber-200'
-                    : 'bg-slate-800 text-slate-400'
+                (() => {
+                  const tone = feedFreshnessTone(mmFeed.lastOkAt)
+                  if (tone === 'ok') return 'bg-emerald-950 text-emerald-300'
+                  if (tone === 'amber') return 'bg-amber-950 text-amber-200'
+                  if (tone === 'red') return 'bg-rose-950 text-rose-200'
+                  if (isAbortOnlyError(mmFeed.lastError)) return 'bg-amber-950 text-amber-200'
+                  return 'bg-slate-800 text-slate-400'
+                })()
               }`}
-              title={mmFeed.lastError ?? 'MM self-feed status'}
+              title={
+                mmFeed.lastError ??
+                (mmFeed.stale
+                  ? `MM feed stale · cacheAgeMs=${mmFeed.cacheAgeMs ?? '—'}`
+                  : 'MM continuous feed (proxy cache)')
+              }
             >
               {mmFeed.lastOkAt
-                ? `MM ok ${formatRelativeTime(mmFeed.lastOkAt)}`
+                ? `MM feed ok ${formatRelativeTime(mmFeed.lastOkAt)}`
                 : mmFeed.lastError
                   ? isAbortOnlyError(mmFeed.lastError)
                     ? 'MM abort soft'

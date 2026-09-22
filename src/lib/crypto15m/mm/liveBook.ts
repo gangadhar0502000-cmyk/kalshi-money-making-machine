@@ -11,6 +11,12 @@ export interface LocalApiHealth {
   readOnly: boolean
   credentialsLoaded: boolean
   banner?: string
+  /** U1: universe cache age in ms (null if never succeeded). */
+  cacheAgeMs?: number | null
+  /** U1: ISO of last successful crypto15m fan-out. */
+  lastSuccessAt?: string | null
+  refreshing?: boolean
+  marketCount?: number
 }
 
 export interface LocalCrypto15mResponse {
@@ -20,6 +26,10 @@ export interface LocalCrypto15mResponse {
   errors?: string[]
   fetchedAt?: string
   banner?: string
+  /** U1 cache metadata */
+  cacheAgeMs?: number | null
+  refreshing?: boolean
+  stale?: boolean
 }
 
 export async function fetchLocalHealth(signal?: AbortSignal): Promise<LocalApiHealth | null> {

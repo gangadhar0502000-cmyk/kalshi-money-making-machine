@@ -346,7 +346,6 @@ export function hourWindowContaining(
       // find exact start by scanning minute
       let s = cand
       while (s > cand - hourMs && hourKeyFromMs(s - 60_000, timeZone) === key) s -= 60_000
-      const end = s + hourMs
       // refine end to first ms outside key
       let e = s + hourMs
       while (e > s && hourKeyFromMs(e - 1, timeZone) !== key) e -= 60_000
