@@ -1,17 +1,57 @@
 /**
- * U2.1 — Paper MM session framework (state only).
- * Start / Stop / Reset shell for later quoting engine attachment (U2.2+).
- * No fills, no quoting, no live orders.
+ * U2.1 / U2.2 — Paper MM session store.
+ * Start / Stop / Reset shell + paper P&L stats (engine attached via mmRunner).
+ * Paper-only · read-only Kalshi · never places live orders.
  */
 
 export type MmSessionStatus = 'idle' | 'running' | 'stopped'
+
+/** Fail-loud update error surfaced in the Apple-clean strip. */
+export type MmUpdateError = {
+  code: 'U2.2'
+  message: string
+  dependency: string
+}
 
 export type MmSessionState = {
   status: MmSessionStatus
   startedAt: number | null
   stoppedAt: number | null
   resetCount: number
+  /** Paper cash ($) — mirrors engine startingCash / cash. */
+  cash: number
+  /** Net YES inventory (contracts). */
+  inventory: number
+  /** Realized spread P&L after fees ($). */
+  realizedPnl: number
+  /** Mark-to-mid unrealized inventory P&L ($). */
+  unrealizedPnl: number
+  /** Cumulative fees paid this session ($). */
+  fees: number
+  /** Fill count this session. */
+  fillsCount: number
+  /** Epoch ms of last fill, or null. */
+  lastFillAt: number | null
+  /** Ticker the runner is quoting (single-book). */
+  activeTicker: string | null
+  /** Fail-loud U2.2 error (orderbook/spot/etc); null when healthy. */
+  updateError: MmUpdateError | null
 }
+
+export type MmSessionStatsPatch = Partial<
+  Pick<
+    MmSessionState,
+    | 'cash'
+    | 'inventory'
+    | 'realizedPnl'
+    | 'unrealizedPnl'
+    | 'fees'
+    | 'fillsCount'
+    | 'lastFillAt'
+    | 'activeTicker'
+    | 'updateError'
+  >
+>
 
 export type MmSessionStore = {
   getState: () => MmSessionState
@@ -19,6 +59,23 @@ export type MmSessionStore = {
   start: () => void
   stop: () => void
   reset: () => void
+  /** Merge paper stats / error from the runner without changing status. */
+  patchStats: (patch: MmSessionStatsPatch) => void
+}
+
+/** Default paper starting cash — matches STRICT_PAPER_MM_CONFIG.startingCash. */
+export const MM_SESSION_STARTING_CASH = 100
+
+const ZERO_STATS = {
+  cash: MM_SESSION_STARTING_CASH,
+  inventory: 0,
+  realizedPnl: 0,
+  unrealizedPnl: 0,
+  fees: 0,
+  fillsCount: 0,
+  lastFillAt: null as number | null,
+  activeTicker: null as string | null,
+  updateError: null as MmUpdateError | null,
 }
 
 const INITIAL: MmSessionState = {
@@ -26,6 +83,36 @@ const INITIAL: MmSessionState = {
   startedAt: null,
   stoppedAt: null,
   resetCount: 0,
+  ...ZERO_STATS,
+}
+
+function sameState(a: MmSessionState, b: MmSessionState): boolean {
+  return (
+    a.status === b.status &&
+    a.startedAt === b.startedAt &&
+    a.stoppedAt === b.stoppedAt &&
+    a.resetCount === b.resetCount &&
+    a.cash === b.cash &&
+    a.inventory === b.inventory &&
+    a.realizedPnl === b.realizedPnl &&
+    a.unrealizedPnl === b.unrealizedPnl &&
+    a.fees === b.fees &&
+    a.fillsCount === b.fillsCount &&
+    a.lastFillAt === b.lastFillAt &&
+    a.activeTicker === b.activeTicker &&
+    sameError(a.updateError, b.updateError)
+  )
+}
+
+function sameError(
+  a: MmUpdateError | null,
+  b: MmUpdateError | null,
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.code === b.code && a.message === b.message && a.dependency === b.dependency
+  )
 }
 
 /** Pure transition helpers (unit-testable without a store). */
@@ -39,6 +126,8 @@ export function transitionStart(
     status: 'running',
     startedAt: nowMs,
     stoppedAt: null,
+    // Clear prior update error on a fresh start; runner may re-set.
+    updateError: null,
   }
 }
 
@@ -55,7 +144,7 @@ export function transitionStop(
 }
 
 /**
- * Reset clears session counters / returns to idle.
+ * Reset clears session counters / P&L / errors → idle.
  * Does not wipe the market feed (feed lives outside this store).
  */
 export function transitionReset(state: MmSessionState): MmSessionState {
@@ -64,6 +153,7 @@ export function transitionReset(state: MmSessionState): MmSessionState {
     startedAt: null,
     stoppedAt: null,
     resetCount: state.resetCount + 1,
+    ...ZERO_STATS,
   }
 }
 
@@ -79,15 +169,7 @@ export function createMmSessionStore(
 
   const set = (next: MmSessionState) => {
     if (next === state) return
-    // shallow equality for no-op transitions
-    if (
-      next.status === state.status &&
-      next.startedAt === state.startedAt &&
-      next.stoppedAt === state.stoppedAt &&
-      next.resetCount === state.resetCount
-    ) {
-      return
-    }
+    if (sameState(next, state)) return
     state = next
     notify()
   }
@@ -103,6 +185,10 @@ export function createMmSessionStore(
     start: () => set(transitionStart(state)),
     stop: () => set(transitionStop(state)),
     reset: () => set(transitionReset(state)),
+    patchStats: (patch) => {
+      const next = { ...state, ...patch }
+      set(next)
+    },
   }
 }
 
@@ -128,4 +214,16 @@ export function statusPillLabel(
   if (state.status === 'stopped') return 'Stopped'
   const started = state.startedAt ?? nowMs
   return `Running · ${formatElapsed(nowMs - started)}`
+}
+
+/** Apple-clean error line: `U2.2: … — needs …` */
+export function formatUpdateError(err: MmUpdateError): string {
+  return `U2.2: ${err.message} — needs ${err.dependency}`
+}
+
+export function makeUpdateError(
+  message: string,
+  dependency: string,
+): MmUpdateError {
+  return { code: 'U2.2', message, dependency }
 }

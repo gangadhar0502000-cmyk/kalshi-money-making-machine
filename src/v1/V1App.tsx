@@ -4,7 +4,7 @@ import { getMidHistory } from '../lib/crypto15m/midHistory'
 import { normalizeSpotAsset } from '../lib/crypto15m/spot'
 import { useContinuousFeed } from './useContinuousFeed'
 import { useSpotMap } from './useSpotMap'
-import { statusPillLabel } from './mm/mmSession'
+import { formatUpdateError, statusPillLabel } from './mm/mmSession'
 import { useMmSession } from './mm/useMmSession'
 import {
   assetShortName,
@@ -102,7 +102,7 @@ export function V1App() {
           </div>
         </header>
 
-        {/* Paper MM control strip — U2.1 framework shell */}
+        {/* Paper MM control strip — U2.2 paper run + P&L */}
         <section className="kmm-mm-strip mb-6 px-4 py-3.5 sm:px-5" aria-label="Paper market making">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
@@ -123,13 +123,16 @@ export function V1App() {
                 )}
                 <span className="num">{statusPillLabel(mm, nowMs)}</span>
               </span>
+              {mm.activeTicker && (
+                <span className="kmm-chip num text-[11px]">{mm.activeTicker}</span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className="kmm-btn kmm-btn--primary"
-                disabled={mm.status === 'running'}
-                onClick={start}
+                disabled={mm.status === 'running' || !selected}
+                onClick={() => start(selected)}
               >
                 Start
               </button>
@@ -146,14 +149,81 @@ export function V1App() {
               </button>
             </div>
           </div>
-          <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
-            {mm.status === 'idle'
-              ? 'Idle · ready when you are'
-              : mm.status === 'running'
-                ? 'Session running · framework only'
-                : 'Stopped · Reset to clear session'}
-            {' · '}Quoting engine arrives in a later update
-          </p>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[12px] text-[var(--color-secondary)]">
+            <span>
+              Cash{' '}
+              <span className="num font-semibold text-[var(--color-label)]">
+                ${mm.cash.toFixed(2)}
+              </span>
+            </span>
+            <span>
+              Inv{' '}
+              <span className="num font-semibold text-[var(--color-label)]">
+                {mm.inventory > 0 ? '+' : ''}
+                {mm.inventory}
+              </span>
+            </span>
+            <span>
+              Realized{' '}
+              <span
+                className={`num font-semibold ${
+                  mm.realizedPnl >= 0
+                    ? 'text-[var(--color-profit)]'
+                    : 'text-[var(--color-danger)]'
+                }`}
+              >
+                {mm.realizedPnl >= 0 ? '+' : ''}
+                ${mm.realizedPnl.toFixed(2)}
+              </span>
+            </span>
+            <span>
+              Unrealized{' '}
+              <span
+                className={`num font-semibold ${
+                  mm.unrealizedPnl >= 0
+                    ? 'text-[var(--color-profit)]'
+                    : 'text-[var(--color-danger)]'
+                }`}
+              >
+                {mm.unrealizedPnl >= 0 ? '+' : ''}
+                ${mm.unrealizedPnl.toFixed(2)}
+              </span>
+            </span>
+            <span>
+              Fills{' '}
+              <span className="num font-semibold text-[var(--color-label)]">
+                {mm.fillsCount}
+              </span>
+            </span>
+            {mm.fees > 0 && (
+              <span>
+                Fees{' '}
+                <span className="num font-semibold text-[var(--color-label)]">
+                  ${mm.fees.toFixed(2)}
+                </span>
+              </span>
+            )}
+          </div>
+          {mm.updateError ? (
+            <p
+              className={`mt-2 text-[12px] font-medium ${
+                /orderbook|proxy/i.test(mm.updateError.dependency)
+                  ? 'text-[var(--color-danger)]'
+                  : 'text-[var(--color-warn)]'
+              }`}
+              role="alert"
+            >
+              {formatUpdateError(mm.updateError)}
+            </p>
+          ) : (
+            <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
+              {mm.status === 'idle'
+                ? 'Idle · Start quotes the focused market (paper YES book)'
+                : mm.status === 'running'
+                  ? 'Session running · paper quotes · read-only'
+                  : 'Stopped · numbers frozen · Reset clears P&L'}
+            </p>
+          )}
         </section>
 
         {/* Hero */}

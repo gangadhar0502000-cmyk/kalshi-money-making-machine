@@ -49,10 +49,19 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Out of scope for U2.1:** multi-book quoting, fills, S1–S5 engine, legacy `PaperMmPanel`. Those attach in **U2.2+**.
 - Paper-only / read-only; never places live trades.
 
+## U2.2 — Paper MM run + P&L into Start/Stop/Reset
+
+- Reuses `PaperMmEngine` (`src/lib/crypto15m/mm/engine.ts`) with **strict realism** defaults on a **single focused ticker** from the continuous feed (not full 5-book portfolio yet).
+- `mmRunner` binds Start → engine start + feed ticks (mid via `onMarketTick`; L2/spot via engine polls); Stop → clean stop (numbers freeze); Reset → `resetSession` + zero session P&L/inventory/fills/errors (feed untouched).
+- Session stats in Apple-clean strip: cash, inv, realized, unrealized, fills (+ fees when non-zero).
+- Fail-loud `updateError: { code: 'U2.2', message, dependency }` — e.g. `U2.2: orderbook failed — needs mm-proxy :8787` when L2 proxy is down; app does not crash.
+- YES-book MM only this update. Complement YES/NO / `betterBookHint` routing deferred to **U2.3**. Multi-book portfolio port deferred.
+- Paper-only / read-only; never places live trades.
+
 ## Upcoming
 
-- **U2.2** — attach paper quoting / fills engine to the Start/Stop/Reset session shell.
-- **U2** — density / keyboard nav polish if needed.
+- **U2.3** — optional betterBookHint YES/NO quote routing (if still needed after single-book YES MM).
+- **U2** — density / keyboard nav polish if needed; multi-book portfolio into the session shell.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).

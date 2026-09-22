@@ -4,14 +4,18 @@ import {
   type MmSessionState,
   type MmSessionStore,
 } from './mmSession'
+import { mmRunner, type MmRunner } from './mmRunner'
 
 /**
- * React hook over the Paper MM session store (U2.1 framework).
- * Pass an alternate store for tests; default is the V1 singleton.
+ * React hook over the Paper MM session store + U2.2 runner.
+ * Pass an alternate store/runner for tests; default is the V1 singleton.
  */
-export function useMmSession(store: MmSessionStore = mmSessionStore): {
+export function useMmSession(
+  store: MmSessionStore = mmSessionStore,
+  runner: MmRunner = mmRunner,
+): {
   state: MmSessionState
-  start: () => void
+  start: (ticker?: string | null) => void
   stop: () => void
   reset: () => void
 } {
@@ -24,8 +28,8 @@ export function useMmSession(store: MmSessionStore = mmSessionStore): {
 
   return {
     state,
-    start: store.start,
-    stop: store.stop,
-    reset: store.reset,
+    start: (ticker) => runner.start(ticker),
+    stop: () => runner.stop(),
+    reset: () => runner.reset(),
   }
 }
