@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Crypto15mMarket } from '../../types/crypto15m'
 import { formatCents, formatDollars, formatRelativeTime } from '../../lib/format'
+import { fetchCrypto15mMarkets, isAbortReason } from '../../lib/crypto15m/api'
+import { isAbortOnlyError } from '../../lib/crypto15m/labRefresh'
 import { type PaperMmConfig } from '../../lib/crypto15m/mm/config'
 import { paperMmEngine } from '../../lib/crypto15m/mm/engine'
 import { paperMmPortfolio } from '../../lib/crypto15m/mm/portfolio'
 import { formatPnlDual, isValidQuoteMid } from '../../lib/crypto15m/mm/prices'
 import { fetchLocalHealth } from '../../lib/crypto15m/mm/liveBook'
+import {
+  MM_MARKET_POLL_MS,
+  pickMmUniverse,
+  type MmFeedStatus,
+} from '../../lib/crypto15m/mm/mmMarketFeed'
 import type { MmEngineState } from '../../lib/crypto15m/mm/types'
 import type { PortfolioState } from '../../lib/crypto15m/mm/portfolio'
 import { parkStatusLabel } from '../../lib/crypto15m/mm/parkStatus'
@@ -69,18 +76,77 @@ function isUnrealisticFillRate(
 }
 
 
-export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Props) {
+export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
   const singleState = useEngineState()
   const portfolioState = usePortfolioState()
   const [draft, setDraft] = useState<PaperMmConfig>(() => ({
     ...paperMmPortfolio.getConfig(),
   }))
   const [proxyOk, setProxyOk] = useState(false)
+  /** null until first completed (non-abort) MM poll — Lab prop is fallback only then. */
+  const [mmOwnedMarkets, setMmOwnedMarkets] = useState<Crypto15mMarket[] | null>(null)
+  const [mmFeed, setMmFeed] = useState<MmFeedStatus>({ everSucceeded: false })
 
   const multiBook = draft.multiBook
   const s = singleState.snapshot
   const fills = singleState.fills
   const cancels = singleState.cancels
+
+  // MM-owned live universe — independent of Lab markets prop / Lab abort banner.
+  useEffect(() => {
+    let alive = true
+    let ac: AbortController | null = null
+    const poll = async () => {
+      ac?.abort()
+      ac = new AbortController()
+      const signal = ac.signal
+      try {
+        const result = await fetchCrypto15mMarkets(signal)
+        if (!alive || signal.aborted) return
+        if (result.markets.length > 0) {
+          setMmOwnedMarkets(result.markets)
+          setMmFeed({
+            everSucceeded: true,
+            lastOkAt: result.fetchedAt,
+            lastError: undefined,
+          })
+          return
+        }
+        if (isAbortOnlyError(result.error)) {
+          setMmFeed((prev) => ({
+            ...prev,
+            lastError: result.error ?? 'Transient abort (retrying)',
+          }))
+          return
+        }
+        // Completed empty / loud failure — own the empty set (stop using Lab fallback).
+        setMmOwnedMarkets(result.markets)
+        setMmFeed({
+          everSucceeded: true,
+          lastOkAt: result.fetchedAt,
+          lastError: result.error,
+        })
+      } catch (e) {
+        if (!alive || isAbortReason(e, signal)) return
+        setMmFeed((prev) => ({
+          ...prev,
+          lastError: e instanceof Error ? e.message : String(e),
+        }))
+      }
+    }
+    void poll()
+    const id = window.setInterval(() => void poll(), MM_MARKET_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+      ac?.abort()
+    }
+  }, [])
+
+  const mmMarkets = useMemo(
+    () => pickMmUniverse(mmOwnedMarkets, markets),
+    [mmOwnedMarkets, markets],
+  )
 
   useEffect(() => {
     let alive = true
@@ -97,8 +163,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
   }, [])
 
   const selected = useMemo(
-    () => markets.find((m) => m.ticker === selectedTicker) ?? null,
-    [markets, selectedTicker],
+    () => mmMarkets.find((m) => m.ticker === selectedTicker) ?? null,
+    [mmMarkets, selectedTicker],
   )
 
   // Single-mode market sync
@@ -109,31 +175,31 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
 
   useEffect(() => {
     if (multiBook) return
-    if (markets.length === 0) return
-    const ticker = paperMmEngine.syncMarketUniverse(markets)
+    if (mmMarkets.length === 0) return
+    const ticker = paperMmEngine.syncMarketUniverse(mmMarkets)
     if (ticker && ticker !== selectedTicker) {
       onSelect(ticker)
     }
-  }, [markets, selectedTicker, onSelect, multiBook])
+  }, [mmMarkets, selectedTicker, onSelect, multiBook])
 
   useEffect(() => {
     if (multiBook) return
     if (selected) paperMmEngine.onMarketTick(selected)
   }, [selected, selected?.midYes, selected?.yesBid, selected?.yesAsk, multiBook])
 
-  // Multi-mode universe sync — rolls must never stop; restore auto-resumes if wasRunning
+  // Multi-mode universe sync — MM-owned list; rolls must never stop
   useEffect(() => {
     if (!multiBook) return
-    paperMmPortfolio.syncMarketUniverse(markets)
+    paperMmPortfolio.syncMarketUniverse(mmMarkets)
     paperMmPortfolio.tryAutoResumeAfterSync()
-  }, [markets, multiBook])
+  }, [mmMarkets, multiBook])
 
   // On mount: if persistence restored wasRunning before markets arrived, resume once synced
   useEffect(() => {
     if (!multiBook) return
-    if (markets.length === 0) return
+    if (mmMarkets.length === 0) return
     paperMmPortfolio.tryAutoResumeAfterSync()
-  }, [multiBook, markets.length])
+  }, [multiBook, mmMarkets.length])
 
   // Keep draft in sync when engine/portfolio applies presets
   useEffect(() => {
@@ -163,7 +229,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     if (on) {
       paperMmEngine.stop()
       paperMmPortfolio.setConfig({ ...draft, multiBook: true })
-      paperMmPortfolio.syncMarketUniverse(markets)
+      paperMmPortfolio.syncMarketUniverse(mmMarkets)
     } else {
       paperMmPortfolio.stop()
       paperMmEngine.setConfig({ ...draft, multiBook: false })
@@ -319,10 +385,27 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         </p>
       </div>
 
-      {source === 'live' && markets.length === 0 && (
+      {mmMarkets.length === 0 &&
+        mmFeed.everSucceeded &&
+        mmFeed.lastError &&
+        !isAbortOnlyError(mmFeed.lastError) && (
         <div className="rounded-xl border-2 border-rose-500/70 bg-rose-950/45 px-4 py-3 text-sm font-semibold text-rose-100">
           🛑 LIVE-ONLY FAILURE — no markets. Demo fixtures removed. Start paper MM only when live
           Kalshi (proxy or public) returns open crypto 15m contracts.
+          <p className="mt-1 text-xs font-normal text-rose-200/80" title={mmFeed.lastError}>
+            {mmFeed.lastError}
+          </p>
+        </div>
+      )}
+      {mmMarkets.length === 0 && isAbortOnlyError(mmFeed.lastError) && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100/90">
+          MM feed transient abort — retrying (not LIVE-ONLY). Lab empty/abort does not block this
+          panel while `/local-api/crypto15m` is healthy.
+          {mmFeed.lastError ? (
+            <p className="mt-1 text-xs font-normal text-amber-200/70" title={mmFeed.lastError}>
+              {mmFeed.lastError}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -358,15 +441,43 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             )}
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                source === 'live' && markets.length > 0
+                mmMarkets.length > 0
                   ? 'bg-emerald-950 text-emerald-300'
-                  : 'bg-rose-950 text-rose-200'
+                  : mmFeed.everSucceeded &&
+                      mmFeed.lastError &&
+                      !isAbortOnlyError(mmFeed.lastError)
+                    ? 'bg-rose-950 text-rose-200'
+                    : 'bg-slate-800 text-slate-300'
               }`}
-              title="Market universe source (proxy → public; demo removed)"
+              title="MM-owned market universe (proxy → public; independent of Lab banner)"
             >
-              {source === 'live' && markets.length > 0
-                ? 'LIVE markets (Kalshi)'
-                : 'LIVE-ONLY FAILURE'}
+              {mmMarkets.length > 0
+                ? mmFeed.everSucceeded
+                  ? 'LIVE markets (MM feed)'
+                  : 'LIVE markets (Lab fallback)'
+                : mmFeed.everSucceeded &&
+                    mmFeed.lastError &&
+                    !isAbortOnlyError(mmFeed.lastError)
+                  ? 'LIVE-ONLY FAILURE'
+                  : 'MM feed…'}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                mmFeed.lastOkAt
+                  ? 'bg-slate-900 text-sky-300'
+                  : isAbortOnlyError(mmFeed.lastError)
+                    ? 'bg-amber-950 text-amber-200'
+                    : 'bg-slate-800 text-slate-400'
+              }`}
+              title={mmFeed.lastError ?? 'MM self-feed status'}
+            >
+              {mmFeed.lastOkAt
+                ? `MM ok ${formatRelativeTime(mmFeed.lastOkAt)}`
+                : mmFeed.lastError
+                  ? isAbortOnlyError(mmFeed.lastError)
+                    ? 'MM abort soft'
+                    : 'MM error'
+                  : 'MM polling'}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -481,8 +592,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                 onChange={(e) => onSelect(e.target.value)}
                 disabled={s.running}
               >
-                {markets.length === 0 && <option value="">No markets</option>}
-                {markets.map((m) => (
+                {mmMarkets.length === 0 && <option value="">No markets</option>}
+                {mmMarkets.map((m) => (
                   <option key={m.ticker} value={m.ticker}>
                     {m.asset} · {m.ticker} · mid {(m.midYes * 100).toFixed(0)}¢ ·{' '}
                     {m.minutesRemaining.toFixed(1)}m left
@@ -499,7 +610,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                 onClick={() => {
                   if (multiBook) {
                     paperMmPortfolio.setConfig(draft)
-                    paperMmPortfolio.syncMarketUniverse(markets)
+                    paperMmPortfolio.syncMarketUniverse(mmMarkets)
                     paperMmPortfolio.start()
                   } else {
                     paperMmEngine.start()

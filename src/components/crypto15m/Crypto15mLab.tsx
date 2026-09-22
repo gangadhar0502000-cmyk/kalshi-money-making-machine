@@ -386,6 +386,7 @@ export function Crypto15mLab() {
       </div>
 
       <div className={tab === 'mm' ? '' : 'hidden'} aria-hidden={tab !== 'mm'}>
+        {/* Paper MM polls its own market universe (~8s); Lab empty/abort must not block quoting. */}
         <PaperMmPanel
           markets={markets}
           selectedTicker={selectedTicker}

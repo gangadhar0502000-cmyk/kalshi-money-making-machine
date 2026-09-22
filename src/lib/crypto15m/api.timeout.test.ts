@@ -22,7 +22,7 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     vi.restoreAllMocks()
   })
 
-  it('slow/aborted proxy + fast public → live (not demo)', async () => {
+  it('slow/aborted proxy + health down + fast public → live (not demo)', async () => {
     const { fetchCrypto15mMarkets } = await import('./api')
     const publicM = liveMarket('KXBTC15M-PUBLIC-FAST')
 
@@ -31,7 +31,7 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input)
         if (url.includes('/local-api/crypto15m')) {
-          // Hang until the proxy AbortSignal fires — must NOT prevent public fallback.
+          // Hang until the proxy AbortSignal fires — health down allows public fallback.
           await new Promise<never>((_resolve, reject) => {
             const s = init?.signal
             const fail = () => {
@@ -42,6 +42,9 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
             if (s?.aborted) return fail()
             s?.addEventListener('abort', fail, { once: true })
           })
+        }
+        if (url.includes('/local-api/health')) {
+          return { ok: false, status: 502, json: async () => ({}) } as Response
         }
         if (url.includes('/markets') && url.includes('series_ticker=')) {
           return {
@@ -56,11 +59,95 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     const result = await fetchCrypto15mMarkets(undefined, ['KXBTC15M'], {
       proxyMs: 40,
       publicMs: 2_000,
+      healthMs: 200,
     })
 
     expect(result.source).toBe('live')
     expect(result.markets.some((m) => m.ticker === 'KXBTC15M-PUBLIC-FAST')).toBe(true)
     expect(result.error ?? '').toMatch(/proxy:\s*aborted/i)
+  })
+
+  it('proxy abort + health ok → soft error, no public fan-out', async () => {
+    const { fetchCrypto15mMarkets } = await import('./api')
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/local-api/crypto15m')) {
+        await new Promise<never>((_resolve, reject) => {
+          const s = init?.signal
+          const fail = () => {
+            const err = new Error('aborted')
+            err.name = 'AbortError'
+            reject(err)
+          }
+          if (s?.aborted) return fail()
+          s?.addEventListener('abort', fail, { once: true })
+        })
+      }
+      if (url.includes('/local-api/health')) {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, readOnly: true, credentialsLoaded: true }),
+        } as Response
+      }
+      // Public must NOT be called
+      return { ok: false, status: 404, json: async () => ({}) } as Response
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const result = await fetchCrypto15mMarkets(undefined, ['KXBTC15M', 'KXETH15M', 'KXSOL15M'], {
+      proxyMs: 30,
+      publicMs: 2_000,
+      healthMs: 200,
+    })
+
+    expect(result.source).toBe('live')
+    expect(result.markets).toEqual([])
+    expect(result.error ?? '').toMatch(/Transient abort/i)
+    expect(result.error ?? '').not.toMatch(/LIVE-ONLY FAILURE/i)
+    const publicCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const u = String(input)
+      return u.includes('/markets') || u.includes('/api/kalshi')
+    })
+    expect(publicCalls).toHaveLength(0)
+    expect(
+      fetchSpy.mock.calls.some(([input]) => String(input).includes('/local-api/health')),
+    ).toBe(true)
+  })
+
+  it('caller abort mid-proxy → quiet empty, no public fan-out', async () => {
+    const { fetchCrypto15mMarkets } = await import('./api')
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/local-api/crypto15m')) {
+        await new Promise<never>((_resolve, reject) => {
+          const s = init?.signal
+          const fail = () => {
+            const err = new Error('The operation was aborted')
+            err.name = 'AbortError'
+            reject(err)
+          }
+          if (s?.aborted) return fail()
+          s?.addEventListener('abort', fail, { once: true })
+        })
+      }
+      return { ok: true, json: async () => ({ markets: [] }) } as Response
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const ac = new AbortController()
+    const pending = fetchCrypto15mMarkets(ac.signal, ['KXBTC15M', 'KXETH15M'], {
+      proxyMs: 5_000,
+      publicMs: 5_000,
+    })
+    ac.abort()
+    const result = await pending
+
+    expect(result.error).toBeUndefined()
+    expect(result.markets).toEqual([])
+    const publicCalls = fetchSpy.mock.calls.filter(([input]) =>
+      String(input).includes('/markets'),
+    )
+    expect(publicCalls).toHaveLength(0)
   })
 
   it('proxy + public fail → LIVE-ONLY empty (not demo)', async () => {
@@ -91,7 +178,7 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     expect(result.error).toMatch(/proxy:\s*HTTP 502/i)
   })
 
-  it('proxy+public abort-only → soft transient (NOT LIVE-ONLY, no console.error)', async () => {
+  it('proxy abort + health ok → soft transient without public (NOT LIVE-ONLY)', async () => {
     const { fetchCrypto15mMarkets } = await import('./api')
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -111,7 +198,13 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
             s?.addEventListener('abort', fail, { once: true })
           })
         }
-        // Public also times out / aborts — abort-only path, not HTTP failure
+        if (url.includes('/local-api/health')) {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, readOnly: true, credentialsLoaded: true }),
+          } as Response
+        }
+        // Should not reach public
         await new Promise<never>((_resolve, reject) => {
           const s = init?.signal
           const fail = () => {
@@ -128,6 +221,7 @@ describe('fetchCrypto15mMarkets · timeout isolation', () => {
     const result = await fetchCrypto15mMarkets(undefined, ['KXBTC15M'], {
       proxyMs: 30,
       publicMs: 30,
+      healthMs: 200,
     })
     expect(result.source).toBe('live')
     expect(result.markets).toEqual([])
