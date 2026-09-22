@@ -2,17 +2,24 @@
 
 Frozen pre-v1 baseline: git tag `legacy-v0`.
 
-## U1 — continuous feed spine (this release)
+## U1 — continuous feed spine
 
 - **mm-proxy** in-memory cache for `/local-api/crypto15m` (TTL ~2.5s): serve fresh cache immediately; background refresh when stale; never wipe last-good open set on transient refresh failure (`stale` / `cacheAgeMs` / `refreshing`).
-- **Continuous feed client** polls proxy every **1s** (proxy-only on the MM path). Shared so Lab + Paper MM stay aligned.
+- **Continuous feed client** polls proxy every **1s** (proxy-only on the MM path). Shared so Lab + Paper MM stay aligned when legacy is open.
 - Honest UI freshness from client `lastSuccessAt` (updates on every successful poll, including cache hits): amber >15s, red >60s.
+
+## U1b — clean feed-only UI (this release)
+
+- **Brand-new** default UI (`src/v1/V1App.tsx`): status row (proxy health, market count, **Feed ok Xs ago**, stale/refreshing, soft last error) + open crypto 15m table (asset/ticker, minutes left, yes bid/ask, mid, optional spot).
+- Default `src/App.tsx` mounts **only** V1App — no Discover/test/kill Lab, Edge Finder, Paper MM panel, honesty walls, or playbook banners.
+- Old Crypto 15m Lab + Edge Finder demoted to recovery via `?legacy=1` or `#legacy` (`src/v1/LegacyApp.tsx`). Not primary tabs.
+- Feed spine unchanged: `continuousFeed` + mm-proxy cache remain infrastructure.
 
 ## Upcoming
 
-- **U2** — UI redesign / layout polish (not in U1).
+- **U2** — UI polish / layout (beyond the minimal U1b table).
 - **U3** — feed + engine observability (richer health, divergence alarms).
-- **U4** — Lab/MM shared book path hardening.
+- **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
 
 Paper-only · read-only Kalshi · no live order placement.

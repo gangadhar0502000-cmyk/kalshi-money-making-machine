@@ -1,52 +1,17 @@
-import { useState } from 'react'
-import { Crypto15mLab } from './components/crypto15m/Crypto15mLab'
-import { EdgeFinderApp } from './components/EdgeFinderApp'
+import { useMemo } from 'react'
+import { V1App } from './v1/V1App'
+import { LegacyApp } from './v1/LegacyApp'
 
-type AppMode = 'crypto15m' | 'edge'
+function wantsLegacy(): boolean {
+  if (typeof window === 'undefined') return false
+  const q = new URLSearchParams(window.location.search)
+  if (q.get('legacy') === '1') return true
+  if (window.location.hash.replace(/^#/, '') === 'legacy') return true
+  return false
+}
 
+/** Default: clean v1 feed. Legacy Lab only via ?legacy=1 or #legacy. */
 export default function App() {
-  const [mode, setMode] = useState<AppMode>('crypto15m')
-
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <nav className="mb-6 flex flex-wrap items-center gap-2 border-b border-slate-800 pb-4">
-        <button
-          type="button"
-          className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-            mode === 'crypto15m'
-              ? 'bg-amber-500 text-slate-950'
-              : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-500'
-          }`}
-          onClick={() => setMode('crypto15m')}
-        >
-          Crypto 15m Lab
-        </button>
-        <button
-          type="button"
-          className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-            mode === 'edge'
-              ? 'bg-emerald-500 text-slate-950'
-              : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-500'
-          }`}
-          onClick={() => setMode('edge')}
-        >
-          Edge Finder
-        </button>
-        <span className="ml-auto text-[11px] text-slate-500">
-          Research only · no API keys · no guaranteed profit
-        </span>
-      </nav>
-
-      {mode === 'crypto15m' ? (
-        <Crypto15mLab />
-      ) : (
-        <EdgeFinderApp />
-      )}
-
-      <footer className="mt-10 border-t border-slate-800/80 pt-6 text-center text-xs text-slate-500">
-        Kalshi Crypto 15m Research Lab · rule discovery, not signals ·{' '}
-        <code className="text-slate-400">npm run dev</code>
-      </footer>
-    </div>
-  )
+  const legacy = useMemo(() => wantsLegacy(), [])
+  return legacy ? <LegacyApp /> : <V1App />
 }
