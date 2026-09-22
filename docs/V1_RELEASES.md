@@ -25,6 +25,12 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Continuous feed already normalizes + `recordMid` on each poll so history fills in the focus sparkline.
 - Pure helpers: `windowProgress`, `fmtCountdownMmSs`, `sparklinePolylinePoints`, `midDeltaCents`.
 
+## U1g — YES+NO books + better-book hint
+
+- Feed hero and cards show **YES and NO** bid/ask/mid (complements: YES+NO≈$1 — **same economic outcome**, different queues).
+- `midNo` / `spreadCentsYes` / `spreadCentsNo` / `betterBookHint` (tighter touch spread → YES|NO|TIE). True queue-ahead needs L2 sizes on both books (future).
+- UI refine: keep void + profit green + gold + KMM ops tone; tone down heavy scanlines / blink / `//` clutter.
+
 ## Upcoming
 
 - **U2** — density / keyboard nav polish if needed.

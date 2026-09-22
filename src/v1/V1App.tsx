@@ -6,12 +6,16 @@ import { useContinuousFeed } from './useContinuousFeed'
 import { useSpotMap } from './useSpotMap'
 import {
   assetShortName,
+  betterBookHint,
   deriveV1FeedStatus,
   fmtMinutesLeft,
   fmtPrice,
   fmtSpot,
   fmtSpreadCents,
+  midNo,
   sparklinePolylinePoints,
+  spreadCentsNo,
+  spreadCentsYes,
   timeUrgencyClass,
   windowProgress,
 } from './feedStatus'
@@ -19,6 +23,7 @@ import {
 /**
  * KMM v1 — Money Machine ops console.
  * Unique hacker / print-money aesthetic. Feed only. Paper / read-only.
+ * YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
   const snap = useContinuousFeed()
@@ -77,7 +82,7 @@ export function V1App() {
                   <span className="kmm-chip">v1 · PAPER</span>
                 </div>
                 <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-dim)]">
-                  ops console // continuous feed // read-only // never live
+                  ops console · continuous feed · read-only · never live
                 </p>
               </div>
             </div>
@@ -102,7 +107,7 @@ export function V1App() {
         </header>
 
         {/* HERO TARGET */}
-        <section className="kmm-hero kmm-scan kmm-corners mb-4 p-4 sm:p-6">
+        <section className="kmm-hero kmm-corners mb-4 p-4 sm:p-6">
           {!status.everSucceeded ? (
             <BootBlock label="BOOTING FEED…" sub="local proxy → kalshi L2 (read-only)" />
           ) : !active ? (
@@ -124,10 +129,10 @@ export function V1App() {
         <section className="mb-4 flex-1">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-dim)]">
-              // open_crypto_15m_scan
+              open crypto 15m
             </p>
             <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-gold)]">
-              select target · hunt edge later
+              YES / NO books · same outcome · different queues
             </p>
           </div>
 
@@ -141,6 +146,8 @@ export function V1App() {
                 const on = m.ticker === selected
                 const canon = normalizeSpotAsset(m.asset)
                 const spot = canon ? spots[canon] ?? null : null
+                const hint = betterBookHint(m)
+                const noMid = midNo(m)
                 return (
                   <button
                     key={m.ticker}
@@ -158,18 +165,43 @@ export function V1App() {
                         {fmtMinutesLeft(m.minutesRemaining)}
                       </span>
                     </div>
-                    <div className="font-display text-[11px] text-[var(--color-dim)]">
-                      {assetShortName(m.asset)}
-                    </div>
-                    <div className="mt-1 flex items-end justify-between">
-                      <div className="num text-2xl font-bold leading-none text-[var(--color-profit)] sm:text-3xl">
-                        {Math.round(m.midYes * 100)}
-                        <span className="text-sm text-[var(--color-dim)]">¢</span>
+                    <div className="flex items-center justify-between gap-1">
+                      <div className="font-display text-[11px] text-[var(--color-dim)]">
+                        {assetShortName(m.asset)}
                       </div>
-                      <HackArc pct={m.midYes} />
+                      {hint !== 'TIE' && (
+                        <span
+                          className="border border-[rgba(255,214,10,0.35)] px-1 py-px text-[8px] font-bold uppercase tracking-wider text-[var(--color-gold)]"
+                          title="Tighter touch spread (proxy until L2 sizes)"
+                        >
+                          {hint}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-[8px] uppercase tracking-wider text-[var(--color-dim)]">
+                          YES
+                        </div>
+                        <div className="num text-xl font-bold leading-none text-[var(--color-profit)] sm:text-2xl">
+                          {Math.round(m.midYes * 100)}
+                          <span className="text-xs text-[var(--color-dim)]">¢</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[8px] uppercase tracking-wider text-[var(--color-dim)]">
+                          NO
+                        </div>
+                        <div className="num text-xl font-bold leading-none text-[var(--color-gold)] sm:text-2xl">
+                          {Math.round(noMid * 100)}
+                          <span className="text-xs text-[var(--color-dim)]">¢</span>
+                        </div>
+                      </div>
                     </div>
                     <div className="num mt-2 text-[10px] text-[var(--color-dim)]">
-                      {fmtPrice(m.yesBid)}/{fmtPrice(m.yesAsk)}
+                      Y {fmtPrice(m.yesBid)}/{fmtPrice(m.yesAsk)}
+                      {' · '}
+                      N {fmtPrice(m.noBid)}/{fmtPrice(m.noAsk)}
                       {spot != null ? ` · ${fmtSpot(spot)}` : ''}
                     </div>
                   </button>
@@ -180,9 +212,9 @@ export function V1App() {
         </section>
 
         <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-line)] pt-3 text-[10px] uppercase tracking-[0.12em] text-[var(--color-dim)]">
-          <span>kmm // print_money_mode=paper // live_orders=off</span>
+          <span>kmm · paper mode · live orders off</span>
           <a href="?legacy=1" className="opacity-30 hover:opacity-70">
-            legacy_lab
+            legacy lab
           </a>
         </footer>
       </div>
@@ -194,7 +226,7 @@ function BootBlock({ label, sub }: { label: string; sub: string }) {
   return (
     <div className="flex flex-col items-start gap-2 py-10 sm:py-14">
       <p className="font-display text-xl font-bold tracking-tight text-[var(--color-profit)] sm:text-2xl">
-        &gt; {label}
+        {label}
       </p>
       <p className="text-xs uppercase tracking-[0.14em] text-[var(--color-dim)]">{sub}</p>
     </div>
@@ -214,13 +246,18 @@ function TargetHero({
   const mids = getMidHistory(market.ticker).map((s) => s.mid)
   const spark = sparklinePolylinePoints(mids, 360, 80)
   const progress = windowProgress(market.minutesRemaining, 15)
-  const pct = Math.round(market.midYes * 100)
+  const yesPct = Math.round(market.midYes * 100)
+  const noMid = midNo(market)
+  const noPct = Math.round(noMid * 100)
+  const hint = betterBookHint(market)
+  const yesSpr = spreadCentsYes(market)
+  const noSpr = spreadCentsNo(market)
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-stretch">
       <div>
         <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-gold)]">
-          // active_target
+          active target
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="border border-[var(--color-profit)] bg-[rgba(184,255,60,0.1)] px-2 py-0.5 text-xs font-bold text-[var(--color-profit)]">
@@ -230,33 +267,50 @@ function TargetHero({
             {assetShortName(market.asset)}
           </span>
           <span className="num text-[10px] text-[var(--color-dim)]">{market.ticker}</span>
+          <span
+            className="border border-[rgba(255,214,10,0.4)] bg-[rgba(255,214,10,0.08)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-gold)]"
+            title="Tighter touch spread ≈ better book until L2 sizes on both sides"
+          >
+            better book: {hint}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-end gap-5">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-dim)]">
-              yes_mid
-            </div>
-            <div className="num font-display text-6xl font-bold leading-none tracking-tight text-[var(--color-profit)] sm:text-7xl">
-              {pct}
-              <span className="text-2xl text-[var(--color-gold)]">¢</span>
-            </div>
-          </div>
-          <HackRing pct={market.midYes} />
-        </div>
-
-        <div className="mt-5 grid grid-cols-3 gap-2 sm:max-w-lg">
-          <Cell k="bid" v={fmtPrice(market.yesBid)} />
-          <Cell k="ask" v={fmtPrice(market.yesAsk)} />
-          <Cell
-            k="spr"
-            v={fmtSpreadCents(market.yesBid, market.yesAsk, market.spreadCents)}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <BookColumn
+            side="YES"
+            midCents={yesPct}
+            bid={market.yesBid}
+            ask={market.yesAsk}
+            spreadLabel={
+              Number.isFinite(yesSpr)
+                ? fmtSpreadCents(market.yesBid, market.yesAsk, yesSpr)
+                : '—'
+            }
+            accent="profit"
+            better={hint === 'YES'}
+          />
+          <BookColumn
+            side="NO"
+            midCents={noPct}
+            bid={market.noBid}
+            ask={market.noAsk}
+            spreadLabel={
+              Number.isFinite(noSpr)
+                ? fmtSpreadCents(market.noBid, market.noAsk, noSpr)
+                : '—'
+            }
+            accent="gold"
+            better={hint === 'NO'}
           />
         </div>
 
+        <p className="mt-3 text-[10px] uppercase tracking-[0.12em] text-[var(--color-dim)]">
+          YES + NO ≈ $1 · same economic outcome · less queue ahead → more fills
+        </p>
+
         <div className="mt-4">
           <div className="mb-1 flex justify-between text-[10px] uppercase tracking-wider text-[var(--color-dim)]">
-            <span>window_burn</span>
+            <span>window</span>
             <span className={`num ${timeUrgencyClass(market.minutesRemaining)}`}>
               {fmtMinutesLeft(market.minutesRemaining)} left
             </span>
@@ -274,14 +328,14 @@ function TargetHero({
 
         {spot != null && (
           <p className="num mt-3 text-[11px] text-[var(--color-gold)]">
-            spot_ref {fmtSpot(spot)}
+            spot {fmtSpot(spot)}
           </p>
         )}
       </div>
 
       <div className="kmm-frame flex flex-col p-3 sm:p-4">
         <div className="mb-2 flex justify-between text-[10px] uppercase tracking-[0.14em] text-[var(--color-dim)]">
-          <span>mid_trace</span>
+          <span>YES mid trace</span>
           <span className="num">{mids.length} samples</span>
         </div>
         {spark ? (
@@ -308,9 +362,59 @@ function TargetHero({
           </div>
         )}
         <p className="mt-auto pt-2 text-[10px] leading-relaxed text-[var(--color-dim)]">
-          Paper surveillance only. Edge rules / MM print layer lands in later v1 updates — this
-          feed is the spine.
+          Paper surveillance only. Complements share payoff; pick the thinner queue for fills.
+          Edge / MM print layer lands later — this feed is the spine.
         </p>
+      </div>
+    </div>
+  )
+}
+
+function BookColumn({
+  side,
+  midCents,
+  bid,
+  ask,
+  spreadLabel,
+  accent,
+  better,
+}: {
+  side: 'YES' | 'NO'
+  midCents: number
+  bid: number
+  ask: number
+  spreadLabel: string
+  accent: 'profit' | 'gold'
+  better: boolean
+}) {
+  const midColor =
+    accent === 'profit' ? 'text-[var(--color-profit)]' : 'text-[var(--color-gold)]'
+  const border = better
+    ? accent === 'profit'
+      ? 'border-[var(--color-profit)]'
+      : 'border-[var(--color-gold)]'
+    : 'border-[var(--color-line)]'
+
+  return (
+    <div className={`border ${border} bg-black/30 p-3`}>
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-dim)]">
+          {side} mid
+        </span>
+        {better && (
+          <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--color-gold)]">
+            tighter
+          </span>
+        )}
+      </div>
+      <div className={`num font-display text-5xl font-bold leading-none tracking-tight ${midColor} sm:text-6xl`}>
+        {midCents}
+        <span className="text-xl text-[var(--color-dim)]">¢</span>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        <Cell k="bid" v={fmtPrice(bid)} />
+        <Cell k="ask" v={fmtPrice(ask)} />
+        <Cell k="spr" v={spreadLabel} />
       </div>
     </div>
   )
@@ -322,62 +426,6 @@ function Cell({ k, v }: { k: string; v: string }) {
       <div className="text-[9px] uppercase tracking-[0.14em] text-[var(--color-dim)]">{k}</div>
       <div className="num text-sm font-semibold text-[var(--color-ink)]">{v}</div>
     </div>
-  )
-}
-
-function HackRing({ pct }: { pct: number }) {
-  const p = Math.min(1, Math.max(0, pct))
-  const r = 48
-  const c = 2 * Math.PI * r
-  const dash = c * p
-  return (
-    <svg width="118" height="118" viewBox="0 0 118 118" aria-hidden>
-      <circle cx="59" cy="59" r={r} fill="none" stroke="rgba(184,255,60,0.12)" strokeWidth="8" />
-      <circle
-        cx="59"
-        cy="59"
-        r={r}
-        fill="none"
-        stroke="var(--color-profit)"
-        strokeWidth="8"
-        strokeLinecap="square"
-        strokeDasharray={`${dash} ${c - dash}`}
-        transform="rotate(-90 59 59)"
-      />
-      <text
-        x="59"
-        y="64"
-        textAnchor="middle"
-        fill="var(--color-gold)"
-        style={{ fontSize: '16px', fontFamily: 'IBM Plex Mono', fontWeight: 700 }}
-      >
-        {Math.round(p * 100)}%
-      </text>
-    </svg>
-  )
-}
-
-function HackArc({ pct }: { pct: number }) {
-  const p = Math.min(1, Math.max(0, pct))
-  const size = 40
-  const r = size / 2 - 3
-  const c = 2 * Math.PI * r
-  const mid = size / 2
-  return (
-    <svg width={size} height={size} aria-hidden>
-      <circle cx={mid} cy={mid} r={r} fill="none" stroke="rgba(184,255,60,0.12)" strokeWidth="3" />
-      <circle
-        cx={mid}
-        cy={mid}
-        r={r}
-        fill="none"
-        stroke="var(--color-profit)"
-        strokeWidth="3"
-        strokeLinecap="square"
-        strokeDasharray={`${c * p} ${c * (1 - p)}`}
-        transform={`rotate(-90 ${mid} ${mid})`}
-      />
-    </svg>
   )
 }
 

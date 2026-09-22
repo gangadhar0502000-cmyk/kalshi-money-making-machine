@@ -17,6 +17,10 @@ import {
   sparklinePolylinePoints,
   midDeltaCents,
   fmtDeltaCents,
+  midNo,
+  spreadCentsYes,
+  spreadCentsNo,
+  betterBookHint,
 } from './feedStatus'
 import type { ContinuousFeedSnapshot } from '../lib/crypto15m/mm/continuousFeed'
 import type { Crypto15mMarket } from '../types/crypto15m'
@@ -133,5 +137,70 @@ describe('v1 feedStatus', () => {
     expect(fmtDeltaCents(5)).toBe('+5¢')
     expect(fmtDeltaCents(-3)).toBe('-3¢')
     expect(fmtDeltaCents(null)).toBe('')
+  })
+})
+
+
+describe('YES/NO book helpers', () => {
+  const base = {
+    yesBid: 0.4,
+    yesAsk: 0.45,
+    noBid: 0.54,
+    noAsk: 0.6,
+    midYes: 0.425,
+    spreadCents: 5,
+  } as Crypto15mMarket
+
+  it('midNo from NO touch or complement of midYes', () => {
+    expect(midNo(base)).toBeCloseTo(0.57, 5)
+    expect(midNo({ noBid: 0, noAsk: 0, midYes: 0.4 } as Crypto15mMarket)).toBeCloseTo(0.6, 5)
+    expect(midNo({ noBid: 0.55, noAsk: 0, midYes: 0.4 } as Crypto15mMarket)).toBeCloseTo(0.55, 5)
+  })
+
+  it('spreadCentsYes / spreadCentsNo', () => {
+    expect(spreadCentsYes(base)).toBe(5)
+    expect(spreadCentsNo(base)).toBeCloseTo(6, 5)
+    expect(spreadCentsYes({ yesBid: 0, yesAsk: 0, spreadCents: 99 } as Crypto15mMarket)).toBe(
+      Number.POSITIVE_INFINITY,
+    )
+    expect(spreadCentsNo({ noBid: 0, noAsk: 0 } as Crypto15mMarket)).toBe(
+      Number.POSITIVE_INFINITY,
+    )
+  })
+
+  it('betterBookHint picks tighter touch spread', () => {
+    // YES 5¢ vs NO 6¢ → YES
+    expect(betterBookHint(base)).toBe('YES')
+    // NO tighter
+    expect(
+      betterBookHint({
+        ...base,
+        yesBid: 0.4,
+        yesAsk: 0.5,
+        spreadCents: 10,
+        noBid: 0.48,
+        noAsk: 0.5,
+      }),
+    ).toBe('NO')
+    // equal spreads → TIE
+    expect(
+      betterBookHint({
+        yesBid: 0.4,
+        yesAsk: 0.45,
+        spreadCents: 5,
+        noBid: 0.55,
+        noAsk: 0.6,
+      } as Crypto15mMarket),
+    ).toBe('TIE')
+    // only YES book → YES
+    expect(
+      betterBookHint({
+        yesBid: 0.4,
+        yesAsk: 0.45,
+        spreadCents: 5,
+        noBid: 0,
+        noAsk: 0,
+      } as Crypto15mMarket),
+    ).toBe('YES')
   })
 })
