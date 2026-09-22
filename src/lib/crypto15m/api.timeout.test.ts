@@ -213,18 +213,22 @@ describe('Lab live-only refresh', () => {
     ).toBe('keep-last')
   })
 
-  it('settled-only keep-last → apply empty (do not glue dead books)', () => {
+  it('settled-only non-abort empty → apply empty (do not glue dead books)', () => {
     expect(
       shouldApplyLabRefresh({
         prevSource: 'live',
-        next: { source: 'live', markets: [] },
+        next: {
+          source: 'live',
+          markets: [],
+          error: 'LIVE-ONLY FAILURE: proxy: HTTP 502 | public: network down',
+        },
         lastMarketsLen: 14,
         lastOpenCount: 0,
       }),
     ).toBe('apply')
   })
 
-  it('settled-only abort-only empty → apply (not keep-last)', () => {
+  it('settled-only abort-only empty → keep-last (never apply empty)', () => {
     expect(
       shouldApplyLabRefresh({
         prevSource: 'live',
@@ -236,7 +240,22 @@ describe('Lab live-only refresh', () => {
         lastMarketsLen: 14,
         lastOpenCount: 0,
       }),
-    ).toBe('apply')
+    ).toBe('keep-last')
+  })
+
+  it('cold abort-only empty → ignore (len 0)', () => {
+    expect(
+      shouldApplyLabRefresh({
+        prevSource: null,
+        next: {
+          source: 'live',
+          markets: [],
+          error: 'Transient abort (retrying): proxy: aborted',
+        },
+        lastMarketsLen: 0,
+        lastOpenCount: 0,
+      }),
+    ).toBe('ignore')
   })
 
   it('open markets still keep-last on abort-only empty', () => {

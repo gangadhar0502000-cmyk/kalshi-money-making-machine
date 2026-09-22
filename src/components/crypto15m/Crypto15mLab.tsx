@@ -288,16 +288,18 @@ export function Crypto15mLab() {
           className={`rounded-full px-2 py-0.5 font-semibold ${
             source === 'live' && markets.length > 0
               ? 'bg-emerald-950 text-emerald-300'
-              : source === 'live' && markets.length === 0
+              : source === 'live' && markets.length === 0 && !isAbortOnlyError(error)
                 ? 'bg-rose-950 text-rose-200'
                 : 'bg-slate-800 text-slate-400'
           }`}
         >
           {source === 'live' && markets.length > 0
             ? 'LIVE Kalshi (proxy → public)'
-            : source === 'live' && markets.length === 0
-              ? 'LIVE-ONLY FAILURE'
-              : 'Fetching markets…'}
+            : source === 'live' && markets.length === 0 && isAbortOnlyError(error)
+              ? 'Retrying…'
+              : source === 'live' && markets.length === 0
+                ? 'LIVE-ONLY FAILURE'
+                : 'Fetching markets…'}
         </span>
         {fetchedAt && <span>Updated {formatRelativeTime(fetchedAt)}</span>}
         {!fetchedAt && lastAttemptAt && (
@@ -315,13 +317,22 @@ export function Crypto15mLab() {
           Refresh now
         </button>
         {error && (
-          <span className="max-w-2xl truncate text-rose-300/90" title={error}>
-            {error}
+          <span
+            className={`max-w-2xl truncate ${
+              isAbortOnlyError(error) ? 'text-amber-300/90' : 'text-rose-300/90'
+            }`}
+            title={error}
+          >
+            {isAbortOnlyError(error)
+              ? error.startsWith('Empty feed') || /retrying/i.test(error)
+                ? error
+                : `Transient abort (retrying): ${error}`
+              : error}
           </span>
         )}
       </div>
 
-      {source === 'live' && markets.length === 0 && error && (
+      {source === 'live' && markets.length === 0 && error && !isAbortOnlyError(error) && (
         <div className="rounded-xl border-2 border-rose-500/70 bg-rose-950/50 px-4 py-3 text-sm font-semibold text-rose-100 shadow-lg shadow-rose-950/40">
           🛑 LIVE-ONLY FAILURE — no market universe. Proxy and public Kalshi both failed (demo
           fixtures removed). Paper research requires online markets; nothing offline is loaded.
@@ -331,6 +342,15 @@ export function Crypto15mLab() {
               {error}
             </p>
           ) : null}
+        </div>
+      )}
+      {source === 'live' && markets.length === 0 && error && isAbortOnlyError(error) && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100/90">
+          Transient abort — retrying live feed (not a LIVE-ONLY failure). Keeping last universe
+          when available; next successful poll will refresh.
+          <p className="mt-1 text-xs font-normal text-amber-200/70" title={error}>
+            {error}
+          </p>
         </div>
       )}
 

@@ -43,16 +43,17 @@ export function isAbortOnlyError(error: string | undefined | null): boolean {
  * universe still has open markets (minutesRemaining > 0). Settled-only keep-last
  * would glue the UI to dead books through window rollover.
  *
- * Abort-only / quiet empties never wipe a live universe and never cold-apply
- * empty (would sticky LIVE-ONLY after Strict Mode / overlapping poll aborts),
- * except when lastOpenCount is 0 (settled-only): then apply empty so the next
- * successful poll can replace the universe.
+ * Abort-only / quiet empties NEVER return 'apply' (would sticky LIVE-ONLY after
+ * Strict Mode / overlapping poll aborts). Prefer keep-last even for settled-only
+ * (sticky settled beats false LIVE-ONLY); cold start → ignore.
+ * Real (non-abort) empty with lastOpenCount<=0 still applies empty so settled
+ * glue can clear when the proxy truly returns an empty open set.
  */
 export function shouldApplyLabRefresh(opts: {
   prevSource: LabSource
   next: Pick<FetchCrypto15mResult, 'source' | 'markets' | 'error'>
   lastMarketsLen: number
-  /** Count of last markets still open (minutesRemaining > 0). When 0, do not keep-last. */
+  /** Count of last markets still open (minutesRemaining > 0). When 0, do not keep-last (real empty only). */
   lastOpenCount?: number
 }): LabRefreshDecision {
   const { prevSource, next, lastMarketsLen } = opts
@@ -62,12 +63,10 @@ export function shouldApplyLabRefresh(opts: {
   const abortOnlyEmpty =
     next.markets.length === 0 && isAbortOnlyError(next.error)
 
-  // Abort races / timeout-labeled "aborted" — never wipe, never cold-apply empty
-  // — unless the kept universe is settled-only (nothing open to preserve).
+  // Abort races / timeout-labeled "aborted" — never wipe, never cold-apply empty.
+  // Settled-only abort also keep-last (better sticky settled than false LIVE-ONLY).
   if (abortOnlyEmpty) {
     if (lastMarketsLen > 0 && (prevSource === 'live' || prevSource === 'demo')) {
-      // Settled-only: apply empty so UI can clear sticky dead books.
-      if (lastOpenCount <= 0) return 'apply'
       return 'keep-last'
     }
     // Cold start abort: ignore so we do not stamp source=live + empty markets.
