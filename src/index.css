@@ -155,6 +155,47 @@
     transition: width 200ms ease;
   }
 
+
+  .kmm-mm-strip {
+    border: 1px solid var(--color-separator);
+    background: var(--color-grouped);
+    border-radius: 16px;
+  }
+
+  .kmm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border: none;
+    border-radius: 980px;
+    padding: 0.45rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-label);
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: background 140ms ease, opacity 140ms ease, transform 80ms ease;
+  }
+  .kmm-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.16);
+  }
+  .kmm-btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .kmm-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .kmm-btn--primary {
+    background: var(--color-tint);
+    color: #fff;
+  }
+  .kmm-btn--primary:hover:not(:disabled) {
+    background: #1890ff;
+  }
+
   .live-pulse {
     animation: kmm-pulse 2.4s ease-in-out infinite;
   }

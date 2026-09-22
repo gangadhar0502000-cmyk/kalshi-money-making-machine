@@ -4,6 +4,8 @@ import { getMidHistory } from '../lib/crypto15m/midHistory'
 import { normalizeSpotAsset } from '../lib/crypto15m/spot'
 import { useContinuousFeed } from './useContinuousFeed'
 import { useSpotMap } from './useSpotMap'
+import { statusPillLabel } from './mm/mmSession'
+import { useMmSession } from './mm/useMmSession'
 import {
   assetShortName,
   betterBookHint,
@@ -22,13 +24,15 @@ import {
 
 /**
  * KMM v1 — Apple-clean feed UI.
- * Dark iOS-style surface. Feed only. Paper / read-only.
+ * Dark iOS-style surface. Continuous feed + YES/NO + Paper MM Start/Stop/Reset shell.
+ * Paper / read-only. Quoting engine arrives in a later update (U2.2+).
  * YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
   const snap = useContinuousFeed()
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [selected, setSelected] = useState<string | null>(null)
+  const { state: mm, start, stop, reset } = useMmSession()
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 200)
@@ -97,6 +101,60 @@ export function V1App() {
             <span className="kmm-chip">{status.proxyShort}</span>
           </div>
         </header>
+
+        {/* Paper MM control strip — U2.1 framework shell */}
+        <section className="kmm-mm-strip mb-6 px-4 py-3.5 sm:px-5" aria-label="Paper market making">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="text-[13px] font-semibold tracking-tight text-[var(--color-label)]">
+                Paper MM
+              </span>
+              <span
+                className={
+                  mm.status === 'running'
+                    ? 'kmm-chip kmm-chip--live'
+                    : mm.status === 'stopped'
+                      ? 'kmm-chip kmm-chip--warn'
+                      : 'kmm-chip'
+                }
+              >
+                {mm.status === 'running' && (
+                  <span className="live-pulse inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-profit)]" />
+                )}
+                <span className="num">{statusPillLabel(mm, nowMs)}</span>
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="kmm-btn kmm-btn--primary"
+                disabled={mm.status === 'running'}
+                onClick={start}
+              >
+                Start
+              </button>
+              <button
+                type="button"
+                className="kmm-btn"
+                disabled={mm.status !== 'running'}
+                onClick={stop}
+              >
+                Stop
+              </button>
+              <button type="button" className="kmm-btn" onClick={reset}>
+                Reset
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
+            {mm.status === 'idle'
+              ? 'Idle · ready when you are'
+              : mm.status === 'running'
+                ? 'Session running · framework only'
+                : 'Stopped · Reset to clear session'}
+            {' · '}Quoting engine arrives in a later update
+          </p>
+        </section>
 
         {/* Hero */}
         <section className="kmm-hero mb-6 p-5 sm:p-7">

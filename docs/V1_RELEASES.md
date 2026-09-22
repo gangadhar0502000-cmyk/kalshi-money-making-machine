@@ -38,8 +38,20 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Header: “Kalshi 15m” + quiet “Paper · v1”; subtle status pills. Hero keeps YES+NO dual books + quiet better-book badge + soft window progress. Market cards: large radius, soft blue selected ring. Single thin tint sparkline.
 - Feed functionality unchanged (`midNo`, `betterBookHint`, continuous poll).
 
+
+## U2.1 — Paper MM Start/Stop/Reset framework
+
+- Apple-clean v1 UI keeps the continuous feed + YES/NO display.
+- Neat **Paper MM** control strip: **Start** (primary blue, disabled while running), **Stop** (disabled when not running), **Reset** (always available; soft clear — no confirm required for paper).
+- Status pill: Idle / Running (+ elapsed) / Stopped.
+- Framework/state only (`src/v1/mm/mmSession.ts` + `useMmSession`): `status`, `startedAt`, `stoppedAt`, `resetCount`; subscribe + React hook. Reset clears session counters / returns to idle; does **not** wipe the feed.
+- Placeholder copy: “Quoting engine arrives in a later update.”
+- **Out of scope for U2.1:** multi-book quoting, fills, S1–S5 engine, legacy `PaperMmPanel`. Those attach in **U2.2+**.
+- Paper-only / read-only; never places live trades.
+
 ## Upcoming
 
+- **U2.2** — attach paper quoting / fills engine to the Start/Stop/Reset session shell.
 - **U2** — density / keyboard nav polish if needed.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
