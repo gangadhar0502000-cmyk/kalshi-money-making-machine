@@ -158,6 +158,9 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
         openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
         openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
+        openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
+        hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
+        minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
       },
     })
     expect(d.bidActive).toBe(true)
@@ -171,7 +174,8 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
       mid: 0.5,
       fairValue: null,
       edgeCents: null,
-      inventory: 5,
+      inventory: 10,
+      avgEntry: 0.5,
       bookBestBid: 0.48,
       bookBestAsk: 0.52,
       minutesRemaining: 8,
@@ -203,6 +207,9 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
         openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
         openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
+        openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
+        hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
+        minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
       },
     })
     expect(d.askActive).toBe(true)

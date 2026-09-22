@@ -92,3 +92,17 @@ export {
   type FillCapSnapshot,
 } from './fillCaps'
 export { parkStatusLabel } from './parkStatus'
+
+export {
+  SCENARIO_LABEL,
+  DEFAULT_SCENARIO_THRESHOLDS,
+  evaluateClose,
+  closeCaptureCents,
+  isRiskFlat,
+  scenarioTag,
+  activeScenarioLabel,
+  pickActiveScenario,
+  type ScenarioId,
+  type ScenarioThresholds,
+  type CloseDecision,
+} from './profitableScenarios'

@@ -102,7 +102,7 @@ describe('engine inventory unwind + fill discipline', () => {
     const q = engine.getState().snapshot.quote
     expect(q).not.toBeNull()
     expect(q!.askActive).toBe(true)
-    expect(q!.askReason.toLowerCase()).toMatch(/unwind/)
+    expect(q!.askReason).toMatch(/S4 CLOSE_RISK|risk flat|S3 CLOSE_PROFIT/)
     expect(q!.bidActive).toBe(false)
     expect(q!.active).toBe(true)
   })

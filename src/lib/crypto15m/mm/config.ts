@@ -164,9 +164,23 @@ export interface PaperMmConfig {
    */
   fillMidFallback: boolean
   /**
-   * Churn filter: refuse reducing fills whose price is within this many cents
-   * of avgEntry (≈0 captured edge), unless forced unwind (expiry / spot-guard).
-   * Strict default 0.5¢.
+   * S1/S2 opening bar: |FV−mid| cents required to open (default 4).
+   * Prefer this over raw minEdgeCents for inventory-adding quotes.
+   */
+  openMinEdgeCents: number
+  /**
+   * No S1/S2 opens when minutesRemaining < this; S4 risk-flat closes allowed.
+   * Default 2 minutes.
+   */
+  hardFlatMinutes: number
+  /**
+   * S3 CLOSE_PROFIT: reducing fill must capture ≥ this many cents vs avgEntry
+   * (signed). Default 1.0¢ — blocks −0.88¢/fill churn unwinds unless S4.
+   */
+  minCloseProfitCents: number
+  /**
+   * Legacy alias for minCloseProfitCents (churn filter). Kept for persist compat.
+   * Strict default 1.0¢ (raised from 0.5¢).
    */
   minChurnCaptureCents: number
 }
@@ -199,7 +213,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicMidHigh: 0.95,
   autoRoll: true,
   fvQuoting: true,
-  minEdgeCents: 3.5,
+  minEdgeCents: 4,
   annualVol: 0.7,
   maxActiveMarkets: 5,
   multiBook: true,
@@ -207,7 +221,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   toxicFillPullMs: 8000,
   unwindThreshold: 1,
   maxSaneEdgeCents: 25,
-  minCaptureCents: 1,
+  minCaptureCents: 1.5,
   edgePersistTicks: 3,
   twoSidedEdgeBandCents: 0,
   openingEdgeExtraCents: 0,
@@ -218,7 +232,10 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   maxFillsPerMarketPer15m: 4,
   maxFillsPerMinute: 1,
   fillMidFallback: false,
-  minChurnCaptureCents: 0.5,
+  openMinEdgeCents: 4,
+  hardFlatMinutes: 2,
+  minCloseProfitCents: 1.0,
+  minChurnCaptureCents: 1.0,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -238,6 +255,7 @@ export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
   maxFillsPerMarketPer15m: 60,
   maxFillsPerMinute: 12,
   fillMidFallback: true,
+  minCloseProfitCents: 0,
   minChurnCaptureCents: 0,
 }
 
@@ -261,6 +279,9 @@ export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
     maxFillsPerMinute: src.maxFillsPerMinute,
     fillMidFallback: src.fillMidFallback,
     minChurnCaptureCents: src.minChurnCaptureCents,
+    minCloseProfitCents: src.minCloseProfitCents,
+    openMinEdgeCents: src.openMinEdgeCents,
+    hardFlatMinutes: src.hardFlatMinutes,
   }
 }
 
@@ -312,7 +333,14 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     maxFillsPerMarketPer15m: Math.round(clamp(c.maxFillsPerMarketPer15m, 1, 500)),
     maxFillsPerMinute: Math.round(clamp(c.maxFillsPerMinute, 1, 120)),
     fillMidFallback: Boolean(c.fillMidFallback),
-    minChurnCaptureCents: clamp(c.minChurnCaptureCents, 0, 10),
+    openMinEdgeCents: clamp(c.openMinEdgeCents, 0, 20),
+    hardFlatMinutes: clamp(c.hardFlatMinutes, 0, 10),
+    minCloseProfitCents: clamp(c.minCloseProfitCents, 0, 10),
+    minChurnCaptureCents: clamp(
+      Math.max(c.minChurnCaptureCents, c.minCloseProfitCents ?? 0),
+      0,
+      10,
+    ),
   }
 }
 
@@ -350,20 +378,48 @@ export function migratePersistedScarcityConfig(
     STRICT_PAPER_MM_CONFIG.maxFillsPerMarketPer15m,
   )
   out.maxFillsPerMinute = Math.min(perMin, STRICT_PAPER_MM_CONFIG.maxFillsPerMinute)
-  const churn =
-    typeof partial.minChurnCaptureCents === 'number' &&
-    Number.isFinite(partial.minChurnCaptureCents)
-      ? partial.minChurnCaptureCents
-      : STRICT_PAPER_MM_CONFIG.minChurnCaptureCents
-  // Older saves lacked the knob (treated as 0) — lift to STRICT default.
-  out.minChurnCaptureCents =
-    churn > 0 ? churn : STRICT_PAPER_MM_CONFIG.minChurnCaptureCents
+  const churnRaw =
+    typeof partial.minCloseProfitCents === 'number' &&
+    Number.isFinite(partial.minCloseProfitCents)
+      ? partial.minCloseProfitCents
+      : typeof partial.minChurnCaptureCents === 'number' &&
+          Number.isFinite(partial.minChurnCaptureCents)
+        ? partial.minChurnCaptureCents
+        : STRICT_PAPER_MM_CONFIG.minCloseProfitCents
+  // Lift older 0 / 0.5¢ bars up to STRICT 1.0¢ close-profit floor.
+  const churn = Math.max(
+    churnRaw > 0 ? churnRaw : STRICT_PAPER_MM_CONFIG.minCloseProfitCents,
+    STRICT_PAPER_MM_CONFIG.minCloseProfitCents,
+  )
+  out.minCloseProfitCents = churn
+  out.minChurnCaptureCents = churn
+  if (partial.openMinEdgeCents == null || !Number.isFinite(partial.openMinEdgeCents)) {
+    out.openMinEdgeCents = STRICT_PAPER_MM_CONFIG.openMinEdgeCents
+  } else {
+    out.openMinEdgeCents = Math.max(
+      partial.openMinEdgeCents,
+      STRICT_PAPER_MM_CONFIG.openMinEdgeCents,
+    )
+  }
+  if (partial.hardFlatMinutes == null || !Number.isFinite(partial.hardFlatMinutes)) {
+    out.hardFlatMinutes = STRICT_PAPER_MM_CONFIG.hardFlatMinutes
+  }
+  // Lift maker capture floor for older 1¢ saves.
+  const cap =
+    typeof partial.minCaptureCents === 'number' && Number.isFinite(partial.minCaptureCents)
+      ? partial.minCaptureCents
+      : STRICT_PAPER_MM_CONFIG.minCaptureCents
+  out.minCaptureCents = Math.max(cap, STRICT_PAPER_MM_CONFIG.minCaptureCents)
   // Lift opening edge bar for older saves that still carry 2.5¢.
   const minEdge =
     typeof partial.minEdgeCents === 'number' && Number.isFinite(partial.minEdgeCents)
       ? partial.minEdgeCents
       : STRICT_PAPER_MM_CONFIG.minEdgeCents
-  out.minEdgeCents = Math.max(minEdge, STRICT_PAPER_MM_CONFIG.minEdgeCents)
+  out.minEdgeCents = Math.max(
+    minEdge,
+    STRICT_PAPER_MM_CONFIG.minEdgeCents,
+    out.openMinEdgeCents ?? STRICT_PAPER_MM_CONFIG.openMinEdgeCents,
+  )
   // Ensure new decision knobs exist on older sessions.
   if (partial.minCaptureCents == null || !Number.isFinite(partial.minCaptureCents)) {
     out.minCaptureCents = STRICT_PAPER_MM_CONFIG.minCaptureCents

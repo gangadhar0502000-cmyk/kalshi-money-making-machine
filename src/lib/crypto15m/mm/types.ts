@@ -21,6 +21,12 @@ export interface MmQuote {
   bidReason: string
   /** Why ask is off (or 'ok'). */
   askReason: string
+  /** S1–S5 scenario id for bid side. */
+  bidScenario?: string
+  /** S1–S5 scenario id for ask side. */
+  askScenario?: string
+  /** Dominant active scenario for UI. */
+  activeScenario?: string
 }
 
 export interface MmFill {

@@ -142,7 +142,7 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
     vi.unstubAllGlobals()
   })
 
-  it('blocks sell within 0.5¢ of avgEntry unless forced unwind', () => {
+  it('blocks sell with <1¢ signed capture unless S4 risk flat', () => {
     const eng = new PaperMmEngine()
     eng.setConfig(
       clampConfig({
@@ -150,7 +150,8 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
         fillCooldownMs: 0,
         maxFillsPerMinute: 20,
         maxFillsPerMarketPer15m: 50,
-        minChurnCaptureCents: 0.5,
+        minChurnCaptureCents: 1.0,
+        minCloseProfitCents: 1.0,
         fvQuoting: false,
         useLiveBook: false,
         applyFees: false,
@@ -175,6 +176,35 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
     eng.stop()
   })
 
+  it('blocks recent-style −0.88¢/fill unwind unless S4', () => {
+    const eng = new PaperMmEngine()
+    eng.setConfig(
+      clampConfig({
+        ...STRICT_PAPER_MM_CONFIG,
+        fillCooldownMs: 0,
+        maxFillsPerMinute: 20,
+        maxFillsPerMarketPer15m: 50,
+        minChurnCaptureCents: 1.0,
+        minCloseProfitCents: 1.0,
+        fvQuoting: false,
+        useLiveBook: false,
+        applyFees: false,
+        expiryPullMinutes: 0.5,
+        hardFlatMinutes: 2,
+      }),
+    )
+    eng.setMarket(mk({ ticker: 'BTC-LOSS', asset: 'BTC', minutesRemaining: 10 }))
+    eng.start()
+    eng.seedInventory(1, 0.5)
+    const fill = applyFill(eng)
+    const before = eng.getState().snapshot.fillCount
+    fill('sell_yes', 0.4912, 1, 0.5, false, 'book_depth', false)
+    expect(eng.getState().snapshot.fillCount).toBe(before)
+    expect(eng.getState().snapshot.inventory).toBe(1)
+    expect(eng.getState().snapshot.message).toMatch(/CLOSE blocked: capture|CHURN SKIP/)
+    eng.stop()
+  })
+
   it('allows flat close when minutesRemaining < expiryPull', () => {
     const eng = new PaperMmEngine()
     eng.setConfig(
@@ -183,7 +213,8 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
         fillCooldownMs: 0,
         maxFillsPerMinute: 20,
         maxFillsPerMarketPer15m: 50,
-        minChurnCaptureCents: 0.5,
+        minChurnCaptureCents: 1.0,
+        minCloseProfitCents: 1.0,
         expiryPullMinutes: 0.5,
         fvQuoting: false,
         useLiveBook: false,
@@ -212,7 +243,8 @@ describe('D: migrate persisted scarcity to STRICT defaults', () => {
     })
     expect(migrated.maxFillsPerMarketPer15m).toBe(4)
     expect(migrated.maxFillsPerMinute).toBe(1)
-    expect(migrated.minChurnCaptureCents).toBe(0.5)
+    expect(migrated.minChurnCaptureCents).toBe(1.0)
+    expect(migrated.minCloseProfitCents).toBe(1.0)
   })
 
   it('deserialize upgrades loose scarcity knobs on strict sessions', () => {
@@ -239,7 +271,7 @@ describe('D: migrate persisted scarcity to STRICT defaults', () => {
     const back = deserializePaperMmSession(raw)!
     expect(back.config.maxFillsPerMarketPer15m).toBe(4)
     expect(back.config.maxFillsPerMinute).toBe(1)
-    expect(back.config.minChurnCaptureCents).toBe(0.5)
+    expect(back.config.minChurnCaptureCents).toBe(1.0)
   })
 })
 

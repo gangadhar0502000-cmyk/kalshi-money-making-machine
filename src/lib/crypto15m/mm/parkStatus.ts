@@ -25,6 +25,8 @@ export function parkStatusLabel(opts: {
   }
   if (both.includes('max inventory')) return 'max inv'
   if (both.includes('unwind-only')) return 'unwind hold'
+  if (both.includes('close blocked')) return 'close blk'
+  if (both.includes('hard flat')) return 'hard flat'
   if (both.includes('no edge')) return 'no edge'
   if (both.includes('edge flicker') || both.includes('flicker')) return 'flicker'
   if (both.includes('clamp killed edge')) return 'clamp killed'

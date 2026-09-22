@@ -101,6 +101,9 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
         openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
         openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
+        openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
+        hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
+        minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
       },
     })
     expect(d.bidActive).toBe(false)

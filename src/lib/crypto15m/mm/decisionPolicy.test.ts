@@ -32,6 +32,9 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     twoSidedEdgeBandCents: DEFAULT_DECISION_POLICY.twoSidedEdgeBandCents,
     openingEdgeExtraCents: DEFAULT_DECISION_POLICY.openingEdgeExtraCents,
     openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
+    openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
+    hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
+    minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
     ...partial,
   }
 }
@@ -54,6 +57,7 @@ function baseInput(partial: Partial<DecisionPolicyInput> = {}): DecisionPolicyIn
     toxicAskPullUntil: 0,
     now: 1_000_000,
     config: baseConfig(),
+    avgEntry: null,
     ...partial,
   }
 }
@@ -65,8 +69,8 @@ describe('decisionPolicy', () => {
     )
     expect(d.bidActive).toBe(true)
     expect(d.askActive).toBe(false)
-    expect(d.bidReason).toMatch(/bid ON:.*FV−mid=\+/)
-    expect(d.askReason.toLowerCase()).toMatch(/no edge/)
+    expect(d.bidReason).toMatch(/S1 OPEN_BID/)
+    expect(d.askActive).toBe(false)
     expect(d.centerMode).toBe('fv')
   })
 
@@ -76,8 +80,8 @@ describe('decisionPolicy', () => {
     )
     expect(d.askActive).toBe(true)
     expect(d.bidActive).toBe(false)
-    expect(d.askReason).toMatch(/ask ON:.*FV−mid=-/)
-    expect(d.bidReason.toLowerCase()).toMatch(/no edge/)
+    expect(d.askReason).toMatch(/S2 OPEN_ASK/)
+    expect(d.bidActive).toBe(false)
   })
 
   it('no edge → both OFF', () => {
@@ -140,13 +144,23 @@ describe('decisionPolicy', () => {
   })
 
   it('inventory long suppresses bid harder', () => {
-    const flat = decideQuoteSides(baseInput({ inventory: 0, edgeCents: 3 }))
-    const long = decideQuoteSides(baseInput({ inventory: 8, edgeCents: 3 }))
+    const flat = decideQuoteSides(
+      baseInput({ inventory: 0, edgeCents: 6, fairValue: 0.56, mid: 0.5 }),
+    )
+    const long = decideQuoteSides(
+      baseInput({
+        inventory: 8,
+        edgeCents: 6,
+        avgEntry: 0.5,
+        bookBestAsk: 0.52,
+        mid: 0.5,
+      }),
+    )
     expect(flat.bidActive).toBe(true)
     expect(long.bidActive).toBe(false)
-    // Long ≥ unwindThreshold → bid off (unwind-only or skew); ask must be ON for unwind
+    // Long with +2¢ capture at ask → S3 CLOSE_PROFIT
     expect(long.askActive).toBe(true)
-    expect(long.askReason.toLowerCase()).toMatch(/unwind/)
+    expect(long.askReason).toMatch(/S3 CLOSE_PROFIT|S4 CLOSE_RISK/)
   })
 
   it('sizes down when |edge| small, up when large', () => {
@@ -189,7 +203,7 @@ describe('decisionPolicy', () => {
     )
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(true)
-    expect(d.askReason.toLowerCase()).toMatch(/inventory unwind/)
+    expect(d.askReason).toMatch(/S4 CLOSE_RISK|risk flat/)
     expect(d.bidReason.toLowerCase()).toMatch(/max inventory|unwind-only/)
     expect(d.active).toBe(true)
     expect(d.unwindActive).toBe(true)
@@ -208,7 +222,7 @@ describe('decisionPolicy', () => {
     )
     expect(d.askActive).toBe(false)
     expect(d.bidActive).toBe(true)
-    expect(d.bidReason.toLowerCase()).toMatch(/inventory unwind/)
+    expect(d.bidReason).toMatch(/S4 CLOSE_RISK|risk flat|S3 CLOSE_PROFIT/)
     expect(d.active).toBe(true)
     expect(d.unwindActive).toBe(true)
   })
@@ -219,7 +233,7 @@ describe('decisionPolicy', () => {
     )
     expect(d.bidActive).toBe(true)
     expect(d.askActive).toBe(false)
-    expect(d.bidReason).toMatch(/bid ON:/)
+    expect(d.bidReason).toMatch(/S1 OPEN_BID|bid ON:/)
   })
 
   it('|edge| 95 with mid≈0.01 → sanity park (unless unwind)', () => {
@@ -246,21 +260,24 @@ describe('decisionPolicy', () => {
       }),
     )
     expect(unwind.askActive).toBe(true)
-    expect(unwind.askReason.toLowerCase()).toMatch(/unwind/)
+    expect(unwind.askReason).toMatch(/S4 CLOSE_RISK|risk flat|S3/)
     expect(unwind.bidActive).toBe(false)
   })
 
-  it('unwind works even without FV when long', () => {
+  it('unwind works even without FV when long at max (S4)', () => {
     const d = decideQuoteSides(
       baseInput({
-        inventory: 5,
+        inventory: 10,
         fairValue: null,
         edgeCents: null,
         mid: 0.5,
+        avgEntry: 0.55, // lossy vs ask join → must be S4 not S3
+        bookBestAsk: 0.5,
+        config: baseConfig({ maxInventory: 10 }),
       }),
     )
     expect(d.askActive).toBe(true)
-    expect(d.askReason.toLowerCase()).toMatch(/unwind/)
+    expect(d.askReason).toMatch(/S4 CLOSE_RISK|risk flat/)
     expect(d.bidActive).toBe(false)
   })
 })
@@ -281,13 +298,13 @@ describe('canAcceptInventoryIncreasingFill', () => {
 
 
 describe('decisionPolicy hardening (opening bar / clamp / persist / one-sided)', () => {
-  it('Opening quote blocked when edge 2.5¢ < new min (3.5)', () => {
+  it('Opening quote blocked when edge 2.5¢ < openMin (4)', () => {
     const d = decideQuoteSides(
       baseInput({
         edgeCents: 2.5,
         fairValue: 0.525,
         mid: 0.5,
-        config: baseConfig({ minEdgeCents: 3.5, edgePersistTicks: 1 }),
+        config: baseConfig({ minEdgeCents: 4, openMinEdgeCents: 4, edgePersistTicks: 1 }),
       }),
     )
     expect(d.bidActive).toBe(false)
@@ -342,7 +359,7 @@ describe('decisionPolicy hardening (opening bar / clamp / persist / one-sided)',
 
     const t3 = mk(5, t2.edgePersist)
     expect(t3.bidActive).toBe(true)
-    expect(t3.bidReason).toMatch(/bid ON:.*persist/)
+    expect(t3.bidReason).toMatch(/S1 OPEN_BID/)
     expect(t3.askActive).toBe(false)
 
     // Reverse edge → drop immediately
@@ -368,18 +385,19 @@ describe('decisionPolicy hardening (opening bar / clamp / persist / one-sided)',
     expect(d.askActive).toBe(false)
   })
 
-  it('Unwind still forces reduce side even without edge', () => {
+  it('S4 forces reduce at max inventory even without edge', () => {
     const d = decideQuoteSides(
       baseInput({
-        inventory: 4,
+        inventory: 10,
         fairValue: null,
         edgeCents: null,
         mid: 0.5,
-        config: baseConfig({ edgePersistTicks: 1 }),
+        avgEntry: 0.55,
+        config: baseConfig({ edgePersistTicks: 1, maxInventory: 10 }),
       }),
     )
     expect(d.askActive).toBe(true)
-    expect(d.askReason.toLowerCase()).toMatch(/unwind/)
+    expect(d.askReason).toMatch(/S4 CLOSE_RISK|risk flat/)
     expect(d.bidActive).toBe(false)
     expect(d.unwindActive).toBe(true)
   })

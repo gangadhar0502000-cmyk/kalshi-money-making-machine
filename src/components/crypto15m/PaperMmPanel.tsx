@@ -296,9 +296,25 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
           ⚠ Fills rising but flat P&amp;L — likely round-trip churn at ~avgEntry (last 15m realized
           delta {formatDollars(realizedDelta15m)}, avg {avgCaptureCents15m.toFixed(2)}¢/fill). Churn
-          filter skips closes within {cfg.minChurnCaptureCents}¢ of entry unless expiry/spot-guard.
+          filter requires ≥{cfg.minCloseProfitCents ?? cfg.minChurnCaptureCents}¢ signed close
+          profit (S3) unless S4 risk flat.
         </div>
       )}
+
+
+      <div className="panel border border-violet-800/40 bg-violet-950/20 p-3 text-[11px] text-slate-300">
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-violet-400">
+          Rules · paper MM playbook
+        </p>
+        <p className="mt-1 text-slate-400">
+          Default <span className="font-mono text-slate-200">S5 NO_TRADE</span>. Opens only via{' '}
+          <span className="font-mono">S1 OPEN_BID</span> / <span className="font-mono">S2 OPEN_ASK</span>{' '}
+          (≥{draft.openMinEdgeCents}¢ edge, ≥{draft.minCaptureCents}¢ capture). Closes via{' '}
+          <span className="font-mono">S3 CLOSE_PROFIT</span> (≥{draft.minCloseProfitCents}¢ vs entry) or{' '}
+          <span className="font-mono">S4 CLOSE_RISK</span> (risk flat). Scarce fills + portfolio caps on.
+          Paper research — not live profits.
+        </p>
+      </div>
 
       {source === 'live' && markets.length === 0 && (
         <div className="rounded-xl border-2 border-rose-500/70 bg-rose-950/45 px-4 py-3 text-sm font-semibold text-rose-100">
@@ -733,11 +749,19 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                               className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"
                               title={`${book?.snapshot.quote?.bidReason ?? ''} / ${book?.snapshot.quote?.askReason ?? ''}`}
                             >
-                              {book?.snapshot.quote?.askReason?.includes('inventory unwind')
-                                ? 'Y unwind'
-                                : book?.snapshot.quote?.bidReason?.includes('inventory unwind')
-                                  ? 'Y unwind'
-                                  : 'Y'}
+                              {book?.snapshot.quote?.activeScenario === 'S4' ||
+                              book?.snapshot.quote?.askReason?.includes('CLOSE_RISK') ||
+                              book?.snapshot.quote?.bidReason?.includes('CLOSE_RISK')
+                                ? 'Y risk'
+                                : book?.snapshot.quote?.activeScenario === 'S3' ||
+                                    book?.snapshot.quote?.askReason?.includes('CLOSE_PROFIT') ||
+                                    book?.snapshot.quote?.bidReason?.includes('CLOSE_PROFIT')
+                                  ? 'Y close'
+                                  : book?.snapshot.quote?.activeScenario === 'S1'
+                                    ? 'Y bid'
+                                    : book?.snapshot.quote?.activeScenario === 'S2'
+                                      ? 'Y ask'
+                                      : 'Y'}
                             </span>
                           ) : inSlot ? (
                             <span
@@ -821,6 +845,23 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
                         {snap.quote.bidActive ? '' : ' OFF'} / ask{' '}
                         {formatCents(snap.quote.yesAsk)}
                         {snap.quote.askActive ? '' : ' OFF'} · {snap.quote.centerMode}
+                        <br />
+                        <span className="text-emerald-300/90">
+                          Active scenario:{' '}
+                          {snap.quote.activeScenario
+                            ? `${snap.quote.activeScenario}${
+                                snap.quote.activeScenario === 'S1'
+                                  ? ' OPEN_BID'
+                                  : snap.quote.activeScenario === 'S2'
+                                    ? ' OPEN_ASK'
+                                    : snap.quote.activeScenario === 'S3'
+                                      ? ' CLOSE_PROFIT'
+                                      : snap.quote.activeScenario === 'S4'
+                                        ? ' CLOSE_RISK'
+                                        : ' NO_TRADE'
+                              }`
+                            : 'S5 NO_TRADE'}
+                        </span>
                         <br />
                         <span className="text-violet-200/80">
                           {snap.quote.bidReason} · {snap.quote.askReason}
@@ -1069,7 +1110,37 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
             step={0.5}
             min={0}
             max={20}
-            onChange={(v) => setDraft((d) => ({ ...d, minEdgeCents: v }))}
+            onChange={(v) => setDraft((d) => ({ ...d, minEdgeCents: v, openMinEdgeCents: v }))}
+          />
+          <Knob
+            label="Open min edge S1/S2 (¢)"
+            value={draft.openMinEdgeCents}
+            step={0.5}
+            min={0}
+            max={20}
+            onChange={(v) => setDraft((d) => ({ ...d, openMinEdgeCents: v }))}
+          />
+          <Knob
+            label="Close profit min S3 (¢)"
+            value={draft.minCloseProfitCents}
+            step={0.25}
+            min={0}
+            max={10}
+            onChange={(v) =>
+              setDraft((d) => ({
+                ...d,
+                minCloseProfitCents: v,
+                minChurnCaptureCents: v,
+              }))
+            }
+          />
+          <Knob
+            label="Hard flat minutes"
+            value={draft.hardFlatMinutes}
+            step={0.5}
+            min={0}
+            max={10}
+            onChange={(v) => setDraft((d) => ({ ...d, hardFlatMinutes: v }))}
           />
           <Knob
             label="Edge persist ticks"

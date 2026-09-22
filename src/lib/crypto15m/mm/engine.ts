@@ -37,6 +37,7 @@ import {
   type DecisionPolicyConfig,
   type EdgePersistState,
 } from './decisionPolicy'
+import { evaluateClose } from './profitableScenarios'
 import type {
   MmCancelEvent,
   MmEngineState,
@@ -207,20 +208,6 @@ export class PaperMmEngine {
       this.config.maxFillsPerMarketPer15m,
       this.fillCapStore.getPortfolioCap15m(),
     )
-  }
-
-  /** Forced unwind bypasses churn filter (expiry pull or spot-guard cancel). */
-  private isForcedUnwindNow(now = Date.now()): boolean {
-    const mins = this.market?.minutesRemaining
-    if (
-      mins != null &&
-      Number.isFinite(mins) &&
-      mins < this.config.expiryPullMinutes
-    ) {
-      return true
-    }
-    if (this.guardMode === 'cancel' && now < this.guardActiveUntil) return true
-    return false
   }
 
   /** Sum captureDollars / avg ¢ for fills in last 15m (excludes settlement). */
@@ -989,6 +976,9 @@ export class PaperMmEngine {
       twoSidedEdgeBandCents: this.config.twoSidedEdgeBandCents,
       openingEdgeExtraCents: this.config.openingEdgeExtraCents,
       openEdgeAddHalfSpread: this.config.openEdgeAddHalfSpread,
+      openMinEdgeCents: this.config.openMinEdgeCents,
+      hardFlatMinutes: this.config.hardFlatMinutes,
+      minCloseProfitCents: this.config.minCloseProfitCents,
     }
 
     const decision = decideQuoteSides({
@@ -1009,23 +999,32 @@ export class PaperMmEngine {
       now,
       config: policyCfg,
       edgePersist: this.edgePersistState,
+      avgEntry: this.avgEntry,
     })
     this.edgePersistState = decision.edgePersist
 
     this.lastFvCenterActive = decision.centerMode === 'fv'
 
+    // Spot-guard cancel still parks opens; S4 risk-flat reduce may stay live.
+    const allowRiskFlatThroughGuard =
+      guardCancel && decision.unwindActive && this.inventory !== 0
+    const guardBlocks = guardCancel && !allowRiskFlatThroughGuard
+
     this.quote = {
       yesBid: decision.yesBid,
       yesAsk: decision.yesAsk,
       size: decision.size,
-      active: decision.active && !guardCancel,
-      bidActive: decision.bidActive && !guardCancel,
-      askActive: decision.askActive && !guardCancel,
+      active: decision.active && !guardBlocks,
+      bidActive: decision.bidActive && !guardBlocks,
+      askActive: decision.askActive && !guardBlocks,
       skewCents: decision.skewCents,
       halfSpreadCents: decision.halfSpreadCents,
       centerMode: decision.centerMode,
       bidReason: decision.bidReason,
       askReason: decision.askReason,
+      bidScenario: decision.bidScenario,
+      askScenario: decision.askScenario,
+      activeScenario: decision.activeScenario,
     }
 
     this.lastQuoteAt = now
@@ -1218,29 +1217,51 @@ export class PaperMmEngine {
       }
     }
 
-    // Churn filter: refuse flat round-trips that close within minChurnCaptureCents of avgEntry.
-    // Stops fill spam with ≈0 captured edge (buy then sell at joined BBO). Forced unwind
-    // (expiry pull / spot-guard cancel) bypasses.
-    if (
-      reason !== 'settlement' &&
-      this.config.minChurnCaptureCents > 0 &&
-      this.avgEntry != null &&
-      this.inventory !== 0
-    ) {
+    // S3 CLOSE_PROFIT / S4 CLOSE_RISK — refuse lossy / sub-1¢ voluntary unwinds.
+    // Fixes −0.88¢/fill churn: signed capture vs avgEntry must be ≥ minCloseProfitCents
+    // unless S4 risk flat (hardFlat / maxInv / spot-guard / toxic holding mid).
+    if (reason !== 'settlement' && this.inventory !== 0) {
       const reducing =
         (side === 'sell_yes' && this.inventory > 0) ||
         (side === 'buy_yes' && this.inventory < 0)
-      if (reducing && !this.isForcedUnwindNow()) {
-        const entry = asDollarPrice(this.avgEntry, 'churn.avgEntry')
-        const distCents = Math.abs(price - entry) * 100
-        if (distCents < this.config.minChurnCaptureCents - 1e-9) {
+      if (reducing) {
+        const minClose = Math.max(
+          this.config.minCloseProfitCents ?? 0,
+          this.config.minChurnCaptureCents ?? 0,
+        )
+        const mins = this.market?.minutesRemaining ?? null
+        const closeDec = evaluateClose({
+          side,
+          price,
+          avgEntry: this.avgEntry,
+          inventory: this.inventory,
+          minCloseProfitCents: minClose,
+          risk: {
+            minutesRemaining: mins,
+            inventory: this.inventory,
+            maxInventory: this.config.maxInventory,
+            hardFlatMinutes: this.config.hardFlatMinutes ?? 2,
+            spotGuardCancel: this.guardMode === 'cancel' && Date.now() < this.guardActiveUntil,
+            guardWidenExtreme: this.guardMode === 'widen' && Date.now() < this.guardActiveUntil,
+            mid,
+            toxicMidLow: this.config.toxicMidLow,
+            toxicMidHigh: this.config.toxicMidHigh,
+            holdingSide: this.inventory > 0 ? 'long' : this.inventory < 0 ? 'short' : 'flat',
+          },
+        })
+        if (!closeDec.allow) {
           this.midCrossRejectCount += 1
           this.message =
-            `CHURN SKIP ${side} @ $${price.toFixed(4)} — within ` +
-            `${distCents.toFixed(2)}¢ of avgEntry $${entry.toFixed(4)} ` +
-            `(need ≥${this.config.minChurnCaptureCents}¢). Flat round-trip blocked. ` +
+            `CHURN SKIP ${side} @ $${price.toFixed(4)} — ${closeDec.reason}. ` +
             `Read-only · never places trades.`
           return
+        }
+        if (closeDec.scenario === 'S4') {
+          this.message =
+            `S4 CLOSE_RISK risk flat ${side} @ $${price.toFixed(4)} ` +
+            `(capture ${
+              closeDec.captureCents == null ? 'n/a' : `${closeDec.captureCents.toFixed(1)}¢`
+            }). Read-only · never places trades.`
         }
       }
     }
