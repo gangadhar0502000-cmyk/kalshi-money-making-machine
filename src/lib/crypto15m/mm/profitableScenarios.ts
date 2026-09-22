@@ -7,7 +7,8 @@
  * S3 CLOSE_PROFIT — reduce inventory only with ≥ minCloseProfitCents vs avgEntry
  * S4 CLOSE_RISK — forced flatten without profit (hard flat / max inv / guard / toxic)
  * S4.1 STUCK_UNWIND — after N blocked S3 reduces, allow reduce at ≥ 0¢ (break-even), never loss
- * S4.2 MARK_BLEED — after same stuck ticks, allow reduce when capture ≤ −markBleedCents (lossy OK)
+ * S4.2 MARK_BLEED — after same stuck ticks, allow reduce when capture ≤ −markBleedCents (lossy OK);
+ *                  escalation LATCHES until flat/flip so scarce maker can rest (not one-tick)
  * S5 NO_TRADE — default; both sides OFF
  * S5.1 SLOT_EVICT — portfolio: evict sanity-parked flat books from active slots
  */
@@ -144,6 +145,7 @@ export type CloseDecision =
  * S4.1: after stuckUnwindTicks consecutive S3 profit-bar blocks, allow ≥0¢ only.
  * S4.2: after same stuck ticks, allow when capture ≤ −markBleedCents (lossy OK).
  * Ladder: S3 → S4 riskOn → S4.1 (≥0) → S4.2 (≤ −bleed) → S5 block.
+ * Latch: once S4.1/S4.2 allows, stuck stays ≥ threshold until flat/flip (scarce maker).
  */
 export function evaluateClose(args: {
   side: 'buy_yes' | 'sell_yes' | 'bid' | 'ask'

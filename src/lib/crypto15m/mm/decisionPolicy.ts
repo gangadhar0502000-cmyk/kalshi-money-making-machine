@@ -591,8 +591,16 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       return
     }
     if (closeDec.allow) {
-      // S3 / S4 / S4.1 / S4.2 succeeded — clear stuck counter
-      nextStuck = { ticks: 0, invSign }
+      // S3 / S4: healthy path — clear. S4.1 / S4.2: LATCH escalation so scarce
+      // maker quotes stay resting (reset-on-allow left only ~1 tick ON → 0 fills).
+      if (closeDec.scenario === 'S4.1' || closeDec.scenario === 'S4.2') {
+        nextStuck = {
+          ticks: Math.max(baseStuckTicks + 1, stuckThresh),
+          invSign,
+        }
+      } else {
+        nextStuck = { ticks: 0, invSign }
+      }
       return
     }
     // Only escalate on S3 profit-bar blocks (CLOSE blocked: capture …)
@@ -609,12 +617,13 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       askActive = false
       askReason = 'ask OFF: toxic mid'
       askScenario = 'S5'
-      nextStuck = { ticks: 0, invSign }
+      // Freeze stuck progress — do not wipe latch while mid is extreme
+      nextStuck = { ticks: baseStuckTicks, invSign }
     } else if (toxicAskPull) {
       askActive = false
       askReason = 'ask OFF: toxic fill pull'
       askScenario = 'S5'
-      nextStuck = { ticks: 0, invSign }
+      nextStuck = { ticks: baseStuckTicks, invSign }
     } else {
       const candidateStuck = baseStuckTicks + 1
       const closeDec = evaluateClose({
@@ -647,12 +656,12 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       bidActive = false
       bidReason = 'bid OFF: toxic mid'
       bidScenario = 'S5'
-      nextStuck = { ticks: 0, invSign }
+      nextStuck = { ticks: baseStuckTicks, invSign }
     } else if (toxicBidPull) {
       bidActive = false
       bidReason = 'bid OFF: toxic fill pull'
       bidScenario = 'S5'
-      nextStuck = { ticks: 0, invSign }
+      nextStuck = { ticks: baseStuckTicks, invSign }
     } else {
       const candidateStuck = baseStuckTicks + 1
       const closeDec = evaluateClose({

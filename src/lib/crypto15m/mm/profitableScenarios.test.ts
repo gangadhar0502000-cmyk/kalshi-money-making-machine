@@ -365,7 +365,8 @@ describe('S4.1 STUCK_UNWIND', () => {
     expect(d3.askScenario).toBe('S4.1')
     expect(d3.askReason).toMatch(/S4\.1 STUCK_UNWIND/)
     expect(d3.activeScenario).toBe('S4.1')
-    expect(d3.stuckUnwind.ticks).toBe(0) // reset on allow
+    // Latch: keep ≥ stuckThresh so scarce maker quote stays ON next ticks
+    expect(d3.stuckUnwind.ticks).toBeGreaterThanOrEqual(3)
   })
 
   it('still blocks −0.5¢ after stuck when above −markBleed (S4.2 not yet)', () => {
@@ -428,9 +429,9 @@ describe('S4.1 STUCK_UNWIND', () => {
         stuckUnwind: { ticks: 4, invSign: 1 },
       }),
     )
-    // 0¢ with stuck 4+1=5 → S4.1 allow → reset
+    // 0¢ with stuck 4+1=5 → S4.1 allow → latch
     expect(blocked.askScenario).toBe('S4.1')
-    expect(blocked.stuckUnwind.ticks).toBe(0)
+    expect(blocked.stuckUnwind.ticks).toBeGreaterThanOrEqual(5)
 
     const flat = decideQuoteSides(
       baseInput({
@@ -493,7 +494,33 @@ describe('S4.2 MARK_BLEED', () => {
     expect(d.askScenario).toBe('S4.2')
     expect(d.askReason).toMatch(/S4\.2 MARK_BLEED/)
     expect(d.activeScenario).toBe('S4.2')
-    expect(d.stuckUnwind.ticks).toBe(0)
+    expect(d.stuckUnwind.ticks).toBeGreaterThanOrEqual(2)
+  })
+
+  it('latches S4.2 across ticks so scarce maker can rest', () => {
+    const cfg = baseConfig({ stuckUnwindTicks: 2, markBleedCents: 5 })
+    const inputBase = {
+      inventory: 2,
+      avgEntry: 0.5,
+      mid: 0.5,
+      fairValue: 0.5,
+      edgeCents: 0,
+      minutesRemaining: 8,
+      bookBestBid: 0.44,
+      bookBestAsk: 0.45,
+      config: cfg,
+    }
+    let stuck = { ticks: 10, invSign: 1 }
+    const d1 = decideQuoteSides(baseInput({ ...inputBase, stuckUnwind: stuck }))
+    expect(d1.askActive).toBe(true)
+    expect(d1.askScenario).toBe('S4.2')
+    stuck = d1.stuckUnwind
+    expect(stuck.ticks).toBeGreaterThanOrEqual(2)
+    // Next tick without re-climbing from 0 — still S4.2 ON
+    const d2 = decideQuoteSides(baseInput({ ...inputBase, stuckUnwind: stuck }))
+    expect(d2.askActive).toBe(true)
+    expect(d2.askScenario).toBe('S4.2')
+    expect(d2.stuckUnwind.ticks).toBeGreaterThanOrEqual(2)
   })
 
   it('refuses −4¢ after stuck (not yet ≤ −markBleedCents)', () => {

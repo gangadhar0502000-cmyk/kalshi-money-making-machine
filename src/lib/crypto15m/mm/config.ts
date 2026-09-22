@@ -192,6 +192,7 @@ export interface PaperMmConfig {
   /**
    * S4.2 MARK_BLEED: after stuckUnwindTicks, allow lossy reduce when capture
    * ≤ −markBleedCents. Default 5¢. Never opens; S4.1 still preferred at ≥0¢.
+   * Escalation latches until inventory flat/flip so scarce maker quotes can rest.
    */
   markBleedCents: number
 }
