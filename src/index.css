@@ -1,101 +1,129 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --color-ink: #e2e8f0;
-  --color-muted: #94a3b8;
-  --color-panel: #111827;
-  --color-panel-2: #0b1220;
-  --color-line: #1f2937;
-  --color-accent: #22c55e;
-  --color-accent-2: #f59e0b;
-  --color-danger: #f87171;
-  --color-info: #38bdf8;
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Syne", "Instrument Sans", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-void: #05060a;
+  --color-ink: #f4f1ea;
+  --color-mute: #8b8798;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-accent: #7c6cff;
+  --color-accent-2: #3dffc0;
+  --color-warm: #ffb86b;
+  --color-danger: #ff5c7a;
+  --color-yes: #3dffc0;
+  --color-no: #ff7a9a;
 }
 
 @layer base {
-  * {
-    box-sizing: border-box;
-  }
-
-  html {
-    color-scheme: dark;
-  }
-
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
   body {
     margin: 0;
     min-height: 100vh;
     font-family: var(--font-sans);
     color: var(--color-ink);
     background:
-      radial-gradient(1200px 600px at 10% -10%, rgba(34, 197, 94, 0.12), transparent 55%),
-      radial-gradient(900px 500px at 90% 0%, rgba(245, 158, 11, 0.08), transparent 50%),
-      linear-gradient(180deg, #070b14 0%, #0b1220 40%, #0a0f1a 100%);
+      radial-gradient(900px 500px at 12% -8%, rgba(124, 108, 255, 0.22), transparent 55%),
+      radial-gradient(800px 480px at 88% 0%, rgba(61, 255, 192, 0.1), transparent 50%),
+      radial-gradient(600px 400px at 50% 100%, rgba(255, 184, 107, 0.06), transparent 45%),
+      var(--color-void);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-
-  #root {
-    min-height: 100vh;
-  }
-
-  ::selection {
-    background: rgba(34, 197, 94, 0.35);
-  }
+  #root { min-height: 100vh; }
+  ::selection { background: rgba(124, 108, 255, 0.4); }
 }
 
 @layer utilities {
-  .panel {
-    @apply rounded-2xl border border-slate-800/80 bg-slate-900/60 shadow-xl shadow-black/20 backdrop-blur;
+  .font-display { font-family: var(--font-display); }
+  .font-mono { font-family: var(--font-mono); }
+
+  .v1-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition
-      disabled:cursor-not-allowed disabled:opacity-50;
+  .v1-glass {
+    background: rgba(12, 14, 22, 0.72);
+    border: 1px solid var(--color-line);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+      0 24px 80px rgba(0, 0, 0, 0.45);
   }
 
-  .btn-primary {
-    @apply bg-emerald-500 text-slate-950 hover:bg-emerald-400;
+  .v1-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-line);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.2rem 0.65rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-mute);
   }
 
-  .btn-ghost {
-    @apply border border-slate-700 bg-slate-800/50 text-slate-200 hover:border-slate-500 hover:bg-slate-800;
+  .v1-chip--live {
+    border-color: rgba(61, 255, 192, 0.35);
+    color: var(--color-accent-2);
+    background: rgba(61, 255, 192, 0.06);
   }
-
-  .input {
-    @apply w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100
-      outline-none ring-emerald-500/0 transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/30;
+  .v1-chip--warn {
+    border-color: rgba(255, 184, 107, 0.35);
+    color: var(--color-warm);
+    background: rgba(255, 184, 107, 0.06);
   }
-
-  .label {
-    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400;
+  .v1-chip--off {
+    border-color: rgba(255, 92, 122, 0.35);
+    color: var(--color-danger);
+    background: rgba(255, 92, 122, 0.06);
   }
 
   .live-pulse {
-    animation: live-pulse 1.8s ease-in-out infinite;
+    animation: v1-pulse 1.8s ease-in-out infinite;
   }
-}
+  @keyframes v1-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(0.85); }
+  }
 
-@keyframes live-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.85); }
-}
+  .v1-card {
+    border-radius: 1.25rem;
+    border: 1px solid var(--color-line);
+    background: linear-gradient(165deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.015) 100%);
+    transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+  }
+  .v1-card:hover {
+    border-color: rgba(124, 108, 255, 0.35);
+    background: linear-gradient(165deg, rgba(124,108,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
+  }
+  .v1-card--active {
+    border-color: rgba(61, 255, 192, 0.45);
+    background: linear-gradient(165deg, rgba(61,255,192,0.1) 0%, rgba(124,108,255,0.06) 100%);
+    box-shadow: 0 0 0 1px rgba(61, 255, 192, 0.12), 0 20px 50px rgba(0, 0, 0, 0.35);
+  }
 
-/* v1 terminal console */
-.v1-console .rail-row--selected {
-  background: rgba(16, 185, 129, 0.08);
-  box-shadow: inset 3px 0 0 0 rgb(52 211 153);
-}
+  .v1-hero {
+    border-radius: 1.75rem;
+    border: 1px solid var(--color-line);
+    background:
+      radial-gradient(600px 280px at 80% 0%, rgba(124, 108, 255, 0.18), transparent 60%),
+      radial-gradient(500px 240px at 10% 100%, rgba(61, 255, 192, 0.1), transparent 55%),
+      rgba(10, 12, 20, 0.85);
+    box-shadow: 0 30px 100px rgba(0, 0, 0, 0.5);
+  }
 
-.v1-console .rail-row--selected::before {
-  content: none;
-}
-
-.v1-console .sparkline-wrap {
-  min-height: 4.5rem;
-}
-
-.v1-console .sparkline {
-  display: block;
-  color: rgb(52 211 153);
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
 }
