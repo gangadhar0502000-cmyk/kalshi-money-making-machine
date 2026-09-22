@@ -39,6 +39,7 @@ const {
   buildBlockedCloseEvent,
   buildS51EvictEvent,
   hourKeyFromMs,
+  parseBlockedCloseCaptureCents,
 } = await import('../src/lib/crypto15m/mm/headlessJournal.ts')
 
 const { PaperMmPortfolio } = await import('../src/lib/crypto15m/mm/portfolio.ts')
@@ -223,12 +224,16 @@ async function runPaperMmLoop(): Promise<void> {
           if (lastBlockedKey.get(mapKey) === fp) continue
           lastBlockedKey.set(mapKey, fp)
           const restingPx = side === 'bid' ? q.yesBid : q.yesAsk
-          const cap = expectedCloseCaptureCents({
-            reduceSide: side,
-            restingPx,
-            avgEntry: snap.avgEntry,
-            inventory: snap.inventory,
-          })
+          // Prefer capture from evaluateClose reason (uses unwind px, not post-clamp quote).
+          let cap: number | null = parseBlockedCloseCaptureCents(reason)
+          if (cap == null) {
+            cap = expectedCloseCaptureCents({
+              reduceSide: side,
+              restingPx,
+              avgEntry: snap.avgEntry,
+              inventory: snap.inventory,
+            })
+          }
           const minClose = Math.max(
             snap.config.minCloseProfitCents ?? 0,
             snap.config.minChurnCaptureCents ?? 0,

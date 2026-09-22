@@ -11,6 +11,7 @@ import {
   classifyFillLeg,
   formatJournalLine,
   hourKeyFromMs,
+  parseBlockedCloseCaptureCents,
   parseJournalLine,
 } from './headlessJournal'
 
@@ -36,6 +37,12 @@ describe('headlessJournal format', () => {
     const parsed = parseJournalLine(line)
     expect(parsed).toEqual(ev)
     expect(parsed?.iso).toBe(new Date(1_700_000_000_000).toISOString())
+  })
+
+  it('parses capture ¢ from CLOSE blocked reason', () => {
+    expect(parseBlockedCloseCaptureCents('CLOSE blocked: capture -3.0¢ < 1¢')).toBeCloseTo(-3, 5)
+    expect(parseBlockedCloseCaptureCents('CLOSE blocked: capture 0.4¢ < 1.0¢')).toBeCloseTo(0.4, 5)
+    expect(parseBlockedCloseCaptureCents('ask OFF: toxic mid')).toBeNull()
   })
 
   it('formats blocked_close with stuckTicks + capture gap', () => {

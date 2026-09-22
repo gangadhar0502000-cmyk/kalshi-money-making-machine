@@ -223,6 +223,15 @@ export function aggregateDigest(
   }
 }
 
+
+/** Parse capture ¢ from a CLOSE blocked reason (evaluateClose text). */
+export function parseBlockedCloseCaptureCents(reason: string): number | null {
+  const m = /CLOSE blocked:\s*capture\s+(-?\d+(?:\.\d+)?)¢/i.exec(reason)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) ? n : null
+}
+
 /** Build a JournalEvent for a paper fill. */
 export function buildFillEvent(input: {
   t?: number
