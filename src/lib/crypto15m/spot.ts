@@ -22,7 +22,7 @@ export type SpotAsset =
 export interface SpotTick {
   asset: string
   price: number
-  source: 'binance' | 'coinbase' | 'demo'
+  source: 'binance' | 'coinbase'
   t: number
 }
 
@@ -94,6 +94,10 @@ export function normalizeSpotAsset(asset: string): string | null {
   return null
 }
 
+/**
+ * Fixture-only reference prices for unit tests / demoCrypto15m helpers.
+ * NEVER used by fetchPublicSpot or live/strict paper MM — fail closed instead.
+ */
 export const DEMO_SPOT_BASE: Record<string, number> = {
   BTC: 95_000,
   ETH: 3_400,
@@ -107,20 +111,6 @@ export const DEMO_SPOT_BASE: Record<string, number> = {
   NEAR: 5,
   TON: 5,
   HYPE: 25,
-}
-
-/** Deterministic-ish demo walk so offline mode still exercises the guard. */
-function demoSpot(asset: string): SpotTick {
-  const base = DEMO_SPOT_BASE[asset]
-  if (base == null || !(base > 0)) {
-    throw new Error(`no demo spot for unsupported asset: ${asset}`)
-  }
-  const t = Date.now()
-  // ~0.05% wobble + occasional larger jumps so guard can fire in demo
-  const wobble = Math.sin(t / 4000) * 0.0004 + Math.sin(t / 17000) * 0.0008
-  const jump = Math.sin(t / 33000) > 0.97 ? 0.0025 * Math.sign(Math.sin(t / 11000)) : 0
-  const price = base * (1 + wobble + jump)
-  return { asset, price, source: 'demo', t }
 }
 
 async function fetchBinance(asset: string, signal?: AbortSignal): Promise<SpotTick | null> {
@@ -148,8 +138,9 @@ async function fetchCoinbase(asset: string, signal?: AbortSignal): Promise<SpotT
 }
 
 /**
- * Poll free public spot. Prefers Binance, falls back to Coinbase, then demo walk
- * for *supported* assets only. Unknown assets fail closed (throw) — never BTC.
+ * Poll free public spot. Prefers Binance, falls back to Coinbase.
+ * Supported assets with both venues failing → throw (fail closed).
+ * Unknown assets throw — never BTC, never demo/fake prices.
  */
 export async function fetchPublicSpot(
   assetRaw: string,
@@ -159,19 +150,22 @@ export async function fetchPublicSpot(
   if (!asset) {
     throw new Error(`unsupported spot asset: ${assetRaw}`)
   }
+  const errors: string[] = []
   try {
     const b = await fetchBinance(asset, signal)
     if (b) return b
-  } catch {
-    /* try coinbase */
+    errors.push('binance: no symbol')
+  } catch (e) {
+    errors.push(`binance: ${e instanceof Error ? e.message : String(e)}`)
   }
   try {
     const c = await fetchCoinbase(asset, signal)
     if (c) return c
-  } catch {
-    /* demo */
+    errors.push('coinbase: no product')
+  } catch (e) {
+    errors.push(`coinbase: ${e instanceof Error ? e.message : String(e)}`)
   }
-  return demoSpot(asset)
+  throw new Error(`spot unavailable for ${asset} (${errors.join('; ')})`)
 }
 
 export interface SpotMoveStats {

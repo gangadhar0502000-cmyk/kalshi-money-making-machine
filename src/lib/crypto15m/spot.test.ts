@@ -64,4 +64,16 @@ describe('fetchPublicSpot fail-closed', () => {
     await expect(fetchPublicSpot('NOTACOIN')).rejects.toThrow(/unsupported spot asset/i)
     await expect(fetchPublicSpot('PEPE')).rejects.toThrow(/unsupported spot asset/i)
   })
+
+  it('throws when Binance and Coinbase both fail — never returns source demo', async () => {
+    const orig = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('network down')
+    }) as typeof fetch
+    try {
+      await expect(fetchPublicSpot('BTC')).rejects.toThrow(/spot unavailable/i)
+    } finally {
+      globalThis.fetch = orig
+    }
+  })
 })

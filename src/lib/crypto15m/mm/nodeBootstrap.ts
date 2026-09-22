@@ -22,7 +22,8 @@ function rewriteUrl(raw: string, proxyBase: string): string {
     return proxyBase.replace(/\/$/, '') + raw
   }
   if (raw.startsWith('/api/binance')) {
-    return 'https://api.binance.com' + raw.replace(/^\/api\/binance/, '')
+    // Prefer .us (US / Mac get 451 from api.binance.com); fetch wrapper may fall back to .com
+    return 'https://api.binance.us' + raw.replace(/^\/api\/binance/, '')
   }
   if (raw.startsWith('/api/coinbase')) {
     return 'https://api.exchange.coinbase.com' + raw.replace(/^\/api\/coinbase/, '')
@@ -157,14 +158,23 @@ export function bootstrapNodePaperMm(opts: NodeBootstrapOpts): {
     })
 
     const origFetch = globalThis.fetch.bind(globalThis)
-    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       let url: string
       if (typeof input === 'string') url = input
       else if (input instanceof URL) url = input.toString()
       else url = input.url
       const rewritten = rewriteUrl(url, proxyBase)
       if (rewritten === url) return origFetch(input as RequestInfo, init)
-      return origFetch(rewritten, init)
+      const res = await origFetch(rewritten, init)
+      // Binance geo: try .us first; if blocked, fall back to .com
+      if (
+        rewritten.includes('://api.binance.us/') &&
+        (res.status === 451 || res.status === 403)
+      ) {
+        const comUrl = rewritten.replace('://api.binance.us/', '://api.binance.com/')
+        return origFetch(comUrl, init)
+      }
+      return res
     }) as typeof fetch
 
     bootstrapped = true

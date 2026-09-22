@@ -1449,12 +1449,12 @@ export class PaperMmEngine {
 
   /**
    * Test/helper: seed last public spot without network (paper research only).
-   * Triggers an FV requote.
+   * Triggers an FV requote. Never tags source as 'demo' — pass real venue when known.
    */
-  seedSpot(price: number): void {
+  seedSpot(price: number, source: SpotTick['source'] = 'binance'): void {
     if (!Number.isFinite(price) || price <= 0) return
     const asset = this.market?.asset ?? 'UNKNOWN'
-    this.lastSpot = { asset, price, source: 'demo', t: Date.now() }
+    this.lastSpot = { asset, price, source, t: Date.now() }
     this.spotHist.push(price, Date.now())
     this.rebuildQuote(true)
     this.emit()

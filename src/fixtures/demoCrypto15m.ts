@@ -4,11 +4,11 @@ import type { KalshiMarketRaw } from '../types/kalshi'
  * Offline crypto 15m samples when live API is unavailable / rate-limited.
  *
  * floor_strike is REQUIRED so estimateYesFairValue runs offline.
- * Strikes sit slightly off DEMO_SPOT_BASE (see spot.ts) so |FV−mid| is non-trivial.
+ * Strikes sit slightly off DEMO_FIXTURE_SPOTS / DEMO_SPOT_BASE (fixture-only; not live spot) so |FV−mid| is non-trivial.
  * Window times are regenerated on every call so markets stay open across refresh.
  */
 
-/** Align with src/lib/crypto15m/spot.ts DEMO_BASE — keep in sync. */
+/** Align with fixture-only DEMO_SPOT_BASE in spot.ts — unit tests only, never live MM. */
 export const DEMO_FIXTURE_SPOTS: Record<string, number> = {
   BTC: 95_000,
   ETH: 3_400,

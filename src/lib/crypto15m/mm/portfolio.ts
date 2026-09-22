@@ -7,7 +7,6 @@
 
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import {
-  DEMO_SPOT_BASE,
   canonicalMmAsset,
   fetchPublicSpot,
   normalizeSpotAsset,
@@ -310,22 +309,6 @@ export class PaperMmPortfolio {
     return markets.filter((m) => isMarketOpen(m, nowMs)).length
   }
 
-  /**
-   * Seed provisional demo spots for assets missing a live tick so FV/scan
-   * is computable offline (DEMO fixtures / first paint before spot poll).
-   */
-  private ensureProvisionalSpots(markets: Crypto15mMarket[]): void {
-    for (const m of markets) {
-      const key = normalizeSpotAsset(m.asset)
-      if (!key) continue // unsupported: leave no spot (scan shows no_spot)
-      if (this.spotsByAsset[key] != null) continue
-      const base = DEMO_SPOT_BASE[key]
-      if (base != null && base > 0) {
-        this.spotsByAsset[key] = base
-      }
-    }
-  }
-
   getState(): PortfolioState {
     const books: PortfolioBookView[] = []
     for (const [slotId, eng] of this.books) {
@@ -420,7 +403,6 @@ export class PaperMmPortfolio {
    */
   syncMarketUniverse(markets: Crypto15mMarket[]): void {
     this.lastMarkets = markets
-    this.ensureProvisionalSpots(markets)
     this.refreshScan(markets)
 
     const openN = this.openCount(markets)
@@ -604,7 +586,6 @@ export class PaperMmPortfolio {
   }
 
   private rebalanceSlots(markets: Crypto15mMarket[]): void {
-    this.ensureProvisionalSpots(markets)
     this.refreshScan(markets)
 
     // CRITICAL: never release books as "outside top-N" on an empty/stale ranking
@@ -825,7 +806,7 @@ export class PaperMmPortfolio {
         for (const eng of this.books.values()) {
           const snap = eng.getState().snapshot
           if (snap.asset && normalizeSpotAsset(snap.asset) === a) {
-            eng.seedSpot(tick.price)
+            eng.seedSpot(tick.price, tick.source)
           }
         }
       } catch {

@@ -46,7 +46,7 @@ const proxy = {
     secure: true,
   },
   '/api/binance': {
-    target: 'https://api.binance.com',
+    target: 'https://api.binance.us',
     changeOrigin: true,
     rewrite: (path: string) => path.replace(/^\/api\/binance/, ''),
     secure: true,

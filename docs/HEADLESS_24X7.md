@@ -2,6 +2,8 @@
 
 **PAPER ONLY — never places live Kalshi orders.** The Mac can stay closed; this box runs continuously.
 
+Public spot is **real-only** (Binance.us preferred, then Coinbase). No demo spot walk — if both venues fail, spot polling fails closed and FV stays parked.
+
 ## What runs
 
 | Process | Role |

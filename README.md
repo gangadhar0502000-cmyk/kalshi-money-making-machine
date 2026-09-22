@@ -189,7 +189,7 @@ src/
     mm-proxy.mjs          Read-only Kalshi proxy (assertReadOnly)
     dev-real.mjs          proxy + vite launcher
     journal.ts            Paper journal + per-rule stats
-    spot.ts               Free public Binance/Coinbase spot (MM guard)
+    spot.ts               Free public Binance.us/Coinbase spot (fail-closed; no demo prices)
     mm/                   Paper market maker engine + config
     backtest/             Settled-history rule replay engine
   fixtures/demoCrypto15m.ts           Unit-test helpers only (not used as live feed)
