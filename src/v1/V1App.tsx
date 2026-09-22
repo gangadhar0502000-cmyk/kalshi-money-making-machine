@@ -17,8 +17,8 @@ import {
 } from './feedStatus'
 
 /**
- * v1 Orbit console — probability-first product UI.
- * Feed only. Paper / read-only.
+ * KMM v1 — Money Machine ops console.
+ * Unique hacker / print-money aesthetic. Feed only. Paper / read-only.
  */
 export function V1App() {
   const snap = useContinuousFeed()
@@ -47,64 +47,68 @@ export function V1App() {
   const assets = useMemo(() => markets.map((m) => m.asset), [markets])
   const spots = useSpotMap(assets)
 
-  const chipClass =
+  const chip =
     status.feedTone === 'ok'
-      ? 'v1-chip v1-chip--live'
+      ? 'kmm-chip kmm-chip--live'
       : status.feedTone === 'amber'
-        ? 'v1-chip v1-chip--warn'
+        ? 'kmm-chip kmm-chip--warn'
         : status.feedTone === 'red'
-          ? 'v1-chip v1-chip--off'
-          : 'v1-chip'
+          ? 'kmm-chip kmm-chip--off'
+          : 'kmm-chip'
 
   return (
-    <div className="v1-shell">
-      <div className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
-        {/* Top nav */}
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-4 sm:mb-8">
-          <div className="flex items-center gap-3">
-            <LogoMark />
-            <div>
-              <div className="flex items-baseline gap-2">
-                <h1 className="font-display text-xl font-bold tracking-tight text-[var(--color-ink)] sm:text-2xl">
-                  Kalshi 15m
-                </h1>
-                <span className="v1-chip">v1</span>
+    <div className="kmm-shell">
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1320px] flex-col px-3 py-4 sm:px-5 sm:py-6 lg:px-8">
+        {/* OPS HEADER */}
+        <header className="kmm-frame kmm-corners mb-4 px-3 py-3 sm:px-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="flex h-9 w-9 items-center justify-center border border-[var(--color-profit)] bg-[rgba(184,255,60,0.08)] font-display text-xs font-bold text-[var(--color-profit)]"
+                aria-hidden
+              >
+                $
               </div>
-              <p className="mt-0.5 text-xs text-[var(--color-mute)]">
-                Paper feed · read-only · never places trades
-              </p>
+              <div>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h1 className="font-display text-lg font-bold tracking-tight text-[var(--color-ink)] sm:text-xl">
+                    KALSHI MONEY MACHINE
+                  </h1>
+                  <span className="kmm-chip">v1 · PAPER</span>
+                </div>
+                <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-dim)]">
+                  ops console // continuous feed // read-only // never live
+                </p>
+              </div>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={chipClass}>
-              <span
-                className={`live-pulse inline-block h-1.5 w-1.5 rounded-full ${
-                  status.feedTone === 'ok'
-                    ? 'bg-[var(--color-accent-2)]'
-                    : status.feedTone === 'amber'
-                      ? 'bg-[var(--color-warm)]'
-                      : status.feedTone === 'red'
-                        ? 'bg-[var(--color-danger)]'
-                        : 'bg-[var(--color-mute)]'
-                }`}
-              />
-              {status.liveLabel}
-            </span>
-            <span className="v1-chip num">{status.feedAgeShort}</span>
-            <span className="v1-chip">{status.marketCount} open</span>
-            <span className="v1-chip">{status.proxyShort}</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={chip}>
+                <span
+                  className={`live-pulse inline-block h-1.5 w-1.5 rounded-full ${
+                    status.feedTone === 'ok'
+                      ? 'bg-[var(--color-profit)]'
+                      : status.feedTone === 'amber'
+                        ? 'bg-[var(--color-gold)]'
+                        : 'bg-[var(--color-alert)]'
+                  }`}
+                />
+                {status.liveLabel.toUpperCase()}
+              </span>
+              <span className="kmm-chip num">AGE {status.feedAgeShort.toUpperCase()}</span>
+              <span className="kmm-chip num">{status.marketCount} MKTS</span>
+              <span className="kmm-chip">PX {status.proxyShort.toUpperCase()}</span>
+            </div>
           </div>
         </header>
 
-        {/* Hero focus */}
-        <section className="v1-hero mb-6 p-5 sm:mb-8 sm:p-8">
+        {/* HERO TARGET */}
+        <section className="kmm-hero kmm-scan kmm-corners mb-4 p-4 sm:p-6">
           {!status.everSucceeded ? (
-            <HeroConnecting />
+            <BootBlock label="BOOTING FEED…" sub="local proxy → kalshi L2 (read-only)" />
           ) : !active ? (
-            <HeroEmpty />
+            <BootBlock label="NO OPEN WINDOWS" sub="feed healthy · waiting next 15m crypto set" />
           ) : (
-            <HeroMarket
+            <TargetHero
               market={active}
               spot={
                 normalizeSpotAsset(active.asset)
@@ -116,76 +120,58 @@ export function V1App() {
           )}
         </section>
 
-        {/* Market mosaic */}
-        <section className="mb-8 flex-1">
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <h2 className="font-display text-sm font-semibold tracking-wide text-[var(--color-ink)]">
-                Open window
-              </h2>
-              <p className="text-xs text-[var(--color-mute)]">
-                Tap a market to focus · sorted by time left
-              </p>
-            </div>
-            {status.lastError && (
-              <p
-                className="max-w-xs truncate text-right text-[10px] text-[var(--color-mute)]"
-                title={status.lastError}
-              >
-                {status.lastError}
-              </p>
-            )}
+        {/* GRID */}
+        <section className="mb-4 flex-1">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-dim)]">
+              // open_crypto_15m_scan
+            </p>
+            <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-gold)]">
+              select target · hunt edge later
+            </p>
           </div>
 
           {markets.length === 0 ? (
-            <div className="v1-glass rounded-2xl px-6 py-16 text-center text-sm text-[var(--color-mute)]">
-              {status.everSucceeded
-                ? 'No open crypto 15m contracts in this window.'
-                : 'Waiting for the continuous proxy feed…'}
+            <div className="kmm-frame px-4 py-14 text-center text-xs uppercase tracking-widest text-[var(--color-dim)]">
+              {status.everSucceeded ? 'empty set' : 'awaiting packets…'}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {markets.map((m) => {
+                const on = m.ticker === selected
                 const canon = normalizeSpotAsset(m.asset)
                 const spot = canon ? spots[canon] ?? null : null
-                const on = m.ticker === selected
                 return (
                   <button
                     key={m.ticker}
                     type="button"
                     onClick={() => setSelected(m.ticker)}
-                    className={`v1-card p-3.5 text-left sm:p-4 ${on ? 'v1-card--active' : ''}`}
+                    className={`kmm-card p-3 ${on ? 'kmm-card--on' : ''}`}
                   >
-                    <div className="mb-3 flex items-start justify-between gap-2">
-                      <span className="rounded-md bg-[rgba(124,108,255,0.15)] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-[var(--color-accent)]">
+                    <div className="mb-2 flex items-center justify-between gap-1">
+                      <span className="border border-[rgba(184,255,60,0.3)] bg-[rgba(184,255,60,0.08)] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-[var(--color-profit)]">
                         {m.asset}
                       </span>
                       <span
-                        className={`num text-[10px] font-medium ${timeUrgencyClass(m.minutesRemaining)}`}
+                        className={`num text-[10px] ${timeUrgencyClass(m.minutesRemaining)}`}
                       >
                         {fmtMinutesLeft(m.minutesRemaining)}
                       </span>
                     </div>
-                    <div className="mb-1 text-xs text-[var(--color-mute)]">
+                    <div className="font-display text-[11px] text-[var(--color-dim)]">
                       {assetShortName(m.asset)}
                     </div>
-                    <div className="flex items-end justify-between gap-2">
-                      <div>
-                        <div className="num text-2xl font-semibold tracking-tight text-[var(--color-yes)] sm:text-3xl">
-                          {Math.round(m.midYes * 100)}
-                          <span className="text-base text-[var(--color-mute)]">¢</span>
-                        </div>
-                        <div className="num mt-1 text-[10px] text-[var(--color-mute)]">
-                          {fmtPrice(m.yesBid)} · {fmtPrice(m.yesAsk)}
-                        </div>
+                    <div className="mt-1 flex items-end justify-between">
+                      <div className="num text-2xl font-bold leading-none text-[var(--color-profit)] sm:text-3xl">
+                        {Math.round(m.midYes * 100)}
+                        <span className="text-sm text-[var(--color-dim)]">¢</span>
                       </div>
-                      <MiniArc pct={m.midYes} size={44} />
+                      <HackArc pct={m.midYes} />
                     </div>
-                    {spot != null && (
-                      <div className="num mt-2.5 border-t border-[var(--color-line)] pt-2 text-[10px] text-[var(--color-mute)]">
-                        Spot {fmtSpot(spot)}
-                      </div>
-                    )}
+                    <div className="num mt-2 text-[10px] text-[var(--color-dim)]">
+                      {fmtPrice(m.yesBid)}/{fmtPrice(m.yesAsk)}
+                      {spot != null ? ` · ${fmtSpot(spot)}` : ''}
+                    </div>
                   </button>
                 )
               })}
@@ -193,10 +179,10 @@ export function V1App() {
           )}
         </section>
 
-        <footer className="mt-auto flex items-center justify-between border-t border-[var(--color-line)] pt-4 text-[10px] text-[var(--color-mute)]">
-          <span>Continuous proxy cache · 1s UI poll</span>
-          <a href="?legacy=1" className="opacity-40 transition hover:opacity-80">
-            legacy
+        <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-line)] pt-3 text-[10px] uppercase tracking-[0.12em] text-[var(--color-dim)]">
+          <span>kmm // print_money_mode=paper // live_orders=off</span>
+          <a href="?legacy=1" className="opacity-30 hover:opacity-70">
+            legacy_lab
           </a>
         </footer>
       </div>
@@ -204,63 +190,18 @@ export function V1App() {
   )
 }
 
-function LogoMark() {
+function BootBlock({ label, sub }: { label: string; sub: string }) {
   return (
-    <div
-      className="relative flex h-10 w-10 items-center justify-center rounded-xl"
-      style={{
-        background:
-          'linear-gradient(145deg, rgba(124,108,255,0.35), rgba(61,255,192,0.2))',
-        boxShadow: '0 0 24px rgba(124,108,255,0.25)',
-      }}
-      aria-hidden
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="9" stroke="rgba(244,241,234,0.25)" strokeWidth="1.5" />
-        <path
-          d="M12 3a9 9 0 0 1 0 18"
-          stroke="var(--color-accent-2)"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <circle cx="12" cy="12" r="2.5" fill="var(--color-ink)" />
-      </svg>
-    </div>
-  )
-}
-
-function HeroConnecting() {
-  return (
-    <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
-      <div className="flex gap-1.5">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="h-2 w-2 rounded-full bg-[var(--color-accent)]"
-            style={{ animation: `v1-pulse 1.2s ease-in-out ${i * 0.15}s infinite` }}
-          />
-        ))}
-      </div>
-      <p className="font-display text-lg font-semibold">Connecting feed</p>
-      <p className="max-w-sm text-sm text-[var(--color-mute)]">
-        Pulling open crypto 15m markets through the local read-only proxy.
+    <div className="flex flex-col items-start gap-2 py-10 sm:py-14">
+      <p className="font-display text-xl font-bold tracking-tight text-[var(--color-profit)] sm:text-2xl">
+        &gt; {label}
       </p>
+      <p className="text-xs uppercase tracking-[0.14em] text-[var(--color-dim)]">{sub}</p>
     </div>
   )
 }
 
-function HeroEmpty() {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-      <p className="font-display text-lg font-semibold">Between windows</p>
-      <p className="max-w-sm text-sm text-[var(--color-mute)]">
-        Feed is up — Kalshi has no open crypto 15m markets right now.
-      </p>
-    </div>
-  )
-}
-
-function HeroMarket({
+function TargetHero({
   market,
   spot,
   nowMs,
@@ -271,157 +212,144 @@ function HeroMarket({
 }) {
   void nowMs
   const mids = getMidHistory(market.ticker).map((s) => s.mid)
-  const spark = sparklinePolylinePoints(mids, 320, 72)
+  const spark = sparklinePolylinePoints(mids, 360, 80)
   const progress = windowProgress(market.minutesRemaining, 15)
   const pct = Math.round(market.midYes * 100)
-  const left = fmtMinutesLeft(market.minutesRemaining)
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:items-center">
+    <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-stretch">
       <div>
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span className="rounded-lg bg-[rgba(124,108,255,0.2)] px-2 py-1 text-xs font-bold tracking-wider text-[var(--color-accent)]">
+        <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-gold)]">
+          // active_target
+        </p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="border border-[var(--color-profit)] bg-[rgba(184,255,60,0.1)] px-2 py-0.5 text-xs font-bold text-[var(--color-profit)]">
             {market.asset}
           </span>
-          <span className="text-sm text-[var(--color-mute)]">
+          <span className="font-display text-sm text-[var(--color-ink)]">
             {assetShortName(market.asset)}
           </span>
-          <span className="num hidden text-[10px] text-[var(--color-mute)] sm:inline">
-            {market.ticker}
-          </span>
+          <span className="num text-[10px] text-[var(--color-dim)]">{market.ticker}</span>
         </div>
 
-        <div className="flex flex-wrap items-end gap-6">
+        <div className="flex flex-wrap items-end gap-5">
           <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--color-mute)]">
-              YES mid
+            <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-dim)]">
+              yes_mid
             </div>
-            <div className="num mt-1 font-display text-6xl font-bold leading-none tracking-tight text-[var(--color-yes)] sm:text-7xl">
+            <div className="num font-display text-6xl font-bold leading-none tracking-tight text-[var(--color-profit)] sm:text-7xl">
               {pct}
-              <span className="text-3xl text-[var(--color-mute)]">¢</span>
+              <span className="text-2xl text-[var(--color-gold)]">¢</span>
             </div>
           </div>
-          <ProbabilityRing pct={market.midYes} />
+          <HackRing pct={market.midYes} />
         </div>
 
-        <div className="mt-6 grid grid-cols-3 gap-3 sm:max-w-md">
-          <Stat label="Bid" value={fmtPrice(market.yesBid)} />
-          <Stat label="Ask" value={fmtPrice(market.yesAsk)} />
-          <Stat
-            label="Spread"
-            value={fmtSpreadCents(market.yesBid, market.yesAsk, market.spreadCents)}
+        <div className="mt-5 grid grid-cols-3 gap-2 sm:max-w-lg">
+          <Cell k="bid" v={fmtPrice(market.yesBid)} />
+          <Cell k="ask" v={fmtPrice(market.yesAsk)} />
+          <Cell
+            k="spr"
+            v={fmtSpreadCents(market.yesBid, market.yesAsk, market.spreadCents)}
           />
         </div>
 
-        <div className="mt-5">
-          <div className="mb-1.5 flex justify-between text-[11px] text-[var(--color-mute)]">
-            <span>Window</span>
-            <span className={`num font-medium ${timeUrgencyClass(market.minutesRemaining)}`}>
-              {left} left
+        <div className="mt-4">
+          <div className="mb-1 flex justify-between text-[10px] uppercase tracking-wider text-[var(--color-dim)]">
+            <span>window_burn</span>
+            <span className={`num ${timeUrgencyClass(market.minutesRemaining)}`}>
+              {fmtMinutesLeft(market.minutesRemaining)} left
             </span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+          <div className="h-2 border border-[var(--color-line)] bg-black/40">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)] transition-[width] duration-300"
-              style={{ width: `${Math.round(progress * 100)}%` }}
+              className="h-full bg-[var(--color-profit)] transition-[width] duration-200"
+              style={{
+                width: `${Math.round(progress * 100)}%`,
+                boxShadow: '0 0 12px rgba(184,255,60,0.45)',
+              }}
             />
           </div>
         </div>
 
         {spot != null && (
-          <p className="num mt-4 text-xs text-[var(--color-mute)]">
-            Underlying spot {fmtSpot(spot)}
+          <p className="num mt-3 text-[11px] text-[var(--color-gold)]">
+            spot_ref {fmtSpot(spot)}
           </p>
         )}
       </div>
 
-      <div className="v1-glass rounded-2xl p-4 sm:p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--color-mute)]">
-            Mid trail
-          </span>
-          <span className="num text-[10px] text-[var(--color-mute)]">{mids.length} pts</span>
+      <div className="kmm-frame flex flex-col p-3 sm:p-4">
+        <div className="mb-2 flex justify-between text-[10px] uppercase tracking-[0.14em] text-[var(--color-dim)]">
+          <span>mid_trace</span>
+          <span className="num">{mids.length} samples</span>
         </div>
         {spark ? (
-          <svg
-            viewBox="0 0 320 72"
-            className="h-24 w-full"
-            preserveAspectRatio="none"
-            aria-hidden
-          >
-            <defs>
-              <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(61,255,192,0.35)" />
-                <stop offset="100%" stopColor="rgba(61,255,192,0)" />
-              </linearGradient>
-            </defs>
-            <polygon
-              points={`0,72 ${spark} 320,72`}
-              fill="url(#sparkFill)"
+          <svg viewBox="0 0 360 80" className="h-28 w-full" preserveAspectRatio="none">
+            <polyline
+              points={spark}
+              fill="none"
+              stroke="var(--color-profit)"
+              strokeWidth="2"
+              strokeLinejoin="round"
             />
             <polyline
               points={spark}
               fill="none"
-              stroke="var(--color-accent-2)"
-              strokeWidth="2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
+              stroke="var(--color-gold)"
+              strokeWidth="1"
+              opacity="0.35"
+              transform="translate(0, 2)"
             />
           </svg>
         ) : (
-          <div className="flex h-24 items-center justify-center text-xs text-[var(--color-mute)]">
-            Building history…
+          <div className="flex h-28 items-center justify-center text-[10px] uppercase tracking-widest text-[var(--color-dim)]">
+            collecting ticks…
           </div>
         )}
-        <p className="mt-2 text-[10px] leading-relaxed text-[var(--color-mute)]">
-          Live mid samples from the continuous feed. History grows while this tab stays open.
+        <p className="mt-auto pt-2 text-[10px] leading-relaxed text-[var(--color-dim)]">
+          Paper surveillance only. Edge rules / MM print layer lands in later v1 updates — this
+          feed is the spine.
         </p>
       </div>
     </div>
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Cell({ k, v }: { k: string; v: string }) {
   return (
-    <div className="rounded-xl border border-[var(--color-line)] bg-white/[0.02] px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-[var(--color-mute)]">{label}</div>
-      <div className="num mt-0.5 text-sm font-semibold text-[var(--color-ink)]">{value}</div>
+    <div className="border border-[var(--color-line)] bg-black/30 px-2 py-2">
+      <div className="text-[9px] uppercase tracking-[0.14em] text-[var(--color-dim)]">{k}</div>
+      <div className="num text-sm font-semibold text-[var(--color-ink)]">{v}</div>
     </div>
   )
 }
 
-function ProbabilityRing({ pct }: { pct: number }) {
+function HackRing({ pct }: { pct: number }) {
   const p = Math.min(1, Math.max(0, pct))
-  const r = 52
+  const r = 48
   const c = 2 * Math.PI * r
   const dash = c * p
   return (
-    <svg width="128" height="128" viewBox="0 0 128 128" className="shrink-0" aria-hidden>
-      <circle cx="64" cy="64" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+    <svg width="118" height="118" viewBox="0 0 118 118" aria-hidden>
+      <circle cx="59" cy="59" r={r} fill="none" stroke="rgba(184,255,60,0.12)" strokeWidth="8" />
       <circle
-        cx="64"
-        cy="64"
+        cx="59"
+        cy="59"
         r={r}
         fill="none"
-        stroke="url(#ringGrad)"
-        strokeWidth="10"
-        strokeLinecap="round"
+        stroke="var(--color-profit)"
+        strokeWidth="8"
+        strokeLinecap="square"
         strokeDasharray={`${dash} ${c - dash}`}
-        transform="rotate(-90 64 64)"
+        transform="rotate(-90 59 59)"
       />
-      <defs>
-        <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--color-accent)" />
-          <stop offset="100%" stopColor="var(--color-accent-2)" />
-        </linearGradient>
-      </defs>
       <text
-        x="64"
-        y="68"
+        x="59"
+        y="64"
         textAnchor="middle"
-        className="num"
-        fill="var(--color-ink)"
-        style={{ fontSize: '18px', fontWeight: 600 }}
+        fill="var(--color-gold)"
+        style={{ fontSize: '16px', fontFamily: 'IBM Plex Mono', fontWeight: 700 }}
       >
         {Math.round(p * 100)}%
       </text>
@@ -429,24 +357,24 @@ function ProbabilityRing({ pct }: { pct: number }) {
   )
 }
 
-function MiniArc({ pct, size }: { pct: number; size: number }) {
+function HackArc({ pct }: { pct: number }) {
   const p = Math.min(1, Math.max(0, pct))
-  const r = size / 2 - 4
+  const size = 40
+  const r = size / 2 - 3
   const c = 2 * Math.PI * r
-  const dash = c * p
   const mid = size / 2
   return (
     <svg width={size} height={size} aria-hidden>
-      <circle cx={mid} cy={mid} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3" />
+      <circle cx={mid} cy={mid} r={r} fill="none" stroke="rgba(184,255,60,0.12)" strokeWidth="3" />
       <circle
         cx={mid}
         cy={mid}
         r={r}
         fill="none"
-        stroke="var(--color-accent-2)"
+        stroke="var(--color-profit)"
         strokeWidth="3"
-        strokeLinecap="round"
-        strokeDasharray={`${dash} ${c - dash}`}
+        strokeLinecap="square"
+        strokeDasharray={`${c * p} ${c * (1 - p)}`}
         transform={`rotate(-90 ${mid} ${mid})`}
       />
     </svg>

@@ -33,3 +33,8 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
 
 Paper-only · read-only Kalshi · no live order placement.
+
+## U1f — Money Machine hacker palette
+
+Unique ops console: toxic profit green + hot gold + void black, IBM Plex Mono / Space Grotesk, scanlines, corner brackets, KMM branding. Not a fintech clone.
+
