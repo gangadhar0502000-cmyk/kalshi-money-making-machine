@@ -36,3 +36,6 @@ coverage
 .env.local
 *.pem
 *.key
+
+# Headless paper MM runtime state (journal/digests/logs/session)
+data/paper-mm/

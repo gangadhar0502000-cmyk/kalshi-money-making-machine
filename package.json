@@ -11,7 +11,10 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "mm:headless": "vite-node scripts/paper-mm-headless.mts",
+    "mm:24x7": "bash scripts/paper-mm-24x7.sh",
+    "mm:proxy": "node scripts/mm-proxy.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

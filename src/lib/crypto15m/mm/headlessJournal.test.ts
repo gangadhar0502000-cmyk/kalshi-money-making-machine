@@ -1,0 +1,135 @@
+/**
+ * Journal line format + digest aggregation by scenario.
+ * @vitest-environment node
+ */
+import { describe, expect, it } from 'vitest'
+import {
+  aggregateDigest,
+  buildBlockedCloseEvent,
+  buildFillEvent,
+  buildS51EvictEvent,
+  formatJournalLine,
+  hourKeyFromMs,
+  parseJournalLine,
+} from './headlessJournal'
+
+describe('headlessJournal format', () => {
+  it('formats and parses a fill line round-trip', () => {
+    const ev = buildFillEvent({
+      t: 1_700_000_000_000,
+      scenarioId: 'S1',
+      ticker: 'KXBTC15M-99',
+      asset: 'BTC',
+      side: 'buy_yes',
+      price: 0.42,
+      edgeCents: 5.5,
+      inventory: 1,
+      minutesLeft: 8.2,
+      captureCents: 0,
+      reason: 'book_depth',
+      realizedDelta: 0,
+    })
+    const line = formatJournalLine(ev)
+    expect(line.startsWith('{')).toBe(true)
+    expect(line.includes('\n')).toBe(false)
+    const parsed = parseJournalLine(line)
+    expect(parsed).toEqual(ev)
+    expect(parsed?.iso).toBe(new Date(1_700_000_000_000).toISOString())
+  })
+
+  it('formats blocked_close with reason and capture', () => {
+    const ev = buildBlockedCloseEvent({
+      t: 1_700_000_000_500,
+      scenarioId: 'S5',
+      ticker: 'KXETH15M-1',
+      asset: 'ETH',
+      side: 'sell_yes',
+      inventory: 2,
+      captureCents: 0.4,
+      reason: 'CLOSE blocked: capture 0.4 < 1.0¢',
+    })
+    const line = formatJournalLine(ev)
+    const parsed = parseJournalLine(line)
+    expect(parsed?.type).toBe('blocked_close')
+    expect(parsed?.reason).toMatch(/CLOSE blocked/)
+    expect(parsed?.captureCents).toBe(0.4)
+  })
+
+  it('returns null for corrupt journal lines', () => {
+    expect(parseJournalLine('')).toBeNull()
+    expect(parseJournalLine('not-json')).toBeNull()
+    expect(parseJournalLine('{"type":"fill"}')).toBeNull()
+  })
+})
+
+describe('headlessJournal digest', () => {
+  it('aggregates fills / stuck / S5.1 by scenario', () => {
+    const t0 = Date.UTC(2026, 8, 22, 3, 10, 0) // inside a known hour UTC
+    const events = [
+      buildFillEvent({
+        t: t0 + 1000,
+        scenarioId: 'S1',
+        side: 'buy_yes',
+        price: 0.4,
+        captureCents: 0,
+        realizedDelta: 0,
+      }),
+      buildFillEvent({
+        t: t0 + 2000,
+        scenarioId: 'S3',
+        side: 'sell_yes',
+        price: 0.45,
+        captureCents: 3.2,
+        realizedDelta: 0.032,
+        reason: 'S3 PROFITABLE_CLOSE',
+      }),
+      buildFillEvent({
+        t: t0 + 3000,
+        scenarioId: 'S4.1',
+        side: 'sell_yes',
+        price: 0.41,
+        captureCents: 0.1,
+        realizedDelta: 0.001,
+        reason: 'S4.1 STUCK_UNWIND',
+      }),
+      buildBlockedCloseEvent({
+        t: t0 + 4000,
+        scenarioId: 'S5',
+        reason: 'CLOSE blocked: capture 0.2 < 1.0¢',
+        captureCents: 0.2,
+      }),
+      buildS51EvictEvent({
+        t: t0 + 5000,
+        ticker: 'KXSOL15M-9',
+        asset: 'SOL',
+      }),
+      // outside window
+      buildFillEvent({
+        t: t0 + 3_600_000 + 10,
+        scenarioId: 'S1',
+        side: 'buy_yes',
+        price: 0.5,
+      }),
+    ]
+
+    const digest = aggregateDigest(events, t0, t0 + 3_600_000)
+    expect(digest.paperOnly).toBe(true)
+    expect(digest.byScenario.S1?.fills).toBe(1)
+    expect(digest.byScenario.S3?.fills).toBe(1)
+    expect(digest.byScenario.S3?.avgCentsPerFill).toBeCloseTo(3.2, 5)
+    expect(digest.byScenario['S4.1']?.fills).toBe(1)
+    expect(digest.byScenario['S4.1']?.stuckS41).toBe(1)
+    expect(digest.byScenario.S5?.blockedCloses).toBe(1)
+    expect(digest.byScenario['S5.1']?.s51Evictions).toBe(1)
+    expect(digest.totals.fills).toBe(3)
+    expect(digest.totals.s51Evictions).toBe(1)
+    expect(digest.totals.blockedCloses).toBe(1)
+    expect(digest.totals.events).toBe(5)
+  })
+
+  it('hourKeyFromMs returns YYYY-MM-DD-HH', () => {
+    const key = hourKeyFromMs(Date.UTC(2026, 8, 22, 5, 30, 0), 'UTC')
+    expect(key).toMatch(/^\d{4}-\d{2}-\d{2}-\d{2}$/)
+    expect(key.endsWith('-05') || key.endsWith('-05')).toBe(true)
+  })
+})
