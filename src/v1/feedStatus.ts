@@ -218,3 +218,74 @@ export function assetShortName(asset: string): string {
   const key = asset.trim().toUpperCase()
   return ASSET_NAMES[key] ?? asset
 }
+
+/** Fraction of ~15m window elapsed (0..1). */
+export function windowProgress(
+  minutesRemaining: number,
+  windowMinutes = 15,
+): number {
+  if (!Number.isFinite(minutesRemaining) || !(windowMinutes > 0)) return 0
+  const elapsed = windowMinutes - minutesRemaining
+  if (!Number.isFinite(elapsed)) return 0
+  return Math.min(1, Math.max(0, elapsed / windowMinutes))
+}
+
+/** Prominent countdown as mm:ss. */
+export function fmtCountdownMmSs(mins: number): string {
+  if (!Number.isFinite(mins) || mins <= 0) return '00:00'
+  const totalSec = Math.max(0, Math.round(mins * 60))
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+/**
+ * SVG polyline points for a mid sparkline.
+ * Returns null when fewer than 2 samples.
+ */
+export function sparklinePolylinePoints(
+  mids: number[],
+  width: number,
+  height: number,
+  pad = 2,
+): string | null {
+  if (mids.length < 2) return null
+  let min = Infinity
+  let max = -Infinity
+  for (const v of mids) {
+    if (!Number.isFinite(v)) continue
+    if (v < min) min = v
+    if (v > max) max = v
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  const span = max - min || 1e-9
+  const innerW = Math.max(1, width - pad * 2)
+  const innerH = Math.max(1, height - pad * 2)
+  const n = mids.length
+  const pts: string[] = []
+  for (let i = 0; i < n; i++) {
+    const mid = mids[i]!
+    const x = pad + (i / (n - 1)) * innerW
+    const y = pad + (1 - (mid - min) / span) * innerH
+    pts.push(`${x.toFixed(1)},${y.toFixed(1)}`)
+  }
+  return pts.join(' ')
+}
+
+/** Δ mid in cents from first→last sample (null if <2). */
+export function midDeltaCents(
+  hist: ReadonlyArray<{ mid: number }>,
+): number | null {
+  if (hist.length < 2) return null
+  const a = hist[0]!.mid
+  const b = hist[hist.length - 1]!.mid
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
+  return Math.round((b - a) * 100)
+}
+
+export function fmtDeltaCents(delta: number | null): string {
+  if (delta == null || !Number.isFinite(delta)) return ''
+  if (delta > 0) return `+${delta}¢`
+  if (delta < 0) return `${delta}¢`
+  return '0¢'
+}

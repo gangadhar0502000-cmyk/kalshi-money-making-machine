@@ -80,3 +80,22 @@
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.85); }
 }
+
+/* v1 terminal console */
+.v1-console .rail-row--selected {
+  background: rgba(16, 185, 129, 0.08);
+  box-shadow: inset 3px 0 0 0 rgb(52 211 153);
+}
+
+.v1-console .rail-row--selected::before {
+  content: none;
+}
+
+.v1-console .sparkline-wrap {
+  min-height: 4.5rem;
+}
+
+.v1-console .sparkline {
+  display: block;
+  color: rgb(52 211 153);
+}

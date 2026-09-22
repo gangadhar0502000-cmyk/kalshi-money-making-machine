@@ -12,6 +12,11 @@ import {
   proxyHealthLabel,
   shortestMinutesLeft,
   timeUrgencyClass,
+  windowProgress,
+  fmtCountdownMmSs,
+  sparklinePolylinePoints,
+  midDeltaCents,
+  fmtDeltaCents,
 } from './feedStatus'
 import type { ContinuousFeedSnapshot } from '../lib/crypto15m/mm/continuousFeed'
 import type { Crypto15mMarket } from '../types/crypto15m'
@@ -106,5 +111,27 @@ describe('v1 feedStatus', () => {
     ).toBe(1.2)
     expect(assetShortName('BTC')).toBe('Bitcoin')
     expect(assetShortName('ZZZ')).toBe('ZZZ')
+  })
+
+  it('window progress and countdown', () => {
+    expect(windowProgress(15, 15)).toBe(0)
+    expect(windowProgress(0, 15)).toBe(1)
+    expect(windowProgress(7.5, 15)).toBeCloseTo(0.5)
+    expect(windowProgress(-1, 15)).toBe(1)
+    expect(fmtCountdownMmSs(2.5)).toBe('02:30')
+    expect(fmtCountdownMmSs(0)).toBe('00:00')
+    expect(fmtCountdownMmSs(0.5)).toBe('00:30')
+  })
+
+  it('sparkline points and mid delta', () => {
+    expect(sparklinePolylinePoints([0.4], 100, 40)).toBeNull()
+    const pts = sparklinePolylinePoints([0.4, 0.5, 0.45], 100, 40)
+    expect(pts).toMatch(/^[\d., ]+$/)
+    expect(pts!.split(' ')).toHaveLength(3)
+    expect(midDeltaCents([])).toBeNull()
+    expect(midDeltaCents([{ mid: 0.4 }, { mid: 0.45 }])).toBe(5)
+    expect(fmtDeltaCents(5)).toBe('+5¢')
+    expect(fmtDeltaCents(-3)).toBe('-3¢')
+    expect(fmtDeltaCents(null)).toBe('')
   })
 })
