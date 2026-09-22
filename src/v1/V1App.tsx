@@ -21,8 +21,8 @@ import {
 } from './feedStatus'
 
 /**
- * KMM v1 — Money Machine ops console.
- * Unique hacker / print-money aesthetic. Feed only. Paper / read-only.
+ * KMM v1 — Apple-clean feed UI.
+ * Dark iOS-style surface. Feed only. Paper / read-only.
  * YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
@@ -63,55 +63,47 @@ export function V1App() {
 
   return (
     <div className="kmm-shell">
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1320px] flex-col px-3 py-4 sm:px-5 sm:py-6 lg:px-8">
-        {/* OPS HEADER */}
-        <header className="kmm-frame kmm-corners mb-4 px-3 py-3 sm:px-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div
-                className="flex h-9 w-9 items-center justify-center border border-[var(--color-profit)] bg-[rgba(184,255,60,0.08)] font-display text-xs font-bold text-[var(--color-profit)]"
-                aria-hidden
-              >
-                $
-              </div>
-              <div>
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <h1 className="font-display text-lg font-bold tracking-tight text-[var(--color-ink)] sm:text-xl">
-                    KALSHI MONEY MACHINE
-                  </h1>
-                  <span className="kmm-chip">v1 · PAPER</span>
-                </div>
-                <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-dim)]">
-                  ops console · continuous feed · read-only · never live
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className={chip}>
-                <span
-                  className={`live-pulse inline-block h-1.5 w-1.5 rounded-full ${
-                    status.feedTone === 'ok'
-                      ? 'bg-[var(--color-profit)]'
-                      : status.feedTone === 'amber'
-                        ? 'bg-[var(--color-gold)]'
-                        : 'bg-[var(--color-alert)]'
-                  }`}
-                />
-                {status.liveLabel.toUpperCase()}
+      <div className="mx-auto flex min-h-screen w-full max-w-[1100px] flex-col px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        {/* Header */}
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h1 className="text-[22px] font-semibold tracking-tight text-[var(--color-label)] sm:text-[26px]">
+                Kalshi 15m
+              </h1>
+              <span className="text-[13px] font-medium text-[var(--color-secondary)]">
+                Paper · v1
               </span>
-              <span className="kmm-chip num">AGE {status.feedAgeShort.toUpperCase()}</span>
-              <span className="kmm-chip num">{status.marketCount} MKTS</span>
-              <span className="kmm-chip">PX {status.proxyShort.toUpperCase()}</span>
             </div>
+            <p className="mt-1 text-[13px] text-[var(--color-tertiary)]">
+              Continuous feed · read-only
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={chip}>
+              <span
+                className={`live-pulse inline-block h-1.5 w-1.5 rounded-full ${
+                  status.feedTone === 'ok'
+                    ? 'bg-[var(--color-profit)]'
+                    : status.feedTone === 'amber'
+                      ? 'bg-[var(--color-warn)]'
+                      : 'bg-[var(--color-danger)]'
+                }`}
+              />
+              {status.liveLabel}
+            </span>
+            <span className="kmm-chip num">{status.feedAgeShort}</span>
+            <span className="kmm-chip num">{status.marketCount} markets</span>
+            <span className="kmm-chip">{status.proxyShort}</span>
           </div>
         </header>
 
-        {/* HERO TARGET */}
-        <section className="kmm-hero kmm-corners mb-4 p-4 sm:p-6">
+        {/* Hero */}
+        <section className="kmm-hero mb-6 p-5 sm:p-7">
           {!status.everSucceeded ? (
-            <BootBlock label="BOOTING FEED…" sub="local proxy → kalshi L2 (read-only)" />
+            <BootBlock label="Connecting…" sub="Local proxy → Kalshi L2 (read-only)" />
           ) : !active ? (
-            <BootBlock label="NO OPEN WINDOWS" sub="feed healthy · waiting next 15m crypto set" />
+            <BootBlock label="No open windows" sub="Feed healthy · waiting for the next 15m set" />
           ) : (
             <TargetHero
               market={active}
@@ -125,23 +117,23 @@ export function V1App() {
           )}
         </section>
 
-        {/* GRID */}
-        <section className="mb-4 flex-1">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-dim)]">
-              open crypto 15m
+        {/* Market list */}
+        <section className="mb-6 flex-1">
+          <div className="mb-3 flex items-center justify-between gap-2 px-0.5">
+            <p className="text-[13px] font-medium text-[var(--color-secondary)]">
+              Open markets
             </p>
-            <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-gold)]">
-              YES / NO books · same outcome · different queues
+            <p className="text-[12px] text-[var(--color-tertiary)]">
+              YES / NO books · same outcome
             </p>
           </div>
 
           {markets.length === 0 ? (
-            <div className="kmm-frame px-4 py-14 text-center text-xs uppercase tracking-widest text-[var(--color-dim)]">
-              {status.everSucceeded ? 'empty set' : 'awaiting packets…'}
+            <div className="kmm-frame px-4 py-16 text-center text-[14px] text-[var(--color-secondary)]">
+              {status.everSucceeded ? 'No open markets right now' : 'Waiting for feed…'}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               {markets.map((m) => {
                 const on = m.ticker === selected
                 const canon = normalizeSpotAsset(m.asset)
@@ -153,52 +145,59 @@ export function V1App() {
                     key={m.ticker}
                     type="button"
                     onClick={() => setSelected(m.ticker)}
-                    className={`kmm-card p-3 ${on ? 'kmm-card--on' : ''}`}
+                    className={`kmm-card p-4 ${on ? 'kmm-card--on' : ''}`}
                   >
-                    <div className="mb-2 flex items-center justify-between gap-1">
-                      <span className="border border-[rgba(184,255,60,0.3)] bg-[rgba(184,255,60,0.08)] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-[var(--color-profit)]">
-                        {m.asset}
-                      </span>
+                    <div className="mb-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="kmm-badge">{m.asset}</span>
+                        <span className="text-[13px] font-medium text-[var(--color-label)]">
+                          {assetShortName(m.asset)}
+                        </span>
+                      </div>
                       <span
-                        className={`num text-[10px] ${timeUrgencyClass(m.minutesRemaining)}`}
+                        className={`num text-[12px] font-medium ${timeUrgencyClass(m.minutesRemaining)}`}
                       >
                         {fmtMinutesLeft(m.minutesRemaining)}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between gap-1">
-                      <div className="font-display text-[11px] text-[var(--color-dim)]">
-                        {assetShortName(m.asset)}
-                      </div>
-                      {hint !== 'TIE' && (
+
+                    {hint !== 'TIE' && (
+                      <div className="mb-2">
                         <span
-                          className="border border-[rgba(255,214,10,0.35)] px-1 py-px text-[8px] font-bold uppercase tracking-wider text-[var(--color-gold)]"
+                          className="kmm-badge kmm-badge--better"
                           title="Tighter touch spread (proxy until L2 sizes)"
                         >
-                          {hint}
+                          Better {hint}
                         </span>
-                      )}
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <div className="text-[8px] uppercase tracking-wider text-[var(--color-dim)]">
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-tertiary)]">
                           YES
                         </div>
-                        <div className="num text-xl font-bold leading-none text-[var(--color-profit)] sm:text-2xl">
+                        <div className="num text-[28px] font-semibold leading-none tracking-tight text-[var(--color-label)]">
                           {Math.round(m.midYes * 100)}
-                          <span className="text-xs text-[var(--color-dim)]">¢</span>
+                          <span className="text-[14px] font-medium text-[var(--color-secondary)]">
+                            ¢
+                          </span>
                         </div>
                       </div>
                       <div>
-                        <div className="text-[8px] uppercase tracking-wider text-[var(--color-dim)]">
+                        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-tertiary)]">
                           NO
                         </div>
-                        <div className="num text-xl font-bold leading-none text-[var(--color-gold)] sm:text-2xl">
+                        <div className="num text-[28px] font-semibold leading-none tracking-tight text-[var(--color-label)]">
                           {Math.round(noMid * 100)}
-                          <span className="text-xs text-[var(--color-dim)]">¢</span>
+                          <span className="text-[14px] font-medium text-[var(--color-secondary)]">
+                            ¢
+                          </span>
                         </div>
                       </div>
                     </div>
-                    <div className="num mt-2 text-[10px] text-[var(--color-dim)]">
+
+                    <div className="num mt-3 text-[11px] text-[var(--color-tertiary)]">
                       Y {fmtPrice(m.yesBid)}/{fmtPrice(m.yesAsk)}
                       {' · '}
                       N {fmtPrice(m.noBid)}/{fmtPrice(m.noAsk)}
@@ -211,10 +210,10 @@ export function V1App() {
           )}
         </section>
 
-        <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-line)] pt-3 text-[10px] uppercase tracking-[0.12em] text-[var(--color-dim)]">
-          <span>kmm · paper mode · live orders off</span>
-          <a href="?legacy=1" className="opacity-30 hover:opacity-70">
-            legacy lab
+        <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-separator)] pt-4 text-[12px] text-[var(--color-tertiary)]">
+          <span>Paper mode · live orders off</span>
+          <a href="?legacy=1" className="text-[var(--color-secondary)] hover:text-[var(--color-label)]">
+            Legacy lab
           </a>
         </footer>
       </div>
@@ -224,11 +223,11 @@ export function V1App() {
 
 function BootBlock({ label, sub }: { label: string; sub: string }) {
   return (
-    <div className="flex flex-col items-start gap-2 py-10 sm:py-14">
-      <p className="font-display text-xl font-bold tracking-tight text-[var(--color-profit)] sm:text-2xl">
+    <div className="flex flex-col items-start gap-1.5 py-10 sm:py-12">
+      <p className="text-[22px] font-semibold tracking-tight text-[var(--color-label)] sm:text-[26px]">
         {label}
       </p>
-      <p className="text-xs uppercase tracking-[0.14em] text-[var(--color-dim)]">{sub}</p>
+      <p className="text-[14px] text-[var(--color-secondary)]">{sub}</p>
     </div>
   )
 }
@@ -254,28 +253,23 @@ function TargetHero({
   const noSpr = spreadCentsNo(market)
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-stretch">
+    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-stretch">
       <div>
-        <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-gold)]">
-          active target
-        </p>
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="border border-[var(--color-profit)] bg-[rgba(184,255,60,0.1)] px-2 py-0.5 text-xs font-bold text-[var(--color-profit)]">
-            {market.asset}
-          </span>
-          <span className="font-display text-sm text-[var(--color-ink)]">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="kmm-badge">{market.asset}</span>
+          <span className="text-[17px] font-semibold tracking-tight text-[var(--color-label)]">
             {assetShortName(market.asset)}
           </span>
-          <span className="num text-[10px] text-[var(--color-dim)]">{market.ticker}</span>
+          <span className="num text-[12px] text-[var(--color-tertiary)]">{market.ticker}</span>
           <span
-            className="border border-[rgba(255,214,10,0.4)] bg-[rgba(255,214,10,0.08)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-gold)]"
+            className="kmm-badge kmm-badge--better"
             title="Tighter touch spread ≈ better book until L2 sizes on both sides"
           >
-            better book: {hint}
+            Better book · {hint}
           </span>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <BookColumn
             side="YES"
             midCents={yesPct}
@@ -286,7 +280,6 @@ function TargetHero({
                 ? fmtSpreadCents(market.yesBid, market.yesAsk, yesSpr)
                 : '—'
             }
-            accent="profit"
             better={hint === 'YES'}
           />
           <BookColumn
@@ -299,71 +292,56 @@ function TargetHero({
                 ? fmtSpreadCents(market.noBid, market.noAsk, noSpr)
                 : '—'
             }
-            accent="gold"
             better={hint === 'NO'}
           />
         </div>
 
-        <p className="mt-3 text-[10px] uppercase tracking-[0.12em] text-[var(--color-dim)]">
-          YES + NO ≈ $1 · same economic outcome · less queue ahead → more fills
+        <p className="mt-3 text-[12px] text-[var(--color-tertiary)]">
+          YES + NO ≈ $1 · same economic outcome · thinner queue → more fills
         </p>
 
-        <div className="mt-4">
-          <div className="mb-1 flex justify-between text-[10px] uppercase tracking-wider text-[var(--color-dim)]">
-            <span>window</span>
-            <span className={`num ${timeUrgencyClass(market.minutesRemaining)}`}>
+        <div className="mt-5">
+          <div className="mb-1.5 flex justify-between text-[12px] text-[var(--color-secondary)]">
+            <span>Window</span>
+            <span className={`num font-medium ${timeUrgencyClass(market.minutesRemaining)}`}>
               {fmtMinutesLeft(market.minutesRemaining)} left
             </span>
           </div>
-          <div className="h-2 border border-[var(--color-line)] bg-black/40">
-            <div
-              className="h-full bg-[var(--color-profit)] transition-[width] duration-200"
-              style={{
-                width: `${Math.round(progress * 100)}%`,
-                boxShadow: '0 0 12px rgba(184,255,60,0.45)',
-              }}
-            />
+          <div className="kmm-progress">
+            <span style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
         </div>
 
         {spot != null && (
-          <p className="num mt-3 text-[11px] text-[var(--color-gold)]">
-            spot {fmtSpot(spot)}
+          <p className="num mt-3 text-[13px] text-[var(--color-secondary)]">
+            Spot {fmtSpot(spot)}
           </p>
         )}
       </div>
 
-      <div className="kmm-frame flex flex-col p-3 sm:p-4">
-        <div className="mb-2 flex justify-between text-[10px] uppercase tracking-[0.14em] text-[var(--color-dim)]">
-          <span>YES mid trace</span>
+      <div className="flex flex-col rounded-[16px] bg-[var(--color-elevated)] p-4">
+        <div className="mb-2 flex justify-between text-[12px] text-[var(--color-secondary)]">
+          <span>YES mid</span>
           <span className="num">{mids.length} samples</span>
         </div>
         {spark ? (
-          <svg viewBox="0 0 360 80" className="h-28 w-full" preserveAspectRatio="none">
+          <svg viewBox="0 0 360 80" className="h-24 w-full" preserveAspectRatio="none">
             <polyline
               points={spark}
               fill="none"
-              stroke="var(--color-profit)"
-              strokeWidth="2"
+              stroke="var(--color-tint)"
+              strokeWidth="1.75"
               strokeLinejoin="round"
-            />
-            <polyline
-              points={spark}
-              fill="none"
-              stroke="var(--color-gold)"
-              strokeWidth="1"
-              opacity="0.35"
-              transform="translate(0, 2)"
+              strokeLinecap="round"
             />
           </svg>
         ) : (
-          <div className="flex h-28 items-center justify-center text-[10px] uppercase tracking-widest text-[var(--color-dim)]">
-            collecting ticks…
+          <div className="flex h-24 items-center justify-center text-[13px] text-[var(--color-tertiary)]">
+            Collecting ticks…
           </div>
         )}
-        <p className="mt-auto pt-2 text-[10px] leading-relaxed text-[var(--color-dim)]">
-          Paper surveillance only. Complements share payoff; pick the thinner queue for fills.
-          Edge / MM print layer lands later — this feed is the spine.
+        <p className="mt-auto pt-3 text-[12px] leading-relaxed text-[var(--color-tertiary)]">
+          Paper surveillance only. Complements share payoff; pick the thinner book for fills.
         </p>
       </div>
     </div>
@@ -376,7 +354,6 @@ function BookColumn({
   bid,
   ask,
   spreadLabel,
-  accent,
   better,
 }: {
   side: 'YES' | 'NO'
@@ -384,37 +361,30 @@ function BookColumn({
   bid: number
   ask: number
   spreadLabel: string
-  accent: 'profit' | 'gold'
   better: boolean
 }) {
-  const midColor =
-    accent === 'profit' ? 'text-[var(--color-profit)]' : 'text-[var(--color-gold)]'
-  const border = better
-    ? accent === 'profit'
-      ? 'border-[var(--color-profit)]'
-      : 'border-[var(--color-gold)]'
-    : 'border-[var(--color-line)]'
-
   return (
-    <div className={`border ${border} bg-black/30 p-3`}>
+    <div
+      className={`rounded-[16px] bg-[var(--color-elevated)] p-4 ${
+        better ? 'ring-1 ring-[rgba(48,209,88,0.35)]' : ''
+      }`}
+    >
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-dim)]">
-          {side} mid
+        <span className="text-[12px] font-medium uppercase tracking-wide text-[var(--color-secondary)]">
+          {side}
         </span>
         {better && (
-          <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--color-gold)]">
-            tighter
-          </span>
+          <span className="text-[11px] font-medium text-[var(--color-profit)]">Tighter</span>
         )}
       </div>
-      <div className={`num font-display text-5xl font-bold leading-none tracking-tight ${midColor} sm:text-6xl`}>
+      <div className="num text-[48px] font-semibold leading-none tracking-tight text-[var(--color-label)] sm:text-[56px]">
         {midCents}
-        <span className="text-xl text-[var(--color-dim)]">¢</span>
+        <span className="text-[20px] font-medium text-[var(--color-secondary)]">¢</span>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-1.5">
-        <Cell k="bid" v={fmtPrice(bid)} />
-        <Cell k="ask" v={fmtPrice(ask)} />
-        <Cell k="spr" v={spreadLabel} />
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <Cell k="Bid" v={fmtPrice(bid)} />
+        <Cell k="Ask" v={fmtPrice(ask)} />
+        <Cell k="Spr" v={spreadLabel} />
       </div>
     </div>
   )
@@ -422,9 +392,11 @@ function BookColumn({
 
 function Cell({ k, v }: { k: string; v: string }) {
   return (
-    <div className="border border-[var(--color-line)] bg-black/30 px-2 py-2">
-      <div className="text-[9px] uppercase tracking-[0.14em] text-[var(--color-dim)]">{k}</div>
-      <div className="num text-sm font-semibold text-[var(--color-ink)]">{v}</div>
+    <div className="rounded-[10px] bg-black/40 px-2.5 py-2">
+      <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-tertiary)]">
+        {k}
+      </div>
+      <div className="num text-[13px] font-semibold text-[var(--color-label)]">{v}</div>
     </div>
   )
 }

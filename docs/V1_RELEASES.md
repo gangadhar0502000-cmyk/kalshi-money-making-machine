@@ -31,6 +31,13 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - `midNo` / `spreadCentsYes` / `spreadCentsNo` / `betterBookHint` (tighter touch spread → YES|NO|TIE). True queue-ahead needs L2 sizes on both books (future).
 - UI refine: keep void + profit green + gold + KMM ops tone; tone down heavy scanlines / blink / `//` clutter.
 
+## U1h — Apple-clean UI
+
+- Abandon hacker/CRT/toxic-green ops look. **Dark Apple** (iOS dark): `#000` background, `#1c1c1e` grouped cards, `#2c2c2e` separators, label `#f5f5f7`, secondary `#98989d`, tint `#0a84ff`, live/profit `#30d158`, warn `#ff9f0a`.
+- System / SF-like stack only (`-apple-system`, BlinkMacSystemFont, SF Pro Text, Segoe UI). Drop Space Grotesk / IBM Plex / Google font links, scanlines, corner brackets, neon glow.
+- Header: “Kalshi 15m” + quiet “Paper · v1”; subtle status pills. Hero keeps YES+NO dual books + quiet better-book badge + soft window progress. Market cards: large radius, soft blue selected ring. Single thin tint sparkline.
+- Feed functionality unchanged (`midNo`, `betterBookHint`, continuous poll).
+
 ## Upcoming
 
 - **U2** — density / keyboard nav polish if needed.

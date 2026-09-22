@@ -1,24 +1,36 @@
 @import "tailwindcss";
 
 /*
-  KMM v1 — Money Machine ops console
-  Unique palette: void black · toxic profit · hot gold · alert magenta
-  Not a fintech clone. Hacker / print-money energy.
+  KMM v1 — Apple-clean dark UI
+  iOS dark: #000 / #1c1c1e / #2c2c2e · label #f5f5f7 · secondary #98989d · tint #0a84ff
+  System font stack. No scanlines, corner brackets, neon glow, or hacker mono.
 */
 
 @theme {
-  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
-  --color-void: #030403;
-  --color-panel: #0a0e0a;
-  --color-ink: #e8ffe8;
-  --color-dim: #5a7a5a;
-  --color-line: rgba(180, 255, 60, 0.12);
-  --color-profit: #b8ff3c;
-  --color-gold: #ffd60a;
-  --color-alert: #ff2d6a;
-  --color-cyan: #3ef0ff;
+  --color-bg: #000000;
+  --color-grouped: #1c1c1e;
+  --color-elevated: #2c2c2e;
+  --color-separator: #2c2c2e;
+  --color-label: #f5f5f7;
+  --color-secondary: #98989d;
+  --color-tertiary: #636366;
+  --color-tint: #0a84ff;
+  --color-profit: #30d158;
+  --color-warn: #ff9f0a;
+  --color-danger: #ff453a;
+
+  /* Aliases kept so residual class refs stay calm */
+  --color-void: #000000;
+  --color-panel: #1c1c1e;
+  --color-ink: #f5f5f7;
+  --color-dim: #98989d;
+  --color-line: #2c2c2e;
+  --color-gold: #ff9f0a;
+  --color-alert: #ff453a;
+  --color-cyan: #0a84ff;
 }
 
 @layer base {
@@ -27,136 +39,120 @@
   body {
     margin: 0;
     min-height: 100vh;
-    font-family: var(--font-mono);
-    color: var(--color-ink);
-    background-color: var(--color-void);
-    background-image:
-      linear-gradient(rgba(184, 255, 60, 0.018) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(184, 255, 60, 0.018) 1px, transparent 1px),
-      radial-gradient(1000px 500px at 0% 0%, rgba(184, 255, 60, 0.06), transparent 50%),
-      radial-gradient(800px 400px at 100% 0%, rgba(255, 214, 10, 0.045), transparent 45%);
-    background-size: 56px 56px, 56px 56px, auto, auto;
+    font-family: var(--font-sans);
+    color: var(--color-label);
+    background-color: var(--color-bg);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   #root { min-height: 100vh; }
   ::selection {
-    background: rgba(184, 255, 60, 0.35);
-    color: #030403;
+    background: rgba(10, 132, 255, 0.35);
+    color: #fff;
   }
 }
 
 @layer utilities {
   .font-display { font-family: var(--font-sans); }
   .font-mono { font-family: var(--font-mono); }
-  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
 
   .kmm-shell {
     min-height: 100vh;
-    position: relative;
-  }
-  .kmm-shell::before {
-    content: "";
-    pointer-events: none;
-    position: fixed;
-    inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 3px,
-      rgba(0, 0, 0, 0.04) 3px,
-      rgba(0, 0, 0, 0.04) 4px
-    );
-    opacity: 0.18;
-    z-index: 50;
+    background: var(--color-bg);
   }
 
   .kmm-frame {
-    border: 1px solid var(--color-line);
-    background: rgba(10, 14, 10, 0.92);
-    box-shadow:
-      0 0 0 1px rgba(184, 255, 60, 0.04) inset,
-      0 0 40px rgba(184, 255, 60, 0.04);
-  }
-
-  .kmm-corners {
-    position: relative;
-  }
-  .kmm-corners::before,
-  .kmm-corners::after {
-    content: "";
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    border-color: var(--color-profit);
-    pointer-events: none;
-  }
-  .kmm-corners::before {
-    top: -1px;
-    left: -1px;
-    border-top: 2px solid;
-    border-left: 2px solid;
-  }
-  .kmm-corners::after {
-    top: -1px;
-    right: -1px;
-    border-top: 2px solid;
-    border-right: 2px solid;
+    border: 1px solid var(--color-separator);
+    background: var(--color-grouped);
+    border-radius: 18px;
   }
 
   .kmm-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    border: 1px solid var(--color-line);
-    background: rgba(184, 255, 60, 0.04);
-    padding: 0.15rem 0.55rem;
-    font-size: 0.625rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-dim);
+    gap: 0.35rem;
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--color-secondary);
   }
   .kmm-chip--live {
-    border-color: rgba(184, 255, 60, 0.45);
+    background: rgba(48, 209, 88, 0.14);
     color: var(--color-profit);
-    background: rgba(184, 255, 60, 0.08);
   }
   .kmm-chip--warn {
-    border-color: rgba(255, 214, 10, 0.45);
-    color: var(--color-gold);
-    background: rgba(255, 214, 10, 0.08);
+    background: rgba(255, 159, 10, 0.14);
+    color: var(--color-warn);
   }
   .kmm-chip--off {
-    border-color: rgba(255, 45, 106, 0.45);
-    color: var(--color-alert);
-    background: rgba(255, 45, 106, 0.08);
+    background: rgba(255, 69, 58, 0.14);
+    color: var(--color-danger);
   }
 
   .kmm-card {
-    border: 1px solid var(--color-line);
-    background: rgba(6, 10, 6, 0.9);
-    transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    border: 1px solid transparent;
+    background: var(--color-grouped);
+    border-radius: 16px;
+    transition: background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
     text-align: left;
     width: 100%;
     cursor: pointer;
   }
   .kmm-card:hover {
-    border-color: rgba(184, 255, 60, 0.35);
-    background: rgba(184, 255, 60, 0.04);
+    background: #232325;
   }
   .kmm-card--on {
-    border-color: var(--color-profit);
-    box-shadow: 0 0 0 1px rgba(184, 255, 60, 0.2), 0 0 28px rgba(184, 255, 60, 0.08);
-    background: rgba(184, 255, 60, 0.06);
+    border-color: rgba(10, 132, 255, 0.45);
+    background: rgba(10, 132, 255, 0.1);
+    box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.2);
   }
 
   .kmm-hero {
-    border: 1px solid rgba(184, 255, 60, 0.22);
-    background:
-      linear-gradient(135deg, rgba(184, 255, 60, 0.06), transparent 40%),
-      linear-gradient(225deg, rgba(255, 214, 10, 0.05), transparent 35%),
-      rgba(6, 10, 6, 0.95);
-    box-shadow: 0 0 60px rgba(184, 255, 60, 0.06);
+    border: 1px solid var(--color-separator);
+    background: var(--color-grouped);
+    border-radius: 20px;
+  }
+
+  .kmm-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: rgba(10, 132, 255, 0.14);
+    color: var(--color-tint);
+  }
+  .kmm-badge--quiet {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-secondary);
+  }
+  .kmm-badge--better {
+    background: rgba(48, 209, 88, 0.14);
+    color: var(--color-profit);
+  }
+
+  .kmm-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+  .kmm-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--color-tint);
+    transition: width 200ms ease;
   }
 
   .live-pulse {
@@ -164,31 +160,6 @@
   }
   @keyframes kmm-pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-  }
-
-  /* Optional light scan — kept subtle; prefer static craft over CRT gimmicks */
-  .kmm-scan {
-    position: relative;
-    overflow: hidden;
-  }
-  .kmm-scan::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 18%;
-    background: linear-gradient(
-      transparent,
-      rgba(184, 255, 60, 0.02),
-      transparent
-    );
-    animation: kmm-scan 8s linear infinite;
-    pointer-events: none;
-    opacity: 0.5;
-  }
-  @keyframes kmm-scan {
-    0% { top: -20%; }
-    100% { top: 110%; }
+    50% { opacity: 0.45; }
   }
 }
