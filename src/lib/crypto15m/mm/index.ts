@@ -4,6 +4,7 @@ export {
   LOOSE_PAPER_MM_CONFIG,
   clampConfig,
   presetsForMode,
+  migratePersistedScarcityConfig,
   type PaperMmConfig,
 } from './config'
 export { PaperMmEngine, paperMmEngine } from './engine'
@@ -81,6 +82,7 @@ export {
   harshFillsPerHourFromCounts,
   isHarshFillsPerHourReady,
   isHarshFillRateSoftWarn,
+  portfolioFillCap15m,
   HARSH_RATE_MIN_HOURS,
   type FillCapSnapshot,
 } from './fillCaps'

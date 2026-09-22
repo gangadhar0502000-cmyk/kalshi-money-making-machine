@@ -138,6 +138,12 @@ export interface PaperMmConfig {
    * (FV unavailable). Strict default false — prefer empty slots over no-FV books.
    */
   fillMidFallback: boolean
+  /**
+   * Churn filter: refuse reducing fills whose price is within this many cents
+   * of avgEntry (≈0 captured edge), unless forced unwind (expiry / spot-guard).
+   * Strict default 0.5¢.
+   */
+  minChurnCaptureCents: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -182,6 +188,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   maxFillsPerMarketPer15m: 4,
   maxFillsPerMinute: 1,
   fillMidFallback: false,
+  minChurnCaptureCents: 0.5,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -201,6 +208,7 @@ export const LOOSE_PAPER_MM_CONFIG: PaperMmConfig = {
   maxFillsPerMarketPer15m: 60,
   maxFillsPerMinute: 12,
   fillMidFallback: true,
+  minChurnCaptureCents: 0,
 }
 
 /** @deprecated Prefer STRICT_PAPER_MM_CONFIG — kept as alias for imports. */
@@ -222,6 +230,7 @@ export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
     maxFillsPerMarketPer15m: src.maxFillsPerMarketPer15m,
     maxFillsPerMinute: src.maxFillsPerMinute,
     fillMidFallback: src.fillMidFallback,
+    minChurnCaptureCents: src.minChurnCaptureCents,
   }
 }
 
@@ -268,10 +277,51 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     maxFillsPerMarketPer15m: Math.round(clamp(c.maxFillsPerMarketPer15m, 1, 500)),
     maxFillsPerMinute: Math.round(clamp(c.maxFillsPerMinute, 1, 120)),
     fillMidFallback: Boolean(c.fillMidFallback),
+    minChurnCaptureCents: clamp(c.minChurnCaptureCents, 0, 10),
   }
 }
 
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n)) return lo
   return Math.min(hi, Math.max(lo, n))
+}
+
+/**
+ * Migrate persisted / older sessions onto current STRICT scarcity defaults.
+ * When strictRealism: clamp maxFillsPerMarketPer15m ≤ 4 and maxFillsPerMinute ≤ 1,
+ * and ensure minChurnCaptureCents ≥ STRICT default when missing/zero from older saves.
+ * Loose mode is left alone.
+ */
+export function migratePersistedScarcityConfig(
+  partial: Partial<PaperMmConfig>,
+): Partial<PaperMmConfig> {
+  const strict =
+    partial.strictRealism !== undefined
+      ? Boolean(partial.strictRealism)
+      : STRICT_PAPER_MM_CONFIG.strictRealism
+  if (!strict) return { ...partial }
+  const out: Partial<PaperMmConfig> = { ...partial, strictRealism: true }
+  const per15 =
+    typeof partial.maxFillsPerMarketPer15m === 'number' &&
+    Number.isFinite(partial.maxFillsPerMarketPer15m)
+      ? partial.maxFillsPerMarketPer15m
+      : STRICT_PAPER_MM_CONFIG.maxFillsPerMarketPer15m
+  const perMin =
+    typeof partial.maxFillsPerMinute === 'number' && Number.isFinite(partial.maxFillsPerMinute)
+      ? partial.maxFillsPerMinute
+      : STRICT_PAPER_MM_CONFIG.maxFillsPerMinute
+  out.maxFillsPerMarketPer15m = Math.min(
+    per15,
+    STRICT_PAPER_MM_CONFIG.maxFillsPerMarketPer15m,
+  )
+  out.maxFillsPerMinute = Math.min(perMin, STRICT_PAPER_MM_CONFIG.maxFillsPerMinute)
+  const churn =
+    typeof partial.minChurnCaptureCents === 'number' &&
+    Number.isFinite(partial.minChurnCaptureCents)
+      ? partial.minChurnCaptureCents
+      : STRICT_PAPER_MM_CONFIG.minChurnCaptureCents
+  // Older saves lacked the knob (treated as 0) — lift to STRICT default.
+  out.minChurnCaptureCents =
+    churn > 0 ? churn : STRICT_PAPER_MM_CONFIG.minChurnCaptureCents
+  return out
 }

@@ -198,9 +198,19 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
     ? portfolioState.aggregate.harshPolicyEpochMs
     : s.harshPolicyEpochMs
   const harshHourReady = isHarshFillsPerHourReady(harshPolicyEpochMs)
-  const portfolioCap15m =
-    Math.max(1, multiBook ? portfolioState.aggregate.activeBooks : 1) *
-    cfg.maxFillsPerMarketPer15m
+  const portfolioCap15m = multiBook
+    ? portfolioState.aggregate.portfolioFillCap15m
+    : Math.max(1, cfg.maxFillsPerMarketPer15m)
+  const realizedDelta15m = multiBook
+    ? portfolioState.aggregate.realizedDeltaLast15m
+    : s.realizedDeltaLast15m
+  const avgCaptureCents15m = multiBook
+    ? portfolioState.aggregate.avgCaptureCentsPerFillLast15m
+    : s.avgCaptureCentsPerFillLast15m
+  const churnyFills =
+    harshFillsLast15m >= 8 &&
+    Math.abs(avgCaptureCents15m) < 0.5 &&
+    Math.abs(realizedDelta15m) < 0.5
   const activeBookCount = multiBook
     ? Math.max(1, portfolioState.aggregate.activeBooks)
     : 1
@@ -275,11 +285,18 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
 
       {showFillRateWarn && !moneyPrinterBug && (
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
-          ⚠ Fill rate still high for paper research ({harshFillsLast15m} fills / last 15m · portfolio
-          cap ≤{portfolioCap15m}
-          {harshHourReady ? ` · ${harshFillsPerHour.toFixed(1)}/hr` : ''}). Legacy fills excluded.
-          Tighten depth / touch / cooldown — or keep iterating MM decision quality. Paper green ≠ live
-          edge.
+          ⚠ Fill rate still high for paper research ({harshFillsLast15m} fills / last 15m · hard
+          portfolio cap ≤{portfolioCap15m}
+          {harshHourReady ? ` · ${harshFillsPerHour.toFixed(1)}/hr` : ''}). Soft warn only — new
+          fills hard-block at cap. Legacy fills excluded. Paper green ≠ live edge.
+        </div>
+      )}
+
+      {churnyFills && !moneyPrinterBug && (
+        <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
+          ⚠ Fills rising but flat P&amp;L — likely round-trip churn at ~avgEntry (last 15m realized
+          delta {formatDollars(realizedDelta15m)}, avg {avgCaptureCents15m.toFixed(2)}¢/fill). Churn
+          filter skips closes within {cfg.minChurnCaptureCents}¢ of entry unless expiry/spot-guard.
         </div>
       )}
 
@@ -569,10 +586,26 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect, source }: Prop
               tone={showFillRateWarn ? 'warn' : 'neutral'}
               sub={
                 showFillRateWarn
-                  ? `⚠ still soft · cap ≤${portfolioCap15m}/15m portfolio`
+                  ? `⚠ soft warn · hard block at ≤${portfolioCap15m}/15m portfolio`
                   : harshHourReady
-                    ? `${harshFillsPerHour.toFixed(1)}/hr · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m · portfolio cap ≤${portfolioCap15m}`
-                    : `cap ≤${portfolioCap15m}/15m · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m · /hr after 15m clock`
+                    ? `${harshFillsPerHour.toFixed(1)}/hr · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m · hard portfolio ≤${portfolioCap15m}`
+                    : `hard ≤${portfolioCap15m}/15m · ≤${cfg.maxFillsPerMinute}/min · ≤${cfg.maxFillsPerMarketPer15m}/ticker/15m · /hr after 15m clock`
+              }
+            />
+            <Stat
+              label="Realized Δ / last 15m"
+              value={formatDollars(realizedDelta15m)}
+              tone={
+                churnyFills
+                  ? 'warn'
+                  : realizedDelta15m >= 0
+                    ? 'good'
+                    : 'bad'
+              }
+              sub={
+                churnyFills
+                  ? `⚠ flat vs fills — avg ${avgCaptureCents15m.toFixed(2)}¢/fill (churn?)`
+                  : `avg ${avgCaptureCents15m.toFixed(2)}¢/fill · capture on closes`
               }
             />
           </div>

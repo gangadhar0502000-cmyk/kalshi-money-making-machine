@@ -9,6 +9,19 @@
 export const FILL_CAP_WINDOW_MS = 15 * 60_000
 export const FILL_CAP_MINUTE_MS = 60_000
 
+/**
+ * Hard portfolio-wide 15m fill ceiling.
+ * Soft UI warn uses ~75% of this; applyFill must hard-block at this cap.
+ */
+export function portfolioFillCap15m(
+  activeBooks: number,
+  maxFillsPerMarketPer15m: number,
+): number {
+  const books = Math.max(1, activeBooks | 0)
+  const per = Math.max(1, maxFillsPerMarketPer15m | 0)
+  return Math.max(books * per, per)
+}
+
 /** Migration marker: fills at/after this epoch count toward harsh-policy metrics. */
 export const HARSH_FILL_POLICY_MARKER = 'harsh-fill-caps-v2'
 
@@ -36,9 +49,54 @@ export class TickerFillCapStore {
   private byTicker = new Map<string, number[]>()
   private harshPolicyEpochMs: number
   private marker: typeof HARSH_FILL_POLICY_MARKER = HARSH_FILL_POLICY_MARKER
+  /** Hard portfolio-wide 15m fill ceiling (set by multi-book controller). null = no portfolio hard cap. */
+  private portfolioCap15m: number | null = null
 
   constructor(harshPolicyEpochMs = Date.now()) {
     this.harshPolicyEpochMs = harshPolicyEpochMs
+  }
+
+  setPortfolioCap15m(cap: number | null): void {
+    if (cap == null || !Number.isFinite(cap)) {
+      this.portfolioCap15m = null
+      return
+    }
+    this.portfolioCap15m = Math.max(1, Math.floor(cap))
+  }
+
+  getPortfolioCap15m(): number | null {
+    return this.portfolioCap15m
+  }
+
+  /** Count fills across all tickers in a rolling window (prunes as it goes). */
+  countAllInWindow(now: number, windowMs: number): number {
+    let n = 0
+    for (const t of [...this.byTicker.keys()]) {
+      n += this.countInWindow(t, now, windowMs)
+    }
+    return n
+  }
+
+  /** Hard portfolio-wide 15m cap — blocks before any book fill when at/over cap. */
+  canAcceptPortfolio(
+    now: number,
+    maxPortfolio15m?: number | null,
+  ): { ok: boolean; reason?: string; count?: number; cap?: number } {
+    const cap =
+      maxPortfolio15m != null && Number.isFinite(maxPortfolio15m)
+        ? Math.max(1, Math.floor(maxPortfolio15m))
+        : this.portfolioCap15m
+    if (cap == null) return { ok: true }
+    const n = this.countAllInWindow(now, FILL_CAP_WINDOW_MS)
+    if (n >= cap) {
+      return {
+        ok: false,
+        reason: `portfolio rate cap ${n}/${cap} fills/15m`,
+        count: n,
+        cap,
+      }
+    }
+    return { ok: true, count: n, cap }
   }
 
   getHarshPolicyEpochMs(): number {
@@ -71,7 +129,11 @@ export class TickerFillCapStore {
     now: number,
     maxPerMinute: number,
     maxPer15m: number,
+    maxPortfolio15m?: number | null,
   ): { ok: boolean; reason?: string } {
+    // Hard portfolio-wide cap first — shared store, all books.
+    const port = this.canAcceptPortfolio(now, maxPortfolio15m)
+    if (!port.ok) return { ok: false, reason: port.reason }
     if (!ticker) return { ok: true }
     const perMin = this.countInWindow(ticker, now, FILL_CAP_MINUTE_MS)
     if (perMin >= maxPerMinute) {

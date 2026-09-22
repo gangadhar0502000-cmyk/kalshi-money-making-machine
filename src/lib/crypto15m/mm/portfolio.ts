@@ -15,6 +15,7 @@ import {
 import {
   DEFAULT_PAPER_MM_CONFIG,
   clampConfig,
+  migratePersistedScarcityConfig,
   presetsForMode,
   type PaperMmConfig,
 } from './config'
@@ -35,7 +36,12 @@ import {
   type PersistedPaperMmSession,
   type SessionLedgerPersisted,
 } from './persist'
-import { TickerFillCapStore, type FillCapSnapshot } from './fillCaps'
+import {
+  FILL_CAP_WINDOW_MS,
+  TickerFillCapStore,
+  portfolioFillCap15m,
+  type FillCapSnapshot,
+} from './fillCaps'
 
 export interface PortfolioBookView {
   slotId: string
@@ -59,6 +65,12 @@ export interface PortfolioAggregate {
   /** Rolling 15m fills across active ticker caps (harsh-era). */
   harshFillsLast15m: number
   harshPolicyEpochMs: number
+  /** Hard portfolio-wide 15m fill ceiling currently enforced. */
+  portfolioFillCap15m: number
+  /** Sum of captureDollars on fills in last rolling 15m (session + live books). */
+  realizedDeltaLast15m: number
+  /** Average captured cents per fill over last 15m (0 if no fills). */
+  avgCaptureCentsPerFillLast15m: number
 }
 
 export interface PortfolioState {
@@ -167,6 +179,13 @@ export class PaperMmPortfolio {
     return this.fillCapStore
   }
 
+  /** Recompute hard portfolio 15m cap from active books × per-ticker scarcity. */
+  private refreshPortfolioFillCap(): void {
+    const books = Math.max(1, this.books.size)
+    const cap = portfolioFillCap15m(books, this.config.maxFillsPerMarketPer15m)
+    this.fillCapStore.setPortfolioCap15m(cap)
+  }
+
   /** Apply a previously serialized session (ledger + knobs + wasRunning). Does not start engines. */
   applySerializedSession(raw: PersistedPaperMmSession | unknown): boolean {
     const parsed =
@@ -174,7 +193,7 @@ export class PaperMmPortfolio {
         ? deserializePaperMmSession(raw)
         : deserializePaperMmSession(raw)
     if (!parsed) return false
-    this.config = clampConfig(parsed.config)
+    this.config = clampConfig(migratePersistedScarcityConfig(parsed.config))
     this.sessionLedger = {
       realizedSpreadPnl: parsed.sessionLedger.realizedSpreadPnl,
       feesPaid: parsed.sessionLedger.feesPaid,
@@ -186,6 +205,7 @@ export class PaperMmPortfolio {
     this.sessionStartedAt = parsed.sessionStartedAt
     this.pendingAutoResume = parsed.running
     this.fillCapStore.importSnapshot(parsed.fillCaps)
+    this.refreshPortfolioFillCap()
     // Do NOT set this.running yet — start({ resume: true }) after universe sync.
     this.running = false
     this.message =
@@ -230,6 +250,7 @@ export class PaperMmPortfolio {
       partial = { ...presetsForMode(partial.strictRealism), ...partial }
     }
     this.config = clampConfig({ ...this.config, ...partial })
+    this.refreshPortfolioFillCap()
     for (const eng of this.books.values()) {
       eng.setConfig(this.config)
     }
@@ -344,6 +365,23 @@ export class PaperMmPortfolio {
       if (b.snapshot.moneyPrinterBug) moneyPrinter = true
     }
     const now = Date.now()
+    this.refreshPortfolioFillCap()
+    const portCap =
+      this.fillCapStore.getPortfolioCap15m() ??
+      portfolioFillCap15m(Math.max(1, books.length), this.config.maxFillsPerMarketPer15m)
+    const cut15 = now - FILL_CAP_WINDOW_MS
+    let realizedDelta15 = 0
+    let fills15 = 0
+    const countCapture = (list: typeof this.sessionLedger.fills) => {
+      for (const f of list) {
+        if (f.reason === 'settlement') continue
+        if (f.t < cut15) continue
+        fills15 += 1
+        realizedDelta15 += f.captureDollars ?? 0
+      }
+    }
+    countCapture(this.sessionLedger.fills)
+    for (const b of books) countCapture(b.fills)
 
     return {
       running: this.running,
@@ -363,6 +401,9 @@ export class PaperMmPortfolio {
         harshFillsPerHour: this.fillCapStore.harshFillsPerHour(now),
         harshFillsLast15m: this.fillCapStore.countHarshInWindow(now, 15 * 60_000),
         harshPolicyEpochMs: this.fillCapStore.getHarshPolicyEpochMs(),
+        portfolioFillCap15m: portCap,
+        realizedDeltaLast15m: realizedDelta15,
+        avgCaptureCentsPerFillLast15m: fills15 > 0 ? (realizedDelta15 / fills15) * 100 : 0,
       },
       message: this.message,
       spotsByAsset: { ...this.spotsByAsset },
@@ -537,6 +578,7 @@ export class PaperMmPortfolio {
     this.unsubEngine(eng)
     this.books.delete(slotId)
     if (t) this.slotOfTicker.delete(t)
+    this.refreshPortfolioFillCap()
     this.message = reason
   }
 
@@ -632,6 +674,7 @@ export class PaperMmPortfolio {
 
     this.books.set(slotId, eng)
     this.slotOfTicker.set(market.ticker, slotId)
+    this.refreshPortfolioFillCap()
 
     if (this.running) eng.start()
     this.message =
@@ -720,6 +763,7 @@ export class PaperMmPortfolio {
     this.sessionStartedAt = null
     this.pendingAutoResume = false
     this.fillCapStore = new TickerFillCapStore(Date.now())
+    this.refreshPortfolioFillCap()
     this.message =
       'Multi-book session reset. Paper books cleared. Read-only · never places trades.'
     if (this.lastMarkets.length > 0) {

@@ -47,6 +47,11 @@ export interface MmFill {
   taker: boolean
   /** Market ticker at fill (for per-ticker caps / restore). */
   ticker?: string | null
+  /**
+   * Realized $ captured on this fill when reducing inventory (0 for opens / adds).
+   * Used for last-15m realized-delta / avg ¢/fill diagnostics.
+   */
+  captureDollars?: number
 }
 
 export interface MmCancelEvent {
@@ -136,6 +141,12 @@ export interface MmSnapshot {
    * strictRealism (not short-session extrapolated /hr).
    */
   fillRateUnrealistic: boolean
+  /** Sum of captureDollars on fills in the last rolling 15m (this book). */
+  realizedDeltaLast15m: number
+  /** Average captured cents per fill over last 15m (0 if no fills). */
+  avgCaptureCentsPerFillLast15m: number
+  /** Hard portfolio 15m fill cap currently applied (null if single-book / unset). */
+  portfolioFillCap15m: number | null
 }
 
 export interface MmEngineState {

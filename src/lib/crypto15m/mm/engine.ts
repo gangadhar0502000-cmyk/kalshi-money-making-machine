@@ -201,7 +201,44 @@ export class PaperMmEngine {
       now,
       this.config.maxFillsPerMinute,
       this.config.maxFillsPerMarketPer15m,
+      this.fillCapStore.getPortfolioCap15m(),
     )
+  }
+
+  /** Forced unwind bypasses churn filter (expiry pull or spot-guard cancel). */
+  private isForcedUnwindNow(now = Date.now()): boolean {
+    const mins = this.market?.minutesRemaining
+    if (
+      mins != null &&
+      Number.isFinite(mins) &&
+      mins < this.config.expiryPullMinutes
+    ) {
+      return true
+    }
+    if (this.guardMode === 'cancel' && now < this.guardActiveUntil) return true
+    return false
+  }
+
+  /** Sum captureDollars / avg ¢ for fills in last 15m (excludes settlement). */
+  private captureStatsLast15m(now = Date.now()): {
+    realizedDelta: number
+    avgCentsPerFill: number
+    fillCount: number
+  } {
+    const cut = now - FILL_CAP_WINDOW_MS
+    let realized = 0
+    let n = 0
+    for (const f of this.fills) {
+      if (f.reason === 'settlement') continue
+      if (f.t < cut) continue
+      n += 1
+      realized += f.captureDollars ?? 0
+    }
+    return {
+      realizedDelta: realized,
+      avgCentsPerFill: n > 0 ? (realized / n) * 100 : 0,
+      fillCount: n,
+    }
   }
 
   /** Legacy session fills/hour (may include pre-migration fills in journal). */
@@ -296,6 +333,9 @@ export class PaperMmEngine {
       ),
       harshPolicyEpochMs: this.fillCapStore.getHarshPolicyEpochMs(),
       fillRateUnrealistic: this.isFillRateUnrealistic(),
+      realizedDeltaLast15m: this.captureStatsLast15m().realizedDelta,
+      avgCaptureCentsPerFillLast15m: this.captureStatsLast15m().avgCentsPerFill,
+      portfolioFillCap15m: this.fillCapStore.getPortfolioCap15m(),
     }
   }
 
@@ -316,15 +356,11 @@ export class PaperMmEngine {
   setMarket(market: Crypto15mMarket | null): void {
     const prevTicker = this.market?.ticker ?? null
     const changed = market?.ticker !== prevTicker
-    // If leaving a live position on a different ticker, settle first
-    if (
-      changed &&
-      this.market &&
-      this.inventory !== 0 &&
-      !this.settled &&
-      market
-    ) {
-      this.settleInventory(this.market, { keepRunning: this.running })
+    // Always settle open inventory before leaving a ticker — never zero without realizing.
+    if (changed && this.market && this.inventory !== 0 && !this.settled) {
+      this.settleInventory(this.market, {
+        keepRunning: this.running && Boolean(market),
+      })
     }
     this.market = market
     if (changed) {
@@ -340,7 +376,21 @@ export class PaperMmEngine {
       this.lastFillAt = 0
       // Do NOT clear fillCapStore — per-ticker caps must survive roll/rebuild.
       // Fresh ticker naturally has an empty window; old ticker stays capped.
-      // New contract → clear paper inventory/quotes (cash + realized kept)
+      // Inventory must already be flat after settle; refuse silent wipe of open risk.
+      if (this.inventory !== 0) {
+        console.warn(
+          `[paper-mm] setMarket refused silent inventory wipe (inv=${this.inventory}) — forcing mid mark`,
+        )
+        if (this.avgEntry != null) {
+          const mid = asDollarPrice(this.lastMid ?? 0.5, 'setMarket.forceMark')
+          const size = Math.abs(this.inventory)
+          const entry = asDollarPrice(this.avgEntry, 'setMarket.forceEntry')
+          const pnlPer = this.inventory > 0 ? mid - entry : entry - mid
+          this.realizedSpreadPnl += pnlPer * size
+          if (this.inventory > 0) this.cash += mid * size
+          else this.cash -= mid * size
+        }
+      }
       this.inventory = 0
       this.avgEntry = null
       this.quote = null
@@ -805,9 +855,12 @@ export class PaperMmEngine {
     const awaitRoll =
       this.config.autoRoll && (opts.keepRunning === true || this.running)
 
-    if (inv !== 0 && this.avgEntry != null) {
+    if (inv !== 0) {
       const size = Math.abs(inv)
-      const entry = asDollarPrice(this.avgEntry, 'settle.avgEntry')
+      const entry =
+        this.avgEntry != null
+          ? asDollarPrice(this.avgEntry, 'settle.avgEntry')
+          : asDollarPrice(market.midYes, 'settle.fallbackMidEntry')
       const pnlPer = inv > 0 ? settlePx - entry : entry - settlePx
       this.realizedSpreadPnl += pnlPer * size
 
@@ -1152,6 +1205,33 @@ export class PaperMmEngine {
       }
     }
 
+    // Churn filter: refuse flat round-trips that close within minChurnCaptureCents of avgEntry.
+    // Stops fill spam with ≈0 captured edge (buy then sell at joined BBO). Forced unwind
+    // (expiry pull / spot-guard cancel) bypasses.
+    if (
+      reason !== 'settlement' &&
+      this.config.minChurnCaptureCents > 0 &&
+      this.avgEntry != null &&
+      this.inventory !== 0
+    ) {
+      const reducing =
+        (side === 'sell_yes' && this.inventory > 0) ||
+        (side === 'buy_yes' && this.inventory < 0)
+      if (reducing && !this.isForcedUnwindNow()) {
+        const entry = asDollarPrice(this.avgEntry, 'churn.avgEntry')
+        const distCents = Math.abs(price - entry) * 100
+        if (distCents < this.config.minChurnCaptureCents - 1e-9) {
+          this.midCrossRejectCount += 1
+          this.message =
+            `CHURN SKIP ${side} @ $${price.toFixed(4)} — within ` +
+            `${distCents.toFixed(2)}¢ of avgEntry $${entry.toFixed(4)} ` +
+            `(need ≥${this.config.minChurnCaptureCents}¢). Flat round-trip blocked. ` +
+            `Read-only · never places trades.`
+          return
+        }
+      }
+    }
+
     const signed = side === 'buy_yes' ? size : -size
 
     // Belt-and-suspenders: refuse taker fills under strict realism
@@ -1190,6 +1270,7 @@ export class PaperMmEngine {
       this.cash += price * size
     }
 
+    let captureDollars = 0
     if (this.inventory === 0 || Math.sign(this.inventory) === Math.sign(signed)) {
       const newInv = this.inventory + signed
       if (this.avgEntry == null || this.inventory === 0) {
@@ -1205,7 +1286,8 @@ export class PaperMmEngine {
       if (this.avgEntry != null && closeQty > 0) {
         const entry = asDollarPrice(this.avgEntry, 'close.avgEntry')
         const pnlPer = this.inventory > 0 ? price - entry : entry - price
-        this.realizedSpreadPnl += pnlPer * closeQty
+        captureDollars = pnlPer * closeQty
+        this.realizedSpreadPnl += captureDollars
       }
       const newInv = this.inventory + signed
       if (newInv === 0) {
@@ -1215,6 +1297,8 @@ export class PaperMmEngine {
       }
       this.inventory = newInv
     }
+    // Fees already deducted from realizedSpreadPnl above — attribute fee to capture for diagnostics
+    if (fee > 0) captureDollars -= fee
 
     const fillAt = Date.now()
     this.fills.push({
@@ -1229,6 +1313,7 @@ export class PaperMmEngine {
       feeDollars: fee,
       taker,
       ticker: this.activeTicker(),
+      captureDollars,
     })
     if (reason !== 'settlement') {
       this.fillCapStore.record(this.activeTicker(), fillAt)

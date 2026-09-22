@@ -3,7 +3,12 @@
  * PAPER ONLY — never touches live Kalshi orders.
  */
 
-import { clampConfig, DEFAULT_PAPER_MM_CONFIG, type PaperMmConfig } from './config'
+import {
+  clampConfig,
+  DEFAULT_PAPER_MM_CONFIG,
+  migratePersistedScarcityConfig,
+  type PaperMmConfig,
+} from './config'
 import {
   emptyFillCapSnapshot,
   HARSH_FILL_POLICY_MARKER,
@@ -156,10 +161,14 @@ export function deserializePaperMmSession(raw: unknown): PersistedPaperMmSession
     fillCaps.marker = HARSH_FILL_POLICY_MARKER
     if (o.v === 1) fillCaps.harshPolicyEpochMs = now
   }
+  const migratedCfg = migratePersistedScarcityConfig({
+    ...DEFAULT_PAPER_MM_CONFIG,
+    ...(o.config ?? {}),
+  })
   return {
     v: 2,
     running: Boolean(o.running),
-    config: clampConfig({ ...DEFAULT_PAPER_MM_CONFIG, ...(o.config ?? {}) }),
+    config: clampConfig(migratedCfg),
     sessionLedger: sanitizeLedger(o.sessionLedger),
     sessionStartedAt:
       o.sessionStartedAt != null && Number.isFinite(o.sessionStartedAt) ? o.sessionStartedAt : null,
