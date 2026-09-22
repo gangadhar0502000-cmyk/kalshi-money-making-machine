@@ -58,6 +58,11 @@ export interface MmFill {
    * Used for last-15m realized-delta / avg ¢/fill diagnostics.
    */
   captureDollars?: number
+  /**
+   * Scenario that authorized this fill at fill time (evaluateClose / open decision).
+   * Stamped before post-fill requote so digests are not polluted by post-flat S5.
+   */
+  scenarioId?: string
 }
 
 export interface MmCancelEvent {
@@ -153,6 +158,12 @@ export interface MmSnapshot {
   avgCaptureCentsPerFillLast15m: number
   /** Hard portfolio 15m fill cap currently applied (null if single-book / unset). */
   portfolioFillCap15m: number | null
+  /**
+   * Consecutive S3 profit-bar blocks for current inventory sign (stuck counter).
+   * 0 when flat or sign flipped. Measurement only — not a trading knob.
+   * (Distinct from config.stuckUnwindTicks, which is the escalation threshold.)
+   */
+  stuckTicks: number
 }
 
 export interface MmEngineState {

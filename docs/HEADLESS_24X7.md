@@ -56,3 +56,18 @@ ls data/paper-mm/digests | tail
 - `mm:proxy` — proxy only
 - `mm:headless` — headless runner
 - `mm:24x7` — supervised 24/7 loop
+
+## Measurement (journal + digests)
+
+Paper-only telemetry — does **not** change trading knobs (`openMinEdge`, `markBleed`, `stuckUnwindTicks` threshold, S4.2 floors).
+
+| Field | Where | Purpose |
+|-------|-------|---------|
+| `fill.scenarioId` | `MmFill` + journal `fill` | Stamped from `evaluateClose` / open quote decision **at fill time**. Post-flat requote often shows S5; do not re-tag lossy flattens from the post-fill quote. |
+| `blocked_close.stuckTicks` | journal | Current stuck counter (consecutive S3 profit-bar blocks). Use to see if S3 flicker resets stuck before S4.1/S4.2. |
+| `blocked_close.captureGapCents` | journal | `minCloseProfitCents − captureCents` (¢ short of the S3 bar). |
+| Digest `openFills` / `closeFills` | `digest-*.json` | Split vs blended `avgCentsPerFill`. |
+| Digest `avgCentsPerRoundTrip` | `digest-*.json` | `totalCaptureCents / closeFills` (¢ per completed close / RT). Blended `avgCentsPerFill` kept for backward compatibility. |
+
+See also `src/lib/crypto15m/mm/RULES.md` measurement notes.
+

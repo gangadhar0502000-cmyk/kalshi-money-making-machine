@@ -8,6 +8,7 @@ import {
   buildBlockedCloseEvent,
   buildFillEvent,
   buildS51EvictEvent,
+  classifyFillLeg,
   formatJournalLine,
   hourKeyFromMs,
   parseJournalLine,
@@ -37,7 +38,7 @@ describe('headlessJournal format', () => {
     expect(parsed?.iso).toBe(new Date(1_700_000_000_000).toISOString())
   })
 
-  it('formats blocked_close with reason and capture', () => {
+  it('formats blocked_close with stuckTicks + capture gap', () => {
     const ev = buildBlockedCloseEvent({
       t: 1_700_000_000_500,
       scenarioId: 'S5',
@@ -46,6 +47,8 @@ describe('headlessJournal format', () => {
       side: 'sell_yes',
       inventory: 2,
       captureCents: 0.4,
+      stuckTicks: 12,
+      captureGapCents: 0.6,
       reason: 'CLOSE blocked: capture 0.4 < 1.0¢',
     })
     const line = formatJournalLine(ev)
@@ -53,12 +56,26 @@ describe('headlessJournal format', () => {
     expect(parsed?.type).toBe('blocked_close')
     expect(parsed?.reason).toMatch(/CLOSE blocked/)
     expect(parsed?.captureCents).toBe(0.4)
+    expect(parsed?.stuckTicks).toBe(12)
+    expect(parsed?.captureGapCents).toBe(0.6)
   })
 
   it('returns null for corrupt journal lines', () => {
     expect(parseJournalLine('')).toBeNull()
     expect(parseJournalLine('not-json')).toBeNull()
     expect(parseJournalLine('{"type":"fill"}')).toBeNull()
+  })
+})
+
+describe('classifyFillLeg', () => {
+  it('stamps open vs close from scenario / capture', () => {
+    expect(classifyFillLeg('S1', 0)).toBe('open')
+    expect(classifyFillLeg('S2', 0)).toBe('open')
+    expect(classifyFillLeg('S3', 1.2)).toBe('close')
+    expect(classifyFillLeg('S4.2', -7)).toBe('close')
+    // Legacy mis-tag: lossy flatten logged as S5 still counts as close
+    expect(classifyFillLeg('S5', -6)).toBe('close')
+    expect(classifyFillLeg('S5', 0)).toBe('open')
   })
 })
 
@@ -106,6 +123,8 @@ describe('headlessJournal digest', () => {
         scenarioId: 'S5',
         reason: 'CLOSE blocked: capture 0.2 < 1.0¢',
         captureCents: 0.2,
+        stuckTicks: 7,
+        captureGapCents: 0.8,
       }),
       buildS51EvictEvent({
         t: t0 + 5000,
@@ -124,7 +143,10 @@ describe('headlessJournal digest', () => {
     const digest = aggregateDigest(events, t0, t0 + 3_600_000)
     expect(digest.paperOnly).toBe(true)
     expect(digest.byScenario.S1?.fills).toBe(1)
+    expect(digest.byScenario.S1?.openFills).toBe(1)
+    expect(digest.byScenario.S1?.closeFills).toBe(0)
     expect(digest.byScenario.S3?.fills).toBe(1)
+    expect(digest.byScenario.S3?.closeFills).toBe(1)
     expect(digest.byScenario.S3?.avgCentsPerFill).toBeCloseTo(3.2, 5)
     expect(digest.byScenario['S4.1']?.fills).toBe(1)
     expect(digest.byScenario['S4.1']?.stuckS41).toBe(1)
@@ -133,10 +155,43 @@ describe('headlessJournal digest', () => {
     expect(digest.byScenario.S5?.blockedCloses).toBe(1)
     expect(digest.byScenario['S5.1']?.s51Evictions).toBe(1)
     expect(digest.totals.fills).toBe(4)
+    expect(digest.totals.openFills).toBe(1)
+    expect(digest.totals.closeFills).toBe(3)
+    expect(digest.totals.avgCentsPerRoundTrip).toBeCloseTo(
+      (0 + 3.2 + 0.1 + -5) / 3,
+      5,
+    )
     expect(digest.totals.markBleedS42).toBe(1)
     expect(digest.totals.s51Evictions).toBe(1)
     expect(digest.totals.blockedCloses).toBe(1)
     expect(digest.totals.events).toBe(6)
+  })
+
+  it('digest split keeps blended avgCentsPerFill backward-compatible', () => {
+    const t0 = Date.UTC(2026, 8, 22, 4, 0, 0)
+    const events = [
+      buildFillEvent({
+        t: t0 + 1,
+        scenarioId: 'S1',
+        side: 'buy_yes',
+        price: 0.4,
+        captureCents: 0,
+      }),
+      buildFillEvent({
+        t: t0 + 2,
+        scenarioId: 'S3',
+        side: 'sell_yes',
+        price: 0.42,
+        captureCents: 2,
+        realizedDelta: 0.02,
+      }),
+    ]
+    const digest = aggregateDigest(events, t0, t0 + 3_600_000)
+    expect(digest.totals.fills).toBe(2)
+    expect(digest.totals.openFills).toBe(1)
+    expect(digest.totals.closeFills).toBe(1)
+    expect(digest.totals.avgCentsPerFill).toBeCloseTo(1, 5) // blended 2/2
+    expect(digest.totals.avgCentsPerRoundTrip).toBeCloseTo(2, 5) // 2/1 closes
   })
 
   it('hourKeyFromMs returns YYYY-MM-DD-HH', () => {

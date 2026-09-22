@@ -331,6 +331,11 @@ export class PaperMmEngine {
       realizedDeltaLast15m: this.captureStatsLast15m().realizedDelta,
       avgCaptureCentsPerFillLast15m: this.captureStatsLast15m().avgCentsPerFill,
       portfolioFillCap15m: this.fillCapStore.getPortfolioCap15m(),
+      stuckTicks: (() => {
+        const invSign = this.inventory > 0 ? 1 : this.inventory < 0 ? -1 : 0
+        if (invSign === 0) return 0
+        return this.stuckUnwindState.invSign === invSign ? this.stuckUnwindState.ticks : 0
+      })(),
     }
   }
 
@@ -1230,6 +1235,9 @@ export class PaperMmEngine {
     // S3 CLOSE_PROFIT / S4 CLOSE_RISK — refuse lossy / sub-1¢ voluntary unwinds.
     // Fixes −0.88¢/fill churn: signed capture vs avgEntry must be ≥ minCloseProfitCents
     // unless S4 risk flat (hardFlat / maxInv / spot-guard / toxic holding mid).
+    // Stamp fill.scenarioId from evaluateClose (or open quote decision) at fill time —
+    // post-flat requote often shows S5 and must not rewrite close attribution.
+    let fillScenarioId: string | undefined
     if (reason !== 'settlement' && this.inventory !== 0) {
       const reducing =
         (side === 'sell_yes' && this.inventory > 0) ||
@@ -1274,6 +1282,7 @@ export class PaperMmEngine {
             `Read-only · never places trades.`
           return
         }
+        fillScenarioId = closeDec.scenario
         if (closeDec.scenario === 'S4') {
           this.message =
             `S4 CLOSE_RISK risk flat ${side} @ $${price.toFixed(4)} ` +
@@ -1292,6 +1301,11 @@ export class PaperMmEngine {
             `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
         }
       }
+    }
+    if (fillScenarioId == null && reason !== 'settlement') {
+      // Open / add — stamp from the quote decision that authorized the resting side.
+      fillScenarioId =
+        side === 'buy_yes' ? this.quote?.bidScenario : this.quote?.askScenario
     }
 
     const signed = side === 'buy_yes' ? size : -size
@@ -1376,6 +1390,7 @@ export class PaperMmEngine {
       taker,
       ticker: this.activeTicker(),
       captureDollars,
+      scenarioId: fillScenarioId,
     })
     if (reason !== 'settlement') {
       this.fillCapStore.record(this.activeTicker(), fillAt)

@@ -136,3 +136,139 @@ describe('engine inventory unwind + fill discipline', () => {
     expect(engine.getState().snapshot.inventory).toBe(9)
   })
 })
+
+
+describe('measurement: fill scenarioId stamp + stuckTicks', () => {
+  let engine: PaperMmEngine
+
+  beforeEach(() => {
+    vi.stubGlobal('window', {
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+    })
+    engine = new PaperMmEngine()
+    engine.setConfig({
+      fillCooldownMs: 0,
+      maxInventory: 10,
+      unwindThreshold: 1,
+      quoteSize: 1,
+      halfSpreadCents: 2,
+      useLiveBook: true,
+      strictRealism: true,
+      fvQuoting: true,
+      minEdgeCents: 2.5,
+      maxSaneEdgeCents: 25,
+      toxicMidLow: 0.05,
+      toxicMidHigh: 0.95,
+      minCloseProfitCents: 1,
+      minChurnCaptureCents: 1,
+      stuckUnwindTicks: 3,
+      markBleedCents: 5,
+      hardFlatMinutes: 2,
+    })
+  })
+
+  afterEach(() => {
+    engine.stop()
+    vi.unstubAllGlobals()
+  })
+
+  type ApplyFill = (
+    side: 'buy_yes' | 'sell_yes',
+    price: number,
+    size: number,
+    mid: number,
+    toxic: boolean,
+    reason: string,
+    taker: boolean,
+  ) => void
+
+  function applyFill(): ApplyFill {
+    return (engine as unknown as { applyFill: ApplyFill }).applyFill.bind(engine)
+  }
+
+  it('stamps S3 scenarioId on profitable close at fill time (not post-flat quote)', () => {
+    const market = mkMarket({
+      ticker: 'KXHYPE15M-STAMP-S3',
+      midYes: 0.5,
+      minutesRemaining: 10,
+    })
+    engine.setMarket(market)
+    engine.seedSpot(20)
+    engine.seedInventory(1, 0.4) // long @ 40¢
+    engine.start()
+
+    const fill = applyFill()
+    const before = engine.getState().fills.length
+    // sell @ 0.45 → +5¢ capture ≥ 1¢ → S3
+    fill('sell_yes', 0.45, 1, 0.5, false, 'book_depth', false)
+    const fills = engine.getState().fills
+    expect(fills.length).toBe(before + 1)
+    const last = fills[fills.length - 1]!
+    expect(last.scenarioId).toBe('S3')
+    expect(last.captureDollars).toBeCloseTo(0.05, 5)
+    // Flat after close — quote may be S5; fill stamp must remain S3
+    expect(engine.getState().snapshot.inventory).toBe(0)
+  })
+
+  it('stamps S4.2 on lossy stuck flatten and exposes stuckTicks on snapshot', () => {
+    const market = mkMarket({
+      ticker: 'KXHYPE15M-STAMP-S42',
+      midYes: 0.5,
+      minutesRemaining: 10,
+    })
+    engine.setMarket(market)
+    engine.seedSpot(20)
+    engine.seedInventory(1, 0.5) // long @ 50¢
+    engine.start()
+
+    // Drive stuck counter via requotes with a blocked reduce path.
+    // Seed stuck state by private field so we do not depend on tick timing.
+    const engAny = engine as unknown as {
+      stuckUnwindState: { ticks: number; invSign: number }
+    }
+    engAny.stuckUnwindState = { ticks: 10, invSign: 1 }
+    expect(engine.getState().snapshot.stuckTicks).toBe(10)
+
+    const fill = applyFill()
+    const before = engine.getState().fills.length
+    // sell @ 0.44 → −6¢ ≤ −5¢ markBleed with stuck → S4.2
+    fill('sell_yes', 0.44, 1, 0.5, false, 'book_depth', false)
+    const fills = engine.getState().fills
+    expect(fills.length).toBe(before + 1)
+    const last = fills[fills.length - 1]!
+    expect(last.scenarioId).toBe('S4.2')
+    expect(last.captureDollars).toBeCloseTo(-0.06, 5)
+  })
+
+  it('stamps open fill scenarioId from authorizing quote side', () => {
+    const market = mkMarket({
+      ticker: 'KXHYPE15M-STAMP-S1',
+      midYes: 0.5,
+      minutesRemaining: 10,
+    })
+    engine.setMarket(market)
+    engine.seedSpot(20)
+    engine.seedInventory(0, null)
+    engine.start()
+    engine.onBook(book(market.ticker, 0.5))
+    const q = engine.getState().snapshot.quote
+    expect(q).not.toBeNull()
+    // Force the authorizing open scenario onto the resting quote (measurement stamp path).
+    const engAny = engine as unknown as { quote: NonNullable<typeof q> }
+    engAny.quote = {
+      ...q!,
+      bidActive: true,
+      active: true,
+      bidScenario: 'S1',
+      bidReason: 'bid ON: S1 OPEN_BID +4.0¢',
+    }
+
+    const fill = applyFill()
+    const before = engine.getState().fills.length
+    fill('buy_yes', 0.48, 1, 0.5, false, 'book_depth', false)
+    const fills = engine.getState().fills
+    expect(fills.length).toBe(before + 1)
+    expect(fills[fills.length - 1]!.scenarioId).toBe('S1')
+  })
+})

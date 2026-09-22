@@ -23,12 +23,29 @@ export interface JournalEvent {
   reason?: string
   /** Realized $ delta on closes (fills that reduce inventory). */
   realizedDelta?: number
+  /**
+   * stuckUnwind counter at blocked_close time (consecutive S3 profit-bar blocks).
+   * Measurement: detect S3 flicker resetting stuck before S4.1/S4.2.
+   */
+  stuckTicks?: number
+  /**
+   * How far capture is below minCloseProfitCents (¢). Positive ⇒ short of the S3 bar.
+   * captureGapCents = minCloseProfitCents − captureCents when both known.
+   */
+  captureGapCents?: number | null
 }
 
 export interface ScenarioDigestRow {
   fills: number
+  /** Fills classified as opens (S1/S2 or ~0 capture). */
+  openFills: number
+  /** Fills classified as closes (S3/S4/S4.x or non-zero capture). */
+  closeFills: number
   totalCaptureCents: number
+  /** Blended avg ¢/fill (opens+closes) — backward-compatible. */
   avgCentsPerFill: number
+  /** Avg ¢ per completed round-trip ≈ totalCapture / closeFills. */
+  avgCentsPerRoundTrip: number
   stuckS41: number
   markBleedS42: number
   s51Evictions: number
@@ -48,14 +65,32 @@ export interface HourlyDigest {
 
 const EMPTY_ROW = (): ScenarioDigestRow => ({
   fills: 0,
+  openFills: 0,
+  closeFills: 0,
   totalCaptureCents: 0,
   avgCentsPerFill: 0,
+  avgCentsPerRoundTrip: 0,
   stuckS41: 0,
   markBleedS42: 0,
   s51Evictions: 0,
   blockedCloses: 0,
   totalRealizedDelta: 0,
 })
+
+const CLOSE_SCENARIOS = new Set(['S3', 'S4', 'S4.1', 'S4.2'])
+const OPEN_SCENARIOS = new Set(['S1', 'S2'])
+
+/** Classify a fill as open vs close for digest split (measurement only). */
+export function classifyFillLeg(
+  scenarioId: string | undefined,
+  captureCents: number,
+): 'open' | 'close' {
+  const sid = scenarioId ?? ''
+  if (CLOSE_SCENARIOS.has(sid) || /^S4(\b|\.)/.test(sid)) return 'close'
+  if (OPEN_SCENARIOS.has(sid)) return 'open'
+  // Legacy / mis-tagged: non-zero capture ⇒ close leg; else open.
+  return Math.abs(captureCents) > 1e-9 ? 'close' : 'open'
+}
 
 /** Format a journal line — pure, no I/O. */
 export function formatJournalLine(ev: JournalEvent): string {
@@ -93,6 +128,8 @@ export function hourKeyFromMs(ms: number, timeZone = 'America/Chicago'): string 
 
 function bump(row: ScenarioDigestRow, patch: Partial<ScenarioDigestRow>): void {
   if (patch.fills) row.fills += patch.fills
+  if (patch.openFills) row.openFills += patch.openFills
+  if (patch.closeFills) row.closeFills += patch.closeFills
   if (patch.totalCaptureCents) row.totalCaptureCents += patch.totalCaptureCents
   if (patch.stuckS41) row.stuckS41 += patch.stuckS41
   if (patch.markBleedS42) row.markBleedS42 += patch.markBleedS42
@@ -105,6 +142,7 @@ function finalizeRow(row: ScenarioDigestRow): ScenarioDigestRow {
   return {
     ...row,
     avgCentsPerFill: row.fills > 0 ? row.totalCaptureCents / row.fills : 0,
+    avgCentsPerRoundTrip: row.closeFills > 0 ? row.totalCaptureCents / row.closeFills : 0,
   }
 }
 
@@ -134,13 +172,18 @@ export function aggregateDigest(
 
     if (ev.type === 'fill') {
       const cap = ev.captureCents ?? (ev.realizedDelta != null ? ev.realizedDelta * 100 : 0)
+      const leg = classifyFillLeg(ev.scenarioId, cap)
       bump(row, {
         fills: 1,
+        openFills: leg === 'open' ? 1 : 0,
+        closeFills: leg === 'close' ? 1 : 0,
         totalCaptureCents: cap,
         totalRealizedDelta: ev.realizedDelta ?? 0,
       })
       bump(totals, {
         fills: 1,
+        openFills: leg === 'open' ? 1 : 0,
+        closeFills: leg === 'close' ? 1 : 0,
         totalCaptureCents: cap,
         totalRealizedDelta: ev.realizedDelta ?? 0,
       })
@@ -227,6 +270,10 @@ export function buildBlockedCloseEvent(input: {
   minutesLeft?: number | null
   captureCents?: number | null
   reason: string
+  /** stuckUnwind counter at block time */
+  stuckTicks?: number
+  /** minCloseProfitCents − captureCents (¢ short of S3 bar) */
+  captureGapCents?: number | null
 }): JournalEvent {
   const t = input.t ?? Date.now()
   return {
@@ -243,6 +290,8 @@ export function buildBlockedCloseEvent(input: {
     minutesLeft: input.minutesLeft ?? null,
     captureCents: input.captureCents ?? null,
     reason: input.reason,
+    stuckTicks: input.stuckTicks,
+    captureGapCents: input.captureGapCents ?? null,
   }
 }
 

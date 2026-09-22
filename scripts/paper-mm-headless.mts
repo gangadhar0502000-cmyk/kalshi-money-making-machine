@@ -45,6 +45,9 @@ const { PaperMmPortfolio } = await import('../src/lib/crypto15m/mm/portfolio.ts'
 const { fetchCrypto15mMarkets } = await import('../src/lib/crypto15m/api.ts')
 const { fetchLocalHealth } = await import('../src/lib/crypto15m/mm/liveBook.ts')
 const { STRICT_PAPER_MM_CONFIG } = await import('../src/lib/crypto15m/mm/config.ts')
+const { expectedCloseCaptureCents } = await import(
+  '../src/lib/crypto15m/mm/profitableScenarios.ts'
+)
 
 import type { JournalEvent } from '../src/lib/crypto15m/mm/headlessJournal.ts'
 import type { PortfolioState } from '../src/lib/crypto15m/mm/portfolio.ts'
@@ -72,6 +75,8 @@ function appendJournal(ev: JournalEvent, stream: WriteStream): void {
     ev.inventory != null ? `inv=${ev.inventory}` : null,
     ev.minutesLeft != null ? `minLeft=${ev.minutesLeft.toFixed(1)}` : null,
     ev.captureCents != null ? `cap=${ev.captureCents.toFixed(2)}¢` : null,
+    ev.stuckTicks != null ? `stuck=${ev.stuckTicks}` : null,
+    ev.captureGapCents != null ? `gap=${ev.captureGapCents.toFixed(2)}¢` : null,
     ev.realizedDelta != null ? `ΔR=$${ev.realizedDelta.toFixed(4)}` : null,
     ev.reason,
   ].filter(Boolean)
@@ -101,7 +106,12 @@ function writeDigestForHour(hourKey: string, events: JournalEvent[]): void {
   const outPath = path.join(DIGEST_DIR, `${hourKey}.json`)
   fs.writeFileSync(outPath, JSON.stringify(digest, null, 2))
   fs.writeFileSync(LATEST_DIGEST, JSON.stringify(digest, null, 2))
-  log(`digest wrote ${outPath} fills=${digest.totals.fills} events=${digest.totals.events}`)
+  log(
+    `digest wrote ${outPath} fills=${digest.totals.fills}` +
+      ` opens=${digest.totals.openFills} closes=${digest.totals.closeFills}` +
+      ` ¢/RT=${digest.totals.avgCentsPerRoundTrip.toFixed(2)}` +
+      ` events=${digest.totals.events}`,
+  )
 }
 
 async function waitForProxy(timeoutMs = 30_000): Promise<boolean> {
@@ -179,11 +189,13 @@ async function runPaperMmLoop(): Promise<void> {
       for (const f of book.fills) {
         if (seenFillIds.has(f.id)) continue
         seenFillIds.add(f.id)
-        const scenario =
+        // Prefer scenario stamped at fill time (evaluateClose / open decision).
+        // Post-flat quote often shows S5 and must not rewrite close attribution.
+        const quoteScenario =
           f.side === 'buy_yes' ? snap.quote?.bidScenario : snap.quote?.askScenario
         const ev = buildFillEvent({
           t: f.t,
-          scenarioId: scenario ?? snap.quote?.activeScenario,
+          scenarioId: f.scenarioId ?? quoteScenario ?? snap.quote?.activeScenario,
           ticker: f.ticker ?? snap.marketTicker,
           asset: snap.asset,
           side: f.side,
@@ -210,15 +222,31 @@ async function runPaperMmLoop(): Promise<void> {
           const mapKey = `${snap.marketTicker}|${side}`
           if (lastBlockedKey.get(mapKey) === fp) continue
           lastBlockedKey.set(mapKey, fp)
+          const restingPx = side === 'bid' ? q.yesBid : q.yesAsk
+          const cap = expectedCloseCaptureCents({
+            reduceSide: side,
+            restingPx,
+            avgEntry: snap.avgEntry,
+            inventory: snap.inventory,
+          })
+          const minClose = Math.max(
+            snap.config.minCloseProfitCents ?? 0,
+            snap.config.minChurnCaptureCents ?? 0,
+          )
+          const gap =
+            cap != null && Number.isFinite(cap) ? minClose - cap : null
           const ev = buildBlockedCloseEvent({
             scenarioId: scenario ?? 'S5',
             ticker: snap.marketTicker,
             asset: snap.asset,
             side,
-            price: side === 'bid' ? q.yesBid : q.yesAsk,
+            price: restingPx,
             edgeCents: snap.edgeVsMidCents,
             inventory: snap.inventory,
             minutesLeft: snap.minutesRemaining,
+            captureCents: cap,
+            stuckTicks: snap.stuckTicks ?? 0,
+            captureGapCents: gap,
             reason,
           })
           hourEvents.push(ev)

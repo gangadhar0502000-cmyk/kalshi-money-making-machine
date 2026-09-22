@@ -52,3 +52,12 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 | `maxSaneEdgeCents` | 25 |
 | `stuckUnwindTicks` | 30 |
 | `markBleedCents` | 5 |
+
+## Measurement (do not confuse with knobs)
+
+Attribution / digests only — **never** change openMinEdge / markBleed / stuckUnwindTicks / S4.2 floors to "fix" digests.
+
+1. **Fill `scenarioId`** — stamped from `evaluateClose` (or the open quote decision) when the fill is accepted. Journaling must prefer `fill.scenarioId` over the post-fill quote (post-flat often S5 → undercounts S4.2 / mis-tags lossy flattens).
+2. **`blocked_close`** — always log `stuckTicks` + `captureGapCents` (= minClose − capture) so overnight autopsies can see S3 flicker resetting stuck.
+3. **Hourly digest** — report `openFills`, `closeFills`, and `avgCentsPerRoundTrip` in addition to blended `avgCentsPerFill`.
+
