@@ -1,0 +1,202 @@
+[
+  {
+    "title": "High-frequency trading in a limit order book",
+    "authors_year": "Avellaneda & Stoikov, 2008",
+    "url": "https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf",
+    "type": "paper",
+    "one_line_takeaway": "Canonical reservation-price + intensity-based optimal bid/ask for inventory-aware LOB MM.",
+    "relevance": 5
+  },
+  {
+    "title": "Dealing with the Inventory Risk: A solution to the market making problem",
+    "authors_year": "Guéant, Lehalle & Fernandez-Tapia, 2013",
+    "url": "https://arxiv.org/pdf/1105.3115.pdf",
+    "type": "paper",
+    "one_line_takeaway": "AS with hard inventory limits; HJB reduces to ODEs; asymptotic quotes nearly constant far from T.",
+    "relevance": 5
+  },
+  {
+    "title": "Optimal Market Making in Prediction Markets",
+    "authors_year": "Feil & Nendel, 2026",
+    "url": "https://arxiv.org/abs/2607.17991",
+    "type": "paper",
+    "one_line_takeaway": "HJB for binary PM CLOB with [0,1] quotes, running MtM penalty, and terminal settlement risk Φ.",
+    "relevance": 5
+  },
+  {
+    "title": "Makers and Takers: The Economics of the Kalshi Prediction Market",
+    "authors_year": "Bürgi, Deng & Whelan, 2025",
+    "url": "https://www.ucd.ie/economics/t4media/WP2025_19.pdf",
+    "type": "journal",
+    "one_line_takeaway": "Kalshi maker–taker economics, favorite–longshot bias; makers lose less than takers; fees ∝ p(1−p).",
+    "relevance": 5
+  },
+  {
+    "title": "Settlement Manipulation in Prediction Markets",
+    "authors_year": "Dai, Jia & Yu, 2026",
+    "url": "https://arxiv.org/html/2606.31675v1",
+    "type": "paper",
+    "one_line_takeaway": "5m BTC binaries show settlement-window spot pushes; 15m largely attenuates manipulation.",
+    "relevance": 5
+  },
+  {
+    "title": "Microstructure, Market Making, and Algorithmic Arbitrage on Decentralised Prediction Markets",
+    "authors_year": "Horacle Capital Research, 2026",
+    "url": "https://horaclecapital.com/assets/pdf/polymarket_paper.pdf",
+    "type": "paper",
+    "one_line_takeaway": "Logit Jump-Diffusion Avellaneda–Stoikov (LAS) for [0,1] prices; critiques BS for event binaries.",
+    "relevance": 4
+  },
+  {
+    "title": "Bid, ask and transaction prices in a specialist market with heterogeneously informed traders",
+    "authors_year": "Glosten & Milgrom, 1985",
+    "url": "https://www.edegan.com/pdfs/Glosten%20Milgrom%20%281985%29%20-%20Bid%20Ask%20and%20Transaction%20Prices%20in%20a%20Specialist%20Market%20with%20Heterogeneously%20Informed%20Trades.pdf",
+    "type": "journal",
+    "one_line_takeaway": "Adverse-selection foundation of the spread; quotes as conditional expectations given trade direction.",
+    "relevance": 5
+  },
+  {
+    "title": "Continuous Auctions and Insider Trading",
+    "authors_year": "Kyle, 1985",
+    "url": "https://www.ressources-actuarielles.net/EXT/ISFA/1226.nsf/769998e0a65ea348c1257052003eb94f/61010370971d6b88c12581600066a93f/$FILE/kyle1985.pdf",
+    "type": "journal",
+    "one_line_takeaway": "Classic informed-flow / price-impact model; informs toxicity and λ-style impact thinking.",
+    "relevance": 4
+  },
+  {
+    "title": "Optimal dealer pricing under transactions and return uncertainty",
+    "authors_year": "Ho & Stoll, 1981",
+    "url": "https://doi.org/10.1016/0304-405X(81)90020-9",
+    "type": "journal",
+    "one_line_takeaway": "Inventory-based dealer reservation pricing ancestor of AS-style skew.",
+    "relevance": 4
+  },
+  {
+    "title": "Logarithmic Market Scoring Rules for Modular Combinatorial Information Aggregation",
+    "authors_year": "Hanson, 2002/2007",
+    "url": "https://mason.gmu.edu/~rhanson/mktscore.pdf",
+    "type": "paper",
+    "one_line_takeaway": "LMSR AMM primary source — contrast with discretionary CLOB market making.",
+    "relevance": 3
+  },
+  {
+    "title": "Price Evolution in a Continuous Double Auction Prediction Market With a Scoring-Rule Based Market Maker",
+    "authors_year": "Chakraborty, Das & Peabody, 2015",
+    "url": "https://ojs.aaai.org/index.php/AAAI/article/download/9313/9172",
+    "type": "paper",
+    "one_line_takeaway": "LMSR integrated into CDA as ordinary book trader; lower spreads ≠ better price discovery.",
+    "relevance": 4
+  },
+  {
+    "title": "Integrating Market Makers, Limit Orders, and Continuous Trade in Prediction Markets",
+    "authors_year": "Heidari, Lahaie, Pennock & Vaughan, 2015",
+    "url": "http://www.cs.cmu.edu/~hheidari/heidari2015integrating.pdf",
+    "type": "paper",
+    "one_line_takeaway": "Fair trading paths for continuous MM with limit orders / combinatorial securities.",
+    "relevance": 3
+  },
+  {
+    "title": "Market Making Mechanisms and Liquidity Dynamics in Blockchain-Based Prediction Markets",
+    "authors_year": "Parshant, 2025 (TUM MA thesis)",
+    "url": "https://www.cs.cit.tum.de/fileadmin/w00cfj/sebis/_my_direct_uploads/20250903_Parshant_MA_Thesis.pdf",
+    "type": "paper",
+    "one_line_takeaway": "Polymarket AMM→CLOB transition; CLOB LP more profitable than AMM after impermanent loss.",
+    "relevance": 3
+  },
+  {
+    "title": "El Oráculo Algorítmico: Creación de Mercado en Plataformas de Predicción (Polymarket)",
+    "authors_year": "Comillas ICAI TFM",
+    "url": "https://repositorio.comillas.edu/items/a780adff-a550-476d-8241-ace07a505ffc",
+    "type": "paper",
+    "one_line_takeaway": "AS adapted to [0,1] binaries using Bernoulli variance; backtested on Polymarket.",
+    "relevance": 3
+  },
+  {
+    "title": "Polymarket Docs — Market Making",
+    "authors_year": "Polymarket, 2026",
+    "url": "https://docs.polymarket.com/trading/market-making",
+    "type": "post",
+    "one_line_takeaway": "Official: two-sided quotes, inventory skew, GTD before catalysts, cancel/replace, complements YES↔NO.",
+    "relevance": 5
+  },
+  {
+    "title": "Fees | Kalshi Help Center",
+    "authors_year": "Kalshi, Apr 19, 2026",
+    "url": "https://help.kalshi.com/en/articles/13823805-fees",
+    "type": "post",
+    "one_line_takeaway": "Maker fees are series-dependent; charged only on execution of resting orders.",
+    "relevance": 4
+  },
+  {
+    "title": "Kalshi Fee Schedule (PDF)",
+    "authors_year": "Kalshi, 2026",
+    "url": "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
+    "type": "post",
+    "one_line_takeaway": "Primary fee formulas and maker/taker variants by market series.",
+    "relevance": 4
+  },
+  {
+    "title": "In Avellaneda-Stoikov market making, reservation prices vs optimal bid ask quotes",
+    "authors_year": "Quant StackExchange, 2021",
+    "url": "https://quant.stackexchange.com/questions/66259/in-avellaneda-stoikov-market-making-what-is-the-difference-between-reservation",
+    "type": "forum",
+    "one_line_takeaway": "Clear split: reservation = inventory mid; optimal depths also use liquidity κ.",
+    "relevance": 3
+  },
+  {
+    "title": "Pricing binary options",
+    "authors_year": "Quant StackExchange",
+    "url": "https://quant.stackexchange.com/questions/63167/pricing-binary-options",
+    "type": "forum",
+    "one_line_takeaway": "Cash-or-nothing / N(d2) fair-value discussion for binaries.",
+    "relevance": 3
+  },
+  {
+    "title": "Avellaneda-Stoikov market making model",
+    "authors_year": "Quant StackExchange",
+    "url": "https://quant.stackexchange.com/questions/36400/avellaneda-stoikov-market-making-model",
+    "type": "forum",
+    "one_line_takeaway": "Practitioner Q&A on AS parameters γ, κ, σ, T.",
+    "relevance": 2
+  },
+  {
+    "title": "Market Making on Polymarket: Spreads, Rebates & Risk",
+    "authors_year": "Tom Hill / StartPolymarket, Sep 15, 2026",
+    "url": "https://startpolymarket.com/strategies/market-making/",
+    "type": "post",
+    "one_line_takeaway": "Complete-set two-bid example; adverse selection sizing vs rebate income (practitioner).",
+    "relevance": 4
+  },
+  {
+    "title": "Prediction Market Maker Strategies",
+    "authors_year": "TradeAlgo",
+    "url": "https://www.tradealgo.com/trading-guides/prediction-markets/prediction-market-maker-strategies-how-to-provide-liquidity-and-profit-from-event-contracts",
+    "type": "post",
+    "one_line_takeaway": "Inventory, time-based decay, binary resolution discontinuity (practitioner).",
+    "relevance": 3
+  },
+  {
+    "title": "Market Making on Prediction Markets: Complete 2026 Guide",
+    "authors_year": "NYCServers, 2026",
+    "url": "https://newyorkcityservers.com/blog/prediction-market-making-guide",
+    "type": "post",
+    "one_line_takeaway": "Event risk, one-sided books, cancel stale quotes near news (practitioner).",
+    "relevance": 3
+  },
+  {
+    "title": "How a Polymarket Arbitrage Bot Actually Works: 5 Strategies Explained",
+    "authors_year": "CasaTrick Substack",
+    "url": "https://casatrick.substack.com/p/polymarket-arbitrage-bot-5-strategies-explained",
+    "type": "post",
+    "one_line_takeaway": "Complete-set / complementary arb mechanics and partial-fill risk (practitioner).",
+    "relevance": 2
+  },
+  {
+    "title": "polybot-market-maker (illustrative AS+BS binary)",
+    "authors_year": "YISOWAK (GitHub)",
+    "url": "https://github.com/YISOWAK/polybot-market-maker",
+    "type": "post",
+    "one_line_takeaway": "Illustrative stack: BS N(d2) FV center + AS skew + optional perp hedge — not a primary source.",
+    "relevance": 2
+  }
+]
