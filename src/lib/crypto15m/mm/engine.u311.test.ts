@@ -179,7 +179,7 @@ describe('engine U3.1.1 extreme-mid fill refuse', () => {
     expect(s.message).toBe(U311_EXTREME_MID)
   })
 
-  it('blackout still parks both', () => {
+  it('blackout + flat still parks both', () => {
     const market = mkMarket('KXBTC15M-U311-BO', 0.5, 0.5)
     engine.setMarket(market)
     engine.seedSpot(100_000)

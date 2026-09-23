@@ -1,7 +1,7 @@
 /**
  * Explicit, testable decision policy for paper MM quoting.
- * U3.1 / U3.1.1: Family E — Digital FV + inventory skew + hard τ-flatten
- * + symmetric extreme-mid open refuse
+ * U3.1 / U3.1.1 / U3.1.2: Family E — Digital FV + inventory skew + hard τ-flatten
+ * + symmetric extreme-mid open refuse + blackout flatten when inventory
  * (see docs/research/U3_QUOTE_LOGIC_RESEARCH.md §9 Family E).
  * S1–S5 scenario playbook is not used. Paper research only — never places live orders.
  */
@@ -9,6 +9,7 @@
 import { clampPx, isValidQuoteMid } from './prices'
 import {
   U31_BLACKOUT,
+  U312_BLACKOUT_FLATTEN,
   U31_NO_FV,
   familyEQuotePrices,
   familyESideArms,
@@ -21,6 +22,7 @@ export const QUOTING_PAUSED_REASON =
 
 export {
   U31_BLACKOUT,
+  U312_BLACKOUT_FLATTEN,
   U31_NO_FV,
   U31_NO_SPOT,
   U31_NO_STRIKE,
@@ -61,7 +63,8 @@ export interface DecisionPolicyConfig {
    */
   quotingEnabled: boolean
   /**
-   * U3.1: both sides OFF when minutesRemaining ≤ this (settlement blackout).
+   * U3.1 / U3.1.2: when minutesRemaining ≤ this — flat inventory parks both
+   * (settlement blackout); inventory ≠ 0 forces flatten-only (exit).
    * Default ~0.75 min.
    */
   blackoutMinutes: number
@@ -192,7 +195,7 @@ export interface DecisionPolicyResult {
   unwindActive: boolean
   edgePersist: EdgePersistState
   stuckUnwind: StuckUnwindState
-  /** Plain Family E tags: open / flatten / blackout — not S1–S5. */
+  /** Plain Family E tags: open / flatten / blackout / blackout_flatten — not S1–S5. */
   bidScenario?: string
   askScenario?: string
   activeScenario?: string
@@ -411,15 +414,22 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     return parkBoth(U31_NO_TAU, blank, persist, stuck)
   }
 
-  if (mins <= blackout) {
+  // U3.1.2: blackout + flat → park both; blackout + inventory → flatten-only
+  // (do not park — that blocked exits in the last ~45s).
+  const inBlackout = mins <= blackout
+  if (inBlackout && input.inventory === 0) {
     return parkBoth(U31_BLACKOUT, blank, persist, stuck, 'blackout')
   }
+  const forceBlackoutFlatten = inBlackout && input.inventory !== 0
 
   const arms = familyESideArms({
     inventory: input.inventory,
     maxInventory: cfg.maxInventory,
     minutesRemaining: mins,
-    hardFlatMinutes: cfg.hardFlatMinutes,
+    // Force flatten even if blackoutMinutes > hardFlatMinutes.
+    hardFlatMinutes: forceBlackoutFlatten
+      ? Math.max(cfg.hardFlatMinutes, mins)
+      : cfg.hardFlatMinutes,
   })
 
   let bidActive = arms.bidActive
@@ -427,7 +437,16 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   let bidReason = arms.bidReason
   let askReason = arms.askReason
   const unwindActive = arms.unwindActive
-  let tag: FamilyETag = arms.tag
+  let tag: FamilyETag = forceBlackoutFlatten ? 'blackout_flatten' : arms.tag
+  if (forceBlackoutFlatten) {
+    if (input.inventory > 0) {
+      bidReason = `${U312_BLACKOUT_FLATTEN} — no new longs`
+      askReason = U312_BLACKOUT_FLATTEN
+    } else {
+      bidReason = U312_BLACKOUT_FLATTEN
+      askReason = `${U312_BLACKOUT_FLATTEN} — no new shorts`
+    }
+  }
 
   // U3.1.1 symmetric extreme-mid: refuse opens; keep reduce/flatten side.
   const mid = isValidQuoteMid(input.mid) ? input.mid : null

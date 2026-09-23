@@ -14,9 +14,18 @@ export const U31_NO_STRIKE = 'U3.1: no strike — needs floor_strike'
 export const U31_NO_TAU = 'U3.1: no τ — needs closeTime'
 export const U31_NO_FV = 'U3.1: no fair value — needs spot + strike + τ'
 export const U31_BLACKOUT = 'U3.1: settlement blackout'
+/** U3.1.2: blackout with inventory — flatten-only, do not park both. */
+export const U312_BLACKOUT_FLATTEN = 'U3.1.2: blackout flatten — exit only'
 
 /** Plain tags for journal — not S1–S5. */
-export type FamilyETag = 'open' | 'flatten' | 'blackout' | 'max_inv' | 'paused' | 'extreme_mid'
+export type FamilyETag =
+  | 'open'
+  | 'flatten'
+  | 'blackout'
+  | 'blackout_flatten'
+  | 'max_inv'
+  | 'paused'
+  | 'extreme_mid'
 
 export interface FamilyESkewConfig {
   inventorySkewCentsPerUnit: number
@@ -134,7 +143,8 @@ export function familyEQuotePrices(input: FamilyEQuotePricesInput): FamilyEQuote
 }
 
 /**
- * Side arms under Family E hard rules (blackout handled by caller).
+ * Side arms under Family E hard rules (flat blackout park handled by caller;
+ * U3.1.2 blackout+inventory forces flatten via hardFlatMinutes bump).
  * Flatten: only inventory-reducing side. Max |q|: withdraw adding side.
  */
 export function familyESideArms(input: {

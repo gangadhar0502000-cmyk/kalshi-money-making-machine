@@ -9,6 +9,7 @@ import {
   DEFAULT_DECISION_POLICY,
   QUOTING_PAUSED_REASON,
   U31_BLACKOUT,
+  U312_BLACKOUT_FLATTEN,
   U311_EXTREME_MID,
   U31_NO_FV,
   type DecisionPolicyConfig,
@@ -94,9 +95,10 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.yesAsk).toBeLessThanOrEqual(0.99)
   })
 
-  it('blackout both OFF', () => {
+  it('blackout + flat → both OFF', () => {
     const d = decideQuoteSides(
       baseInput({
+        inventory: 0,
         minutesRemaining: 0.5,
         config: baseConfig({ blackoutMinutes: 0.75 }),
       }),
@@ -105,6 +107,50 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.askActive).toBe(false)
     expect(d.bothOffReason).toBe(U31_BLACKOUT)
     expect(d.activeScenario).toBe('blackout')
+  })
+
+  it('U3.1.2: blackout + long → ask only (bid OFF)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        minutesRemaining: 0.5,
+        config: baseConfig({ blackoutMinutes: 0.75, hardFlatMinutes: 2 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.unwindActive).toBe(true)
+    expect(d.activeScenario).toBe('blackout_flatten')
+    expect(d.askReason).toBe(U312_BLACKOUT_FLATTEN)
+    expect(d.bothOffReason).toBeNull()
+  })
+
+  it('U3.1.2: blackout + short → bid only (ask OFF)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: -2,
+        minutesRemaining: 0.4,
+        config: baseConfig({ blackoutMinutes: 0.75, hardFlatMinutes: 2 }),
+      }),
+    )
+    expect(d.askActive).toBe(false)
+    expect(d.bidActive).toBe(true)
+    expect(d.unwindActive).toBe(true)
+    expect(d.activeScenario).toBe('blackout_flatten')
+    expect(d.bidReason).toBe(U312_BLACKOUT_FLATTEN)
+  })
+
+  it('τ > blackout + hardFlat → flatten (not blackout_flatten)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 3,
+        minutesRemaining: 1.5,
+        config: baseConfig({ hardFlatMinutes: 2, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.activeScenario).toBe('flatten')
   })
 
   it('flatten only reduces (long → ask only)', () => {
@@ -232,7 +278,7 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.bidActive).toBe(true)
   })
 
-  it('blackout still parks both (unchanged)', () => {
+  it('blackout + flat still parks both (U3.1.2 unchanged for q=0)', () => {
     const d = decideQuoteSides(
       baseInput({
         mid: 0.99,
@@ -244,6 +290,23 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(false)
     expect(d.bothOffReason).toBe(U31_BLACKOUT)
+  })
+
+  it('U3.1.2 + U3.1.1: blackout long @ extreme mid — ask stays, no new longs', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.99,
+        fairValue: 0.96,
+        inventory: 1,
+        minutesRemaining: 0.5,
+        bookBestBid: 0.98,
+        bookBestAsk: 0.99,
+        config: baseConfig({ blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.activeScenario).toBe('blackout_flatten')
   })
 
 })

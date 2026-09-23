@@ -209,6 +209,11 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 
 - Symmetric open refuse: no new longs when mid ≥ toxicMidHigh; no new shorts when mid ≤ toxicMidLow. Flatten/reduce still allowed. Flat+extreme parks with `U3.1.1: extreme mid — no new opens`. Quote + fill paths. Paper-only.
 
+## U3.1.2 — blackout flatten when inventory (not park-both)
+
+- Bug: blackout parked **both** sides even with inventory, blocking Family E flatten in the last ~45s.
+- Fix: `mins ≤ blackoutMinutes` + flat → park both; + inventory → force flatten-only (`blackout_flatten`, strip `U3.1.2: blackout flatten — exit only`). U3.1.1 open refuse still applies; reduce allowed at extreme mid. Paper-only.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

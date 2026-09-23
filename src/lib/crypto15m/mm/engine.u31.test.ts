@@ -113,7 +113,7 @@ describe('U3.1 Family E engine', () => {
     expect(s.message).toBe(U31_NO_SPOT)
   })
 
-  it('near expiry blackout → both OFF', () => {
+  it('near expiry blackout + flat → both OFF', () => {
     const market = mkMarket('KXBTC15M-BO', 0.4)
     engine.setMarket(market)
     engine.seedSpot(100_000)

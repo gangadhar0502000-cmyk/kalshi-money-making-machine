@@ -33,6 +33,7 @@ import {
   canAcceptInventoryIncreasingFill,
   decideQuoteSides,
   QUOTING_PAUSED_REASON,
+  U312_BLACKOUT_FLATTEN,
   U31_NO_SPOT,
   U31_NO_STRIKE,
   U31_NO_TAU,
@@ -1124,7 +1125,8 @@ export class PaperMmEngine {
       activeScenario: decision.activeScenario,
     }
 
-    // U3.0 pause / U3.1 fail-loud or blackout on strip (do not erase U2.14 hold advisories).
+    // U3.0 pause / U3.1 fail-loud / U3.1.2 blackout-flatten on strip
+    // (do not erase U2.14 hold advisories).
     const holdL2 = /U2\.14:\s*L2 off — holding inv/i.test(this.message)
     if (this.running && !holdL2) {
       if (!this.config.quotingEnabled) {
@@ -1134,11 +1136,15 @@ export class PaperMmEngine {
         /^U3\.1/.test(decision.bothOffReason)
       ) {
         this.message = decision.bothOffReason
+      } else if (decision.active && decision.activeScenario === 'blackout_flatten') {
+        this.message = U312_BLACKOUT_FLATTEN
+      } else if (decision.active && decision.activeScenario === 'flatten') {
+        this.message = 'U3.1: flatten — exit only'
       } else if (
         decision.active &&
         /^U3\.1/.test(this.message)
       ) {
-        // Clear prior U3.1 park once quotes arm again.
+        // Clear prior U3.1 park once quotes arm again (open / two-sided).
         this.message = this.config.strictRealism
           ? 'Paper MM running (strict realism · Family E). Read-only API · never places trades.'
           : 'Paper MM running (LOOSE · Family E). Fills soft — not live edge.'

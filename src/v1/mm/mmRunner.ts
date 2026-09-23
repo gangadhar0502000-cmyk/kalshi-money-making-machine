@@ -73,6 +73,16 @@ export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
       'U3.0',
     )
   }
+  if (/U3\.1\.2:\s*blackout flatten/i.test(msg)) {
+    return makeUpdateError(
+      'blackout flatten — exit only',
+      'inventory flat before blackout',
+      'U3.1.2',
+    )
+  }
+  if (/U3\.1:\s*flatten — exit only/i.test(msg)) {
+    return makeUpdateError('flatten — exit only', 'minutesRemaining > hardFlatMinutes', 'U3.1')
+  }
   if (/U3\.1:\s*settlement blackout/i.test(msg)) {
     return makeUpdateError('settlement blackout', 'minutesRemaining > blackoutMinutes', 'U3.1')
   }
