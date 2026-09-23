@@ -476,7 +476,13 @@ export class PaperMmPortfolio {
           eng.settleNow()
         }
       }
-      if (this.books.size > 0) {
+      // U2.14.1: always evaluate L2-off eviction when useLiveBook, even while holding
+      // through empty/unranked feed (previously returned before maybeEvictL2Off).
+      // Refill only when hasValidRanked — not on this early-return path.
+      const l2DroppedEarly = this.maybeEvictL2Off()
+      if (l2DroppedEarly.length > 0) {
+        this.message = `U2.14: dropped ${l2DroppedEarly.join(', ')} — L2 off`
+      } else if (this.books.size > 0) {
         this.message =
           openN === 0
             ? `Feed empty/stale — holding ${this.books.size} slot(s) until open crypto 15m refresh. Read-only · never places trades.`
@@ -582,9 +588,12 @@ export class PaperMmPortfolio {
       after < Math.min(this.config.maxActiveMarkets, openRanked.length) &&
       openRanked.length > 0
     ) {
-      this.message =
-        `Multi-book under-filled (${after}/${this.config.maxActiveMarkets}) — ` +
-        `retrying fill from ${openRanked.length} open ranked. Read-only · never places trades.`
+      // U2.14.1: under-fill must not erase the fail-loud U2.14 drop strip.
+      if (l2Dropped.length === 0) {
+        this.message =
+          `Multi-book under-filled (${after}/${this.config.maxActiveMarkets}) — ` +
+          `retrying fill from ${openRanked.length} open ranked. Read-only · never places trades.`
+      }
       this.rebalanceSlots(markets)
     }
 
@@ -599,10 +608,11 @@ export class PaperMmPortfolio {
 
 
   /**
-   * U2.14 — after l2OffDropTicks consecutive syncs with useLiveBook && !liveBook:
+   * U2.14 / U2.14.1 — after l2OffDropTicks consecutive syncs with useLiveBook && !liveBook:
    * flat inventory → drop slot (S5.1 SLOT_EVICT pattern) and let rebalanceSlots
-   * refill from ranked open set. Open inventory → hold with fail-loud row status
-   * (never invent flatten prices without L2).
+   * refill from ranked open set (when ranked set exists). Open inventory → hold with
+   * fail-loud row status (never invent flatten prices without L2).
+   * Called on the main sync path and on the empty/unranked early-return path (U2.14.1).
    * @returns tickers dropped this pass (for fail-loud strip after refill).
    */
   private maybeEvictL2Off(): string[] {

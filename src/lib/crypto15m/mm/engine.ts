@@ -117,6 +117,16 @@ export class PaperMmEngine {
   private prevBook: OrderBookSnapshot | null = null
   private liveBook = false
   private liveBookAuthenticated = false
+  /**
+   * U2.14.1: portfolio called noteL2OffHoldingInv — pollBook / soft-sim must not
+   * overwrite with U2.13 while inventory remains open.
+   */
+  private holdingInvForL2Off = false
+  /**
+   * U2.14.1: last mid from a real L2 onBook. When useLiveBook && !liveBook, freeze
+   * mark to this (do not adopt extreme feed 0¢/100¢ mids for unrealized).
+   */
+  private lastLiveMarkMid: number | null = null
   private bookBestBid: number | null = null
   private bookBestAsk: number | null = null
   private unitsWarning: string | null = null
@@ -267,11 +277,19 @@ export class PaperMmEngine {
   }
 
   private midDollars(): number {
+    // U2.14.1: freeze mark to last live L2 mid while L2 is off (avoid 0¢/100¢ feed).
+    if (this.config.useLiveBook && !this.liveBook && this.lastLiveMarkMid != null) {
+      return asDollarPrice(this.lastLiveMarkMid, 'frozenLiveMark')
+    }
     if (this.prevBook) return asDollarPrice(this.prevBook.mid, 'book.mid')
     return asDollarPrice(this.market?.midYes ?? 0.5, 'market.midYes')
   }
 
   private unrealizedDollars(mid: number): number {
+    // U2.14.1: no honest L2 mark yet → do not invent unrealized from extreme feed mid.
+    if (this.config.useLiveBook && !this.liveBook && this.lastLiveMarkMid == null) {
+      return 0
+    }
     const m = asDollarPrice(mid, 'unrealized.mid')
     if (this.inventory === 0 || this.avgEntry == null) return 0
     const entry = asDollarPrice(this.avgEntry, 'unrealized.avgEntry')
@@ -390,6 +408,8 @@ export class PaperMmEngine {
       this.bookBestBid = null
       this.bookBestAsk = null
       this.liveBook = false
+      this.holdingInvForL2Off = false
+      this.lastLiveMarkMid = null
       this.midWalkState = { ...DEFAULT_DETECT_STATE }
       this.lastFillAt = 0
       // Do NOT clear fillCapStore — per-ticker caps must survive roll/rebuild.
@@ -538,6 +558,8 @@ export class PaperMmEngine {
     this.settled = false
     this.midCrossRejectCount = 0
     this.prevBook = null
+    this.holdingInvForL2Off = false
+    this.lastLiveMarkMid = null
     this.unitsWarning = null
     this.lastUnrealizedAbs = 0
     this.moneyPrinterBug = false
@@ -628,16 +650,14 @@ export class PaperMmEngine {
       })
       if (!book) {
         this.liveBook = false
-        this.message = 'L2 off — no soft fills (U2.13)'
+        this.setL2OffNoSoftFillsMessage()
         this.emit()
         return
       }
       this.onBook(book)
     } catch (e) {
       this.liveBook = false
-      this.message = `L2 off — no soft fills (U2.13): ${
-        e instanceof Error ? e.message : String(e)
-      }`
+      this.setL2OffNoSoftFillsMessage(e instanceof Error ? e.message : String(e))
       this.emit()
     }
   }
@@ -649,11 +669,13 @@ export class PaperMmEngine {
 
     this.liveBook = true
     this.liveBookAuthenticated = book.authenticated
+    this.holdingInvForL2Off = false
     this.bookBestBid = asDollarPrice(book.bestBid, 'book.bestBid')
     this.bookBestAsk = asDollarPrice(book.bestAsk, 'book.bestAsk')
     this.lastTickAt = Date.now()
 
     const mid = asDollarPrice(book.mid, 'onBook.mid')
+    this.lastLiveMarkMid = mid
     if (this.market) {
       // Keep market mid aligned to book mid (dollars)
       this.market = { ...this.market, midYes: mid, yesBid: book.bestBid, yesAsk: book.bestAsk }
@@ -814,14 +836,21 @@ export class PaperMmEngine {
 
   onMarketTick(market: Crypto15mMarket): void {
     if (this.market?.ticker !== market.ticker) return
-    const mid = asDollarPrice(market.midYes, 'onMarketTick.mid')
+    const feedMid = asDollarPrice(market.midYes, 'onMarketTick.mid')
+    // U2.14.1: when useLiveBook && !liveBook, freeze mark to last live L2 mid —
+    // do not adopt extreme feed mids (0¢/100¢ settled/empty window) for unrealized.
+    const freezeMark =
+      this.config.useLiveBook && !this.liveBook && this.lastLiveMarkMid != null
+    const mid = freezeMark
+      ? asDollarPrice(this.lastLiveMarkMid!, 'onMarketTick.frozenMark')
+      : feedMid
     this.market = { ...market, midYes: mid }
     const now = Date.now()
     this.lastTickAt = now
 
     if (this.running && this.config.settleOnClose && !this.settled && marketLooksSettled(market)) {
       this.settleInventory(this.market)
-      this.lastMid = mid
+      if (!freezeMark) this.lastMid = mid
       this.emit()
       return
     }
@@ -837,7 +866,7 @@ export class PaperMmEngine {
       }
       this.maybeSoftSimOrFailLoud(mid)
     }
-    this.lastMid = mid
+    if (!freezeMark) this.lastMid = mid
     this.emit()
   }
 
@@ -862,13 +891,12 @@ export class PaperMmEngine {
   /**
    * Soft-sim only when useLiveBook is off. U2.13: useLiveBook && !liveBook →
    * fail-loud, no mid-cross / random fills.
+   * U2.14.1: do not overwrite U2.14 hold-inv advisory with U2.13.
    */
   private maybeSoftSimOrFailLoud(mid: number): void {
     if (this.liveBook) return
     if (this.config.useLiveBook) {
-      if (!/L2 off — no soft fills \(U2\.13\)/.test(this.message)) {
-        this.message = 'L2 off — no soft fills (U2.13)'
-      }
+      this.setL2OffNoSoftFillsMessage()
       return
     }
     this.simulateSoftFills(mid)
@@ -939,6 +967,7 @@ export class PaperMmEngine {
 
     this.inventory = 0
     this.avgEntry = null
+    this.holdingInvForL2Off = false
 
     if (awaitRoll) {
       // Stay running (timers up) so syncMarketUniverse can roll without Start.
@@ -1500,11 +1529,39 @@ export class PaperMmEngine {
    */
 
   /**
+   * U2.14 / U2.14.1: L2-off row message. Prefer hold advisory when portfolio has
+   * noted open inventory past l2OffDropTicks (or message already says so).
+   */
+  private setL2OffNoSoftFillsMessage(detail?: string): void {
+    if (
+      this.holdingInvForL2Off ||
+      (this.inventory !== 0 && /U2\.14:\s*L2 off — holding inv/i.test(this.message))
+    ) {
+      this.holdingInvForL2Off = true
+      this.message = 'U2.14: L2 off — holding inv until flat'
+      return
+    }
+    this.message = detail
+      ? `L2 off — no soft fills (U2.13): ${detail}`
+      : 'L2 off — no soft fills (U2.13)'
+  }
+
+  /**
    * U2.14: portfolio advisory when L2 stays off past l2OffDropTicks with open inv.
    * Does not invent fills or flatten prices.
    */
   noteL2OffHoldingInv(): void {
+    this.holdingInvForL2Off = true
     this.message = 'U2.14: L2 off — holding inv until flat'
+    this.emit()
+  }
+
+  /**
+   * U2.14.1 test helper — same message path as pollBook when fetch returns null.
+   */
+  __noteL2PollFailedForTests(detail?: string): void {
+    this.liveBook = false
+    this.setL2OffNoSoftFillsMessage(detail)
     this.emit()
   }
 
@@ -1512,17 +1569,25 @@ export class PaperMmEngine {
   __setLiveBookForTests(on: boolean): void {
     this.liveBook = on
     if (on) {
+      this.holdingInvForL2Off = false
       this.message = 'Live L2 (test)'
+      if (this.lastMid != null) this.lastLiveMarkMid = this.lastMid
     } else if (!/L2 off/i.test(this.message)) {
-      this.message = 'L2 off — no soft fills (U2.13)'
+      this.setL2OffNoSoftFillsMessage()
     }
     this.emit()
+  }
+
+  /** U2.14.1 test helper — seed last live mark mid (frozen while L2 off). */
+  __setLastLiveMarkMidForTests(mid: number | null): void {
+    this.lastLiveMarkMid = mid == null ? null : asDollarPrice(mid, 'test.lastLiveMarkMid')
   }
 
   seedInventory(inventory: number, avgEntry: number | null = 0.5): void {
     this.inventory = Math.trunc(inventory)
     this.avgEntry =
       this.inventory === 0 ? null : avgEntry != null ? asDollarPrice(avgEntry, 'seed.avg') : 0.5
+    if (this.inventory === 0) this.holdingInvForL2Off = false
     this.rebuildQuote(true)
     this.emit()
   }

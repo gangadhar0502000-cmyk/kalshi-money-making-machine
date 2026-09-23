@@ -172,10 +172,20 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **U2 complete** with this slice. **U3 next** — feed + engine observability (richer health, divergence alarms). Fill observability strip deferred to U3.
 - Paper-only · read-only · never places live orders.
 
+
+## U2.14.1 — L2-off drop on hold path, hold message, soft marks
+
+- **A)** `syncMarketUniverse` early-return (`openN === 0` / empty ranked) now still runs `maybeEvictL2Off` when `useLiveBook` — flat L2-off books drop within ~`l2OffDropTicks` even while holding through empty/unranked feed. Refill remains gated on a valid ranked set.
+- **B)** Engine `pollBook` null/error and soft-sim fail-loud no longer overwrite `U2.14: L2 off — holding inv until flat` when portfolio has noted open inventory (`holdingInvForL2Off`). Soft-fill gate unchanged.
+- **C)** Multi-book under-fill strip must not erase `U2.14: dropped … — L2 off` on the same sync.
+- **D)** Soft marks: when `useLiveBook && !liveBook`, freeze mark mid to last live L2 mid (`lastLiveMarkMid`); if never had L2, unrealized displays **0** (do not invent P&L from extreme feed 0¢/100¢). Documented choice — smallest honest fix; no invented fills.
+- **E)** Browser L2 path remains **GET** `/local-api/orderbooks?tickers=…` (batch coalesce in `liveBook.ts`) — no POST regression.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.
-- **U3** — feed + engine observability (richer health, divergence alarms). **U2 complete as of U2.14.**
+- **U3** — feed + engine observability (richer health, divergence alarms). **U2 complete as of U2.14 / U2.14.1.**
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
 

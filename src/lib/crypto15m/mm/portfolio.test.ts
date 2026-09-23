@@ -588,6 +588,98 @@ describe('PaperMmPortfolio', () => {
       expect(portfolio.getL2OffTicksForTests(slotId)).toBe(0)
       expect(portfolio.getState().books[0]!.snapshot.marketTicker).toBe('BTC-L2BACK')
     })
+
+    it('U2.14.1: drops flat L2-off on early-return when open set is empty', () => {
+      const btc = mk({
+        ticker: 'BTC-EARLY-DROP',
+        asset: 'BTC',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      portfolio.seedSpot('BTC', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        useLiveBook: true,
+        l2OffDropTicks: 3,
+        fillMidFallback: true,
+        fvQuoting: true,
+        minEdgeCents: 1,
+      })
+      portfolio.syncMarketUniverse([btc])
+      portfolio.start()
+      expect(portfolio.getState().books.some((b) => b.snapshot.marketTicker === 'BTC-EARLY-DROP')).toBe(
+        true,
+      )
+      expect(portfolio.getState().books[0]!.snapshot.liveBook).toBe(false)
+
+      // Closed feed → openN===0 early-return path (must still evict flat L2-off).
+      const closed = mk({
+        ticker: 'BTC-EARLY-DROP',
+        asset: 'BTC',
+        midYes: 0.48,
+        floorStrike: 100,
+        status: 'closed',
+        minutesRemaining: 0,
+        closeTime: new Date(Date.now() - 60_000).toISOString(),
+      })
+      for (let i = 0; i < 6; i++) {
+        const still = portfolio
+          .getState()
+          .books.some((b) => b.snapshot.marketTicker === 'BTC-EARLY-DROP')
+        if (!still) break
+        portfolio.syncMarketUniverse([closed])
+      }
+      const st = portfolio.getState()
+      expect(st.books.map((b) => b.snapshot.marketTicker)).not.toContain('BTC-EARLY-DROP')
+      expect(st.message).toMatch(/U2\.14: dropped .+ — L2 off/)
+    })
+
+    it('U2.14.1: under-fill does not erase U2.14 drop strip', () => {
+      const btc = mk({
+        ticker: 'BTC-DROP-STRIP',
+        asset: 'BTC',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      const eth = mk({
+        ticker: 'ETH-ONLY-REFILL',
+        asset: 'ETH',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      portfolio.seedSpot('BTC', 100.05)
+      portfolio.seedSpot('ETH', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 2,
+        multiBook: true,
+        useLiveBook: true,
+        l2OffDropTicks: 2,
+        fillMidFallback: true,
+        fvQuoting: true,
+        minEdgeCents: 1,
+      })
+      // Start with BTC only so first slot is L2-off BTC; then add ETH for refill.
+      portfolio.syncMarketUniverse([btc])
+      portfolio.start()
+      expect(portfolio.getState().books[0]!.snapshot.marketTicker).toBe('BTC-DROP-STRIP')
+      for (let i = 0; i < 5; i++) {
+        const still = portfolio
+          .getState()
+          .books.some((b) => b.snapshot.marketTicker === 'BTC-DROP-STRIP')
+        if (!still) break
+        // Ranked set has BTC+ETH so main path runs; after drop only ETH refills → under-filled
+        portfolio.syncMarketUniverse([btc, eth])
+      }
+      const st = portfolio.getState()
+      expect(st.message).toMatch(/U2\.14: dropped .+ — L2 off/)
+      expect(st.message).not.toMatch(/under-filled/i)
+      expect(st.books.map((b) => b.snapshot.marketTicker)).not.toContain('BTC-DROP-STRIP')
+    })
+
   })
 
 })

@@ -95,7 +95,7 @@ export function derivePortfolioUpdateError(
 ): MmUpdateError | null {
   const msg = state.message ?? ''
   // U2.14 drop (quiet strip — once per eviction message, not every tick).
-  const drop = msg.match(/U2\.14: dropped ([\w.-]+) — L2 off/i)
+  const drop = msg.match(/U2\.14: dropped (.+?) — L2 off/i)
   if (drop) {
     return makeUpdateError(
       `dropped ${drop[1]} — L2 off`,
