@@ -226,6 +226,14 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Fill journal tape:** every fill JSONL row records iso/t/ticker/asset/side/price/fillSize/mid/fairValue/edgeCents/yesBid/yesAsk/centerMode/inventoryBefore/inventory/minutesLeft/queueAhead/reason/captureCents/realizedDelta/cashAfter/spot/strike/scenarioId (house tags).
 - Paper-only · read-only · never places live orders.
 
+
+## U3.2.1 — last-τ flatten actually exits (hit bid / fail-loud stuck)
+
+- **Bug:** hardFlat / blackout_flatten armed the exit side but stayed **maker-only**, so long YES at mid≈1¢ sat on an ask nobody lifted through the final ~40s.
+- **Fix:** flatten / blackout_flatten prices the exit **through the touch** (long → sell at best bid; short → buy at best ask). Strict paper still refuses taker **opens**; flatten reduces may `taker_cross`. No bid/ask to exit → fail-loud `U3.2.1: stuck inventory, no bid/ask`.
+- Rate caps skipped for flatten exits; fill tags prefer `flatten` / `blackout_flatten` over S3/S4 labels. No S1–S5 / no FV-centering reopen.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

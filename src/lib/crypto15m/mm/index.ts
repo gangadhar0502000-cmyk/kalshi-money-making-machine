@@ -115,6 +115,10 @@ export {
   U32_HOUSE_MID,
   U32_NO_MID,
   U32_RANK_LIQUIDITY,
+  U321_STUCK_NO_BID,
+  U321_STUCK_NO_ASK,
+  isFlattenHouseTag,
+  aggressiveFlattenPrices,
   type HouseTag,
 } from './houseMidQuote'
 

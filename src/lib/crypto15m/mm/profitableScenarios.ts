@@ -112,7 +112,7 @@ export function isRiskFlat(input: RiskFlatInput): boolean {
   if (
     mins != null &&
     Number.isFinite(mins) &&
-    mins < input.hardFlatMinutes
+    mins <= input.hardFlatMinutes
   ) {
     return true
   }

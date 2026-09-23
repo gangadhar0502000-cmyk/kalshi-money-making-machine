@@ -10,6 +10,10 @@ import {
   houseMidQuotePrices,
   houseReservation,
   midQualityScore,
+  aggressiveFlattenPrices,
+  U321_STUCK_NO_BID,
+  U321_STUCK_NO_ASK,
+  isFlattenHouseTag,
 } from './houseMidQuote'
 
 describe('houseMidQuotePrices', () => {
@@ -58,5 +62,53 @@ describe('midQualityScore', () => {
   it('prefers mid near 0.5 over near toxic extremes', () => {
     expect(midQualityScore(0.5)).toBeGreaterThan(midQualityScore(0.1))
     expect(midQualityScore(0.5)).toBeGreaterThan(midQualityScore(0.9))
+  })
+})
+
+
+describe('U3.2.1 aggressiveFlattenPrices', () => {
+  it('long hits best bid (not maker ask above touch)', () => {
+    const r = aggressiveFlattenPrices({
+      inventory: 1,
+      yesBid: 0.01,
+      yesAsk: 0.03,
+      bookBestBid: 0.01,
+      bookBestAsk: 0.02,
+      quoteClampEpsilon: 0.01,
+    })
+    expect(r.stuckReason).toBeNull()
+    expect(r.yesAsk).toBeCloseTo(0.01, 5)
+    expect(r.yesAsk).toBeLessThanOrEqual(0.01 + 1e-9)
+  })
+
+  it('long with no bid → stuck fail-loud', () => {
+    const r = aggressiveFlattenPrices({
+      inventory: 1,
+      yesBid: 0.01,
+      yesAsk: 0.02,
+      bookBestBid: null,
+      bookBestAsk: 0.02,
+      quoteClampEpsilon: 0.01,
+    })
+    expect(r.stuckReason).toBe(U321_STUCK_NO_BID)
+  })
+
+  it('short lifts best ask', () => {
+    const r = aggressiveFlattenPrices({
+      inventory: -1,
+      yesBid: 0.97,
+      yesAsk: 0.99,
+      bookBestBid: 0.98,
+      bookBestAsk: 0.99,
+      quoteClampEpsilon: 0.01,
+    })
+    expect(r.stuckReason).toBeNull()
+    expect(r.yesBid).toBeCloseTo(0.99, 5)
+  })
+
+  it('isFlattenHouseTag', () => {
+    expect(isFlattenHouseTag('flatten')).toBe(true)
+    expect(isFlattenHouseTag('blackout_flatten')).toBe(true)
+    expect(isFlattenHouseTag('house_mid')).toBe(false)
   })
 })

@@ -15,9 +15,13 @@ import {
 import {
   U32_HOUSE_MID,
   U32_NO_MID,
+  aggressiveFlattenPrices,
+  isFlattenHouseTag,
   houseMidQuotePrices,
   type HouseTag,
 } from './houseMidQuote'
+
+export { U321_STUCK_NO_BID, U321_STUCK_NO_ASK, isFlattenHouseTag } from './houseMidQuote'
 
 /** Fail-loud strip / reason when paper quotes stay OFF (U3.0 legacy pause). */
 export const QUOTING_PAUSED_REASON =
@@ -451,6 +455,29 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   } else if (tag === 'house_mid') {
     bidReason = U32_HOUSE_MID
     askReason = U32_HOUSE_MID
+  }
+
+  
+  // U3.2.1: in flatten / blackout_flatten, price exit through the touch so L2 can fill.
+  // Maker-only join leaves ask above a 1¢ dump and never exits — hit bid (long) / lift ask (short).
+  if (unwindActive && isFlattenHouseTag(tag)) {
+    const flatPx = aggressiveFlattenPrices({
+      inventory: input.inventory,
+      yesBid,
+      yesAsk,
+      bookBestBid: input.bookBestBid,
+      bookBestAsk: input.bookBestAsk,
+      quoteClampEpsilon: eps,
+    })
+    yesBid = flatPx.yesBid
+    yesAsk = flatPx.yesAsk
+    if (flatPx.stuckReason) {
+      if (input.inventory > 0) {
+        askReason = flatPx.stuckReason
+      } else if (input.inventory < 0) {
+        bidReason = flatPx.stuckReason
+      }
+    }
   }
 
   // U3.1.1 symmetric extreme-mid: refuse opens; keep reduce/flatten side.

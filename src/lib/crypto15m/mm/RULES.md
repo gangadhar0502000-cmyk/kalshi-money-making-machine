@@ -11,7 +11,7 @@
 - **Hard τ:**
   - **Blackout (flat):** `minutesRemaining ≤ blackoutMinutes` (default **0.75**) and `q === 0` → both OFF, `U3.1: settlement blackout`.
   - **Blackout flatten (U3.1.2):** same τ window but `q ≠ 0` → flatten-only (long → ask; short → bid), tag `blackout_flatten`, strip `U3.1.2: blackout flatten — exit only`.
-  - **Flatten:** `minutesRemaining ≤ hardFlatMinutes` (default **2**) and `q ≠ 0` → only reducing side ON.
+  - **Flatten:** `minutesRemaining ≤ hardFlatMinutes` (default **2**) and `q ≠ 0` → only reducing side ON; **U3.2.1** prices through the touch (hit bid / lift ask).
 - **Hard Q:** `|q| ≥ maxInventory` → withdraw the adding side.
 - **Fills:** U2.13 L2 queue fills only when live book; no soft fills when L2 off.
 - **Invalid mid:** park fail-loud `U3.2: no mid — needs two-sided book`.
@@ -38,6 +38,16 @@ Settlement blackout must not trap open inventory. In the last `blackoutMinutes`:
 - **Flat** → park both (unchanged).
 - **Long / short** → flatten-only via side arms; U3.1.1 extreme-mid still refuses *opens*; reduce side stays allowed.
 - Settled / `mins ≤ 0` settlement path unchanged.
+
+## U3.2.1 — last-τ flatten must actually exit (not silent maker park)
+
+In `hardFlatMinutes` / `blackoutMinutes` with `q ≠ 0`, flatten is not optional:
+
+- **Long** → sell YES by **hitting the best bid** (taker-through-touch). **Short** → buy YES by **lifting the best ask**.
+- Maker-only join is wrong here: a resting ask above a 1¢ dump never gets lifted while the book bleeds out.
+- Engine allows `taker_cross` **only** for flatten / blackout_flatten reducing fills (strict realism still blocks taker opens).
+- If exit liquidity is missing (long + no bid, short + no ask) → fail-loud `U3.2.1: stuck inventory, no bid/ask` on that book — never silent hold.
+- Do **not** revive S1–S5 or FV-centered opens.
 
 ## Slot ops (not quote scenarios)
 

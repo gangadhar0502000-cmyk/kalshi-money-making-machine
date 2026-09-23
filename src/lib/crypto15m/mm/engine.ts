@@ -44,6 +44,9 @@ import {
   type DecisionPolicyConfig,
   type EdgePersistState,
   type StuckUnwindState,
+  isFlattenHouseTag,
+  U321_STUCK_NO_BID,
+  U321_STUCK_NO_ASK,
 } from './decisionPolicy'
 import { evaluateClose } from './profitableScenarios'
 import type {
@@ -700,16 +703,22 @@ export class PaperMmEngine {
       this.lastMid != null &&
       Math.abs(mid - this.lastMid) * 100 >= this.config.midMoveRequoteCents
     const due = Date.now() - this.lastQuoteAt >= this.config.quoteRefreshMs
-    if (midMoved || due || !this.quote) {
+    // U3.2.1: with inventory, always reprice on each book so flatten can hit the
+    // live bid/ask (start() may have quoted with null BBO → false "stuck").
+    const invNeedsBbo = this.inventory !== 0
+    if (midMoved || due || !this.quote || invNeedsBbo) {
       this.rebuildQuote(false)
     }
 
     if (this.quote?.active && !this.moneyPrinterBug) {
       const now = Date.now()
       const cooling = now - this.lastFillAt < this.config.fillCooldownMs
+      const flattenExit = isFlattenHouseTag(this.quote?.activeScenario)
       const rate = cooling
         ? { ok: false as const, reason: 'fill cooldown' }
-        : this.canAcceptFillByRateCaps(now)
+        : flattenExit
+          ? { ok: true as const }
+          : this.canAcceptFillByRateCaps(now)
       if (!rate.ok && !cooling) {
         this.message =
           `FILL RATE CAP — ${rate.reason}. Harsh paper discipline · read-only.`
@@ -724,7 +733,9 @@ export class PaperMmEngine {
         this.midWalkState,
         {
           // Strict realism (default): maker-only — never emit taker_cross fee bleed.
-          allowTakerCross: !this.config.strictRealism,
+          allowTakerCross:
+            !this.config.strictRealism ||
+            isFlattenHouseTag(this.quote?.activeScenario),
           allowMidWalk: this.config.allowMidWalk,
           minBookDepthConsumed: this.config.minBookDepthConsumed,
           minTouchPolls: this.config.minTouchPolls,
@@ -778,7 +789,7 @@ export class PaperMmEngine {
       this.message = QUOTING_PAUSED_REASON
     } else if (
       !/U2\.14:\s*L2 off — holding inv/i.test(this.message) &&
-      !/^U3\.1/.test(this.message)
+      !/^U3\.(1|2)/.test(this.message)
     ) {
       this.message = this.liveBookAuthenticated
         ? 'LIVE BOOK (read-only) · never places trades'
@@ -1138,9 +1149,25 @@ export class PaperMmEngine {
       ) {
         this.message = decision.bothOffReason
       } else if (decision.active && decision.activeScenario === 'blackout_flatten') {
-        this.message = U312_BLACKOUT_FLATTEN
+        const stuck =
+          (typeof decision.askReason === 'string' &&
+            decision.askReason.startsWith('U3.2.1:') &&
+            decision.askReason) ||
+          (typeof decision.bidReason === 'string' &&
+            decision.bidReason.startsWith('U3.2.1:') &&
+            decision.bidReason) ||
+          null
+        this.message = stuck || U312_BLACKOUT_FLATTEN
       } else if (decision.active && decision.activeScenario === 'flatten') {
-        this.message = 'U3.1: flatten — exit only'
+        const stuck =
+          (typeof decision.askReason === 'string' &&
+            decision.askReason.startsWith('U3.2.1:') &&
+            decision.askReason) ||
+          (typeof decision.bidReason === 'string' &&
+            decision.bidReason.startsWith('U3.2.1:') &&
+            decision.bidReason) ||
+          null
+        this.message = stuck || 'U3.1: flatten — exit only'
       } else if (decision.active && decision.activeScenario === 'house_mid') {
         this.message = U32_HOUSE_MID
       } else if (
@@ -1349,6 +1376,11 @@ export class PaperMmEngine {
     // unless S4 risk flat (hardFlat / maxInv / spot-guard / toxic holding mid).
     // Stamp fill.scenarioId from evaluateClose (or open quote decision) at fill time —
     // post-flat requote often shows S5 and must not rewrite close attribution.
+    const flattenExitFill = isFlattenHouseTag(this.quote?.activeScenario)
+    const reducingFill =
+      (side === 'sell_yes' && this.inventory > 0) ||
+      (side === 'buy_yes' && this.inventory < 0)
+
     let fillScenarioId: string | undefined
     if (reason !== 'settlement' && this.inventory !== 0) {
       const reducing =
@@ -1394,7 +1426,9 @@ export class PaperMmEngine {
             `Read-only · never places trades.`
           return
         }
-        fillScenarioId = closeDec.scenario
+        fillScenarioId = flattenExitFill
+          ? (this.quote?.activeScenario ?? closeDec.scenario)
+          : closeDec.scenario
         if (closeDec.scenario === 'S4') {
           this.message =
             `S4 CLOSE_RISK risk flat ${side} @ $${price.toFixed(4)} ` +
@@ -1424,7 +1458,7 @@ export class PaperMmEngine {
     const signed = side === 'buy_yes' ? size : -size
 
     // Belt-and-suspenders: refuse taker fills under strict realism
-    if (taker && this.config.strictRealism) {
+    if (taker && this.config.strictRealism && !(flattenExitFill && reducingFill)) {
       this.midCrossRejectCount += 1
       this.message =
         `TAKER REFUSED ${side} @ $${price.toFixed(4)} — strict maker-only (no taker_cross).`

@@ -16,6 +16,7 @@ import {
   type DecisionPolicyConfig,
   type DecisionPolicyInput,
 } from './decisionPolicy'
+import { U321_STUCK_NO_BID } from './houseMidQuote'
 
 function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicyConfig {
   return {
@@ -335,5 +336,71 @@ describe('decisionPolicy U3.2 house mid', () => {
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(true)
     expect(d.activeScenario).toBe('blackout_flatten')
+  })
+})
+
+
+describe('U3.2.1 last-τ flatten exits', () => {
+  it('inv≠0 + τ≤40s → blackout_flatten tag + exit ask at best bid', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 1,
+        minutesRemaining: 0.5, // 30s
+        mid: 0.01,
+        bookBestBid: 0.01,
+        bookBestAsk: 0.02,
+        config: baseConfig({ blackoutMinutes: 0.75, hardFlatMinutes: 2 }),
+      }),
+    )
+    expect(d.activeScenario).toBe('blackout_flatten')
+    expect(d.askActive).toBe(true)
+    expect(d.bidActive).toBe(false)
+    expect(d.yesAsk).toBeCloseTo(0.01, 5)
+  })
+
+  it('inv=0 + τ≤blackout → blackout, no quotes', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 0.5,
+        mid: 0.5,
+        config: baseConfig({ blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.activeScenario).toBe('blackout')
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+  })
+
+  it('mid≈1¢ inv+1 with no bid → flatten armed + stuck fail-loud', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 1,
+        minutesRemaining: 0.4,
+        mid: 0.01,
+        bookBestBid: null,
+        bookBestAsk: 0.01,
+        config: baseConfig({ blackoutMinutes: 0.75, hardFlatMinutes: 2 }),
+      }),
+    )
+    expect(d.activeScenario).toBe('blackout_flatten')
+    expect(d.askActive).toBe(true)
+    expect(d.askReason).toBe(U321_STUCK_NO_BID)
+  })
+
+  it('hardFlat window (τ=1.5) flatten tags exit ask through bid', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        minutesRemaining: 1.5,
+        mid: 0.4,
+        bookBestBid: 0.39,
+        bookBestAsk: 0.41,
+        config: baseConfig({ hardFlatMinutes: 2, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.activeScenario).toBe('flatten')
+    expect(d.askActive).toBe(true)
+    expect(d.yesAsk).toBeCloseTo(0.39, 5)
   })
 })

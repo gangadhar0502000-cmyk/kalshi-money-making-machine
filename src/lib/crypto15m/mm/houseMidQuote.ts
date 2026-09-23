@@ -116,6 +116,66 @@ export function houseMidQuotePrices(input: HouseMidQuotePricesInput): HouseMidQu
   return { yesBid, yesAsk, reservation, skewCents, halfSpreadCents: half }
 }
 
+/** U3.2.1: long flatten but book has no YES bid to hit. */
+export const U321_STUCK_NO_BID = 'U3.2.1: stuck inventory, no bid'
+/** U3.2.1: short flatten but book has no YES ask to lift. */
+export const U321_STUCK_NO_ASK = 'U3.2.1: stuck inventory, no ask'
+
+/** True for hard-τ / blackout inventory exit tags. */
+export function isFlattenHouseTag(tag: string | null | undefined): boolean {
+  return tag === 'flatten' || tag === 'blackout_flatten'
+}
+
+/**
+ * U3.2.1 — price the exit side through the touch so L2 can fill.
+ * Long → sell at best bid (taker); short → buy at best ask.
+ * Maker-only join cannot exit a collapsing 1¢ book; this must not re-apply maker clamp.
+ */
+export function aggressiveFlattenPrices(input: {
+  inventory: number
+  yesBid: number
+  yesAsk: number
+  bookBestBid: number | null
+  bookBestAsk: number | null
+  quoteClampEpsilon: number
+}): { yesBid: number; yesAsk: number; stuckReason: string | null } {
+  const eps =
+    Number.isFinite(input.quoteClampEpsilon) && input.quoteClampEpsilon > 0
+      ? input.quoteClampEpsilon
+      : 0.01
+  let yesBid = input.yesBid
+  let yesAsk = input.yesAsk
+  const bidOk =
+    input.bookBestBid != null &&
+    Number.isFinite(input.bookBestBid) &&
+    input.bookBestBid > 0
+  const askOk =
+    input.bookBestAsk != null &&
+    Number.isFinite(input.bookBestAsk) &&
+    input.bookBestAsk > 0 &&
+    input.bookBestAsk < 1
+
+  if (input.inventory > 0) {
+    if (bidOk) {
+      yesAsk = clampProbEps(input.bookBestBid as number, eps)
+      yesBid = clampProbEps(Math.min(yesBid, yesAsk - 0.01), eps)
+      if (!(yesAsk > yesBid)) yesBid = clampProbEps(yesAsk - 0.01, eps)
+      return { yesBid, yesAsk, stuckReason: null }
+    }
+    return { yesBid, yesAsk, stuckReason: U321_STUCK_NO_BID }
+  }
+  if (input.inventory < 0) {
+    if (askOk) {
+      yesBid = clampProbEps(input.bookBestAsk as number, eps)
+      yesAsk = clampProbEps(Math.max(yesAsk, yesBid + 0.01), eps)
+      if (!(yesAsk > yesBid)) yesAsk = clampProbEps(yesBid + 0.01, eps)
+      return { yesBid, yesAsk, stuckReason: null }
+    }
+    return { yesBid, yesAsk, stuckReason: U321_STUCK_NO_ASK }
+  }
+  return { yesBid, yesAsk, stuckReason: null }
+}
+
 /**
  * Mid-quality score for ranking (higher = better): room from toxic extremes.
  * Not |FV−mid|.
