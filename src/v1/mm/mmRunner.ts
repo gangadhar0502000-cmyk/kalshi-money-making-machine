@@ -66,8 +66,8 @@ const FEED_TICK_MS = 1000
  */
 export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
   const msg = snap.message ?? ''
-  if (/L2 book poll failed|orderbook/i.test(msg) && !snap.liveBook) {
-    return makeUpdateError('orderbook failed', 'mm-proxy :8787')
+  if (/L2 book poll failed|orderbook|L2 off/i.test(msg) && !snap.liveBook) {
+    return makeUpdateError('L2 off — no soft fills', 'mm-proxy :8787', 'U2.13')
   }
   if (/Spot poll failed/i.test(msg)) {
     return makeUpdateError('spot failed', 'public spot feed')
@@ -105,14 +105,14 @@ export function derivePortfolioUpdateError(
       'U2.4',
     )
   }
-  // Surface book-level orderbook failure if all active books lack liveBook.
+  // Surface book-level orderbook / L2-off failure.
   if (state.running && state.books.length > 0) {
     const anyLive = state.books.some((b) => b.snapshot.liveBook)
     const anyObFail = state.books.some((b) =>
-      /L2 book poll failed|orderbook/i.test(b.snapshot.message ?? ''),
+      /L2 book poll failed|orderbook|L2 off/i.test(b.snapshot.message ?? ''),
     )
     if (!anyLive && anyObFail) {
-      return makeUpdateError('orderbook failed', 'mm-proxy :8787', 'U2.4')
+      return makeUpdateError('L2 off — no soft fills', 'mm-proxy :8787', 'U2.13')
     }
   }
   return null
@@ -139,6 +139,7 @@ function booksFromPortfolio(state: PortfolioState): MmBookRow[] {
   for (const b of state.books) {
     const ticker = b.snapshot.marketTicker
     if (!ticker) continue
+    const side = b.snapshot.quoteBookSide === 'no' ? 'NO' : 'YES'
     rows.push({
       slotId: b.slotId,
       ticker,
@@ -150,6 +151,7 @@ function booksFromPortfolio(state: PortfolioState): MmBookRow[] {
       liveBook: Boolean(b.snapshot.liveBook),
       midYes: b.snapshot.midYes ?? 0,
       message: b.snapshot.message ?? '',
+      quoteBook: side,
     })
   }
   return rows

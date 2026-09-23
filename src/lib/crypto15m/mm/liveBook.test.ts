@@ -182,4 +182,36 @@ describe('liveBook coalescing (U2.10 / U2.12)', () => {
     // Critical: while first was blocked, second must not have started
     // (asserted above at batchStarts === 1 before release)
   })
+
+  it('U2.13 coalesce: waiters with different sides re-parse same batch raw', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      expect(url).toContain('/local-api/orderbooks?tickers=')
+      return {
+        ok: true,
+        json: async () => ({
+          readOnly: true,
+          depth: 25,
+          fetchedAt: '2026-09-22T12:00:00.000Z',
+          books: {
+            'T-A': bookPayload('T-A'),
+          },
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pYes = fetchLiveOrderbook('T-A', { side: 'yes' })
+    const pNo = fetchLiveOrderbook('T-A', { side: 'no' })
+    await vi.advanceTimersByTimeAsync(LIVE_BOOK_COALESCE_MS)
+    const [yesBook, noBook] = await Promise.all([pYes, pNo])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // YES-primary: bid 0.40, ask 1-0.55=0.45
+    expect(yesBook?.bestBid).toBeCloseTo(0.4)
+    expect(yesBook?.bestAsk).toBeCloseTo(0.45)
+    // NO-primary: bid 0.55, ask 1-0.40=0.60
+    expect(noBook?.bestBid).toBeCloseTo(0.55)
+    expect(noBook?.bestAsk).toBeCloseTo(0.6)
+  })
 })

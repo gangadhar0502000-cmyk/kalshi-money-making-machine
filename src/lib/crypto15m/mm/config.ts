@@ -21,6 +21,11 @@ export interface PaperMmConfig {
   bookPollMs: number
   /** Prefer real L2 book fills when proxy is up (default ON). */
   useLiveBook: boolean
+  /**
+   * U2.13: which primary L2 book to join for queue fills ('yes' | 'no').
+   * Complements = same economic outcome, different queues. Default YES.
+   */
+  quoteBookSide: 'yes' | 'no'
   /** Minimum ms between any two paper fills (kills money-printer round-trips). */
   fillCooldownMs: number
   /** Mid move (cents) that forces an immediate requote. */
@@ -209,6 +214,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   spotPollMs: 1000,
   bookPollMs: 750,
   useLiveBook: true,
+  quoteBookSide: 'yes',
   fillCooldownMs: 20_000,
   midMoveRequoteCents: 1,
   inventorySkewCentsPerUnit: 0.15,
@@ -312,6 +318,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     spotPollMs: Math.round(clamp(c.spotPollMs, 500, 10_000)),
     bookPollMs: Math.round(clamp(c.bookPollMs, 300, 10_000)),
     useLiveBook: Boolean(c.useLiveBook),
+    quoteBookSide: c.quoteBookSide === 'no' ? 'no' : 'yes',
     fillCooldownMs: Math.round(clamp(c.fillCooldownMs, 0, 120_000)),
     midMoveRequoteCents: clamp(c.midMoveRequoteCents, 0.25, 10),
     inventorySkewCentsPerUnit: clamp(c.inventorySkewCentsPerUnit, 0, 2),

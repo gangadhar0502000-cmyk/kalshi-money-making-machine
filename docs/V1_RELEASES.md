@@ -66,7 +66,7 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Session store tracks `quoteBook: 'YES' | 'NO' | null`; Apple-clean strip shows quiet `Book YES` / `Book NO` badge.
 - Fail-loud `U2.3: … — needs …` when the preferred book is one-sided and the other is not a usable two-sided fallback.
 - **Keep U2.2 behavior** when hint is YES / TIE defaults to YES.
-- **Deferred:** true NO-primary L2 queue join (L2 remains YES-combined this slice); multi-book (5-book) portfolio.
+- **Done in U2.13:** true NO-primary L2 queue join. Multi-book landed in U2.4.
 - Paper-only / read-only; never places live trades.
 
 
@@ -150,9 +150,19 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Success: MM 5/5 Running → browser polls `:8787` without timeout storm; header age tracks **proxy fetchedAt**, not HTTP cache-hit time.
 - Paper-only / read-only; never places live trades. No soft DEMO feed.
 
+## U2.13 — YES/NO primary L2 queues for paper fills
+
+- True **YES-primary** and **NO-primary** L2 snapshots via `parseOrderbookFp(..., side)`.
+- Engines poll `fetchLiveOrderbook(ticker, { side: quoteBookSide })`; coalesce waiters carry side and re-parse the batch raw book.
+- Multi portfolio uses `resolveQuoteBook` / `betterBookHint` per slot (sticky while `|inventory| ≥ 1`) and sets `quoteBookSide`; feeds `marketForQuoteBook` into setMarket/onMarketTick.
+- **No soft fills when L2 off** (`useLiveBook && !liveBook` → fail-loud `L2 off — no soft fills (U2.13)`). Complements = same economic outcome, different queues.
+- Active books row shows quiet `Book YES` / `Book NO`; idle help mentions L2 queue fills on better YES/NO book.
+- Aggregate session `quoteBook` stays null in multi; per-row is enough.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
-- **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.
+- **U2.5+ residual** — optional strict toggle; keyboard nav if needed.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).

@@ -162,13 +162,30 @@ export class PaperMmEngine {
     if (partial.strictRealism !== undefined && partial.strictRealism !== this.config.strictRealism) {
       partial = { ...presetsForMode(partial.strictRealism), ...partial }
     }
+    const prevSide = this.config.quoteBookSide
     this.config = clampConfig({ ...this.config, ...partial })
+    if (
+      partial.quoteBookSide !== undefined &&
+      this.config.quoteBookSide !== prevSide
+    ) {
+      // Side flip — drop YES queueAhead on NO book (and vice versa).
+      this.midWalkState = { ...DEFAULT_DETECT_STATE }
+      this.prevBook = null
+      this.liveBook = false
+      this.bookBestBid = null
+      this.bookBestAsk = null
+    }
     if (!this.running) {
       this.cash = this.config.startingCash
     }
     this.rebuildQuote(true)
     if (this.running) this.armTimers()
     this.emit()
+  }
+
+  /** U2.13: set primary L2 side; resets queue walk when side flips. */
+  setQuoteBookSide(side: 'yes' | 'no'): void {
+    this.setConfig({ quoteBookSide: side === 'no' ? 'no' : 'yes' })
   }
 
   setStrictRealism(strict: boolean): void {
@@ -308,6 +325,7 @@ export class PaperMmEngine {
       message: this.message,
       liveBook: this.liveBook,
       liveBookAuthenticated: this.liveBookAuthenticated,
+      quoteBookSide: this.config.quoteBookSide === 'no' ? 'no' : 'yes',
       bookBestBid: this.bookBestBid,
       bookBestAsk: this.bookBestAsk,
       unitsWarning: this.unitsWarning,
@@ -605,15 +623,19 @@ export class PaperMmEngine {
   private async pollBook(): Promise<void> {
     if (!this.running || !this.market || !this.config.useLiveBook || this.settled) return
     try {
-      const book = await fetchLiveOrderbook(this.market.ticker)
+      const book = await fetchLiveOrderbook(this.market.ticker, {
+        side: this.config.quoteBookSide === 'no' ? 'no' : 'yes',
+      })
       if (!book) {
         this.liveBook = false
+        this.message = 'L2 off — no soft fills (U2.13)'
+        this.emit()
         return
       }
       this.onBook(book)
     } catch (e) {
       this.liveBook = false
-      this.message = `L2 book poll failed (falling back to soft sim): ${
+      this.message = `L2 off — no soft fills (U2.13): ${
         e instanceof Error ? e.message : String(e)
       }`
       this.emit()
@@ -813,9 +835,7 @@ export class PaperMmEngine {
       if (midMoved || due) {
         this.rebuildQuote(false)
       }
-      if (!this.liveBook) {
-        this.simulateSoftFills(mid)
-      }
+      this.maybeSoftSimOrFailLoud(mid)
     }
     this.lastMid = mid
     this.emit()
@@ -835,10 +855,23 @@ export class PaperMmEngine {
     if (now - this.lastQuoteAt >= this.config.quoteRefreshMs) {
       this.rebuildQuote(false)
     }
-    if (!this.liveBook) {
-      this.simulateSoftFills(this.midDollars())
-    }
+    this.maybeSoftSimOrFailLoud(this.midDollars())
     this.emit()
+  }
+
+  /**
+   * Soft-sim only when useLiveBook is off. U2.13: useLiveBook && !liveBook →
+   * fail-loud, no mid-cross / random fills.
+   */
+  private maybeSoftSimOrFailLoud(mid: number): void {
+    if (this.liveBook) return
+    if (this.config.useLiveBook) {
+      if (!/L2 off — no soft fills \(U2\.13\)/.test(this.message)) {
+        this.message = 'L2 off — no soft fills (U2.13)'
+      }
+      return
+    }
+    this.simulateSoftFills(mid)
   }
 
   private settleInventory(
@@ -1046,13 +1079,14 @@ export class PaperMmEngine {
     }
   }
 
-  /** Soft-sim fallback when L2 proxy is unavailable. Disabled under strict / live book. */
+  /** Soft-sim fallback when L2 proxy is unavailable. Disabled under strict / live book / U2.13. */
   private simulateSoftFills(midRaw: number): void {
     if (!this.running || !this.quote?.active || !this.market || this.settled) return
     if (this.moneyPrinterBug) return
-    // Kill soft fills entirely when live book is up, or always under strict realism
+    // Kill soft fills entirely when live book is up, useLiveBook requested, or strict
     if (this.config.strictRealism) return
-    if (this.config.useLiveBook && this.liveBook) return
+    if (this.config.useLiveBook) return
+    if (this.liveBook) return
     const mid = asDollarPrice(midRaw, 'soft.mid')
     const q = this.quote
     const stats = this.spotHist.stats(this.config.spotWindowSec)

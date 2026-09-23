@@ -40,8 +40,13 @@ function parseLevel(pair: RawLevel): BookLevel | null {
   return { price, size }
 }
 
+export type OrderbookPrimarySide = 'yes' | 'no'
+
 /**
- * Kalshi returns yes bids + no bids. YES ask @ P ⇔ NO bid @ (1−P).
+ * Kalshi returns yes bids + no bids.
+ * side='yes' (default): YES-combined — bids=yes, asks=NO bids→YES asks (YES ask @ P ⇔ NO bid @ 1−P).
+ * side='no': NO-primary — bids=no, asks=YES bids→NO asks (NO ask @ P ⇔ YES bid @ 1−P).
+ * Same OrderBookSnapshot shape either way (yesBids/yesAsks hold the primary view).
  */
 export function parseOrderbookFp(
   ticker: string,
@@ -51,38 +56,43 @@ export function parseOrderbookFp(
   },
   authenticated = false,
   t = Date.now(),
+  side: OrderbookPrimarySide = 'yes',
 ): OrderBookSnapshot | null {
   const yesRaw = raw.orderbook_fp?.yes_dollars ?? raw.orderbook?.yes ?? []
   const noRaw = raw.orderbook_fp?.no_dollars ?? raw.orderbook?.no ?? []
 
-  const yesBids: BookLevel[] = []
-  for (const row of yesRaw) {
+  const primaryRaw = side === 'no' ? noRaw : yesRaw
+  const complementRaw = side === 'no' ? yesRaw : noRaw
+  const askLabel = side === 'no' ? 'book.noAsk' : 'book.yesAsk'
+
+  const bids: BookLevel[] = []
+  for (const row of primaryRaw) {
     if (Array.isArray(row) && row.length >= 2) {
       const lv = parseLevel(row as RawLevel)
-      if (lv) yesBids.push(lv)
+      if (lv) bids.push(lv)
     }
   }
-  yesBids.sort((a, b) => b.price - a.price)
+  bids.sort((a, b) => b.price - a.price)
 
-  const yesAsks: BookLevel[] = []
-  for (const row of noRaw) {
+  const asks: BookLevel[] = []
+  for (const row of complementRaw) {
     if (Array.isArray(row) && row.length >= 2) {
-      const noBid = parseLevel(row as RawLevel)
-      if (!noBid) continue
-      const askPx = asDollarPrice(1 - noBid.price, 'book.yesAsk')
+      const compBid = parseLevel(row as RawLevel)
+      if (!compBid) continue
+      const askPx = asDollarPrice(1 - compBid.price, askLabel)
       if (askPx >= 0.01 && askPx <= 0.99) {
-        yesAsks.push({ price: Math.round(askPx * 100) / 100, size: noBid.size })
+        asks.push({ price: Math.round(askPx * 100) / 100, size: compBid.size })
       }
     }
   }
-  yesAsks.sort((a, b) => a.price - b.price)
+  asks.sort((a, b) => a.price - b.price)
 
-  if (yesBids.length === 0 && yesAsks.length === 0) return null
+  if (bids.length === 0 && asks.length === 0) return null
 
-  const hasBid = yesBids.length > 0
-  const hasAsk = yesAsks.length > 0
-  const bestBid = hasBid ? yesBids[0]!.price : 0
-  const bestAsk = hasAsk ? yesAsks[0]!.price : 0
+  const hasBid = bids.length > 0
+  const hasAsk = asks.length > 0
+  const bestBid = hasBid ? bids[0]!.price : 0
+  const bestAsk = hasAsk ? asks[0]!.price : 0
   let mid: number
   if (hasBid && hasAsk) {
     mid = (bestBid + bestAsk) / 2
@@ -97,7 +107,16 @@ export function parseOrderbookFp(
   // One-sided / empty mid=0 is not a real quote mid — keep snapshot but mid stays 0
   // so callers (isValidQuoteMid) can gate edge/quoting.
 
-  return { ticker, t, yesBids, yesAsks, bestBid: hasBid ? bestBid : 0, bestAsk: hasAsk ? bestAsk : 0, mid, authenticated }
+  return {
+    ticker,
+    t,
+    yesBids: bids,
+    yesAsks: asks,
+    bestBid: hasBid ? bestBid : 0,
+    bestAsk: hasAsk ? bestAsk : 0,
+    mid,
+    authenticated,
+  }
 }
 
 function depthBidAtOrAbove(book: OrderBookSnapshot, price: number): number {

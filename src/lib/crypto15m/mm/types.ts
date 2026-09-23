@@ -117,6 +117,8 @@ export interface MmSnapshot {
   /** True when local read-only proxy + orderbook polling is healthy. */
   liveBook: boolean
   liveBookAuthenticated: boolean
+  /** U2.13: primary L2 side currently used for queue fills. */
+  quoteBookSide: 'yes' | 'no'
   bookBestBid: number | null
   bookBestAsk: number | null
   unitsWarning: string | null

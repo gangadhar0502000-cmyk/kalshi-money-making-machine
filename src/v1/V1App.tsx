@@ -269,7 +269,7 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start runs paper multi-book loose (up to 5)'
+                ? 'Idle · Start runs paper multi-book loose (up to 5) · L2 queue fills on better YES/NO book'
                 : mm.status === 'running'
                   ? 'Session running · paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
@@ -328,6 +328,11 @@ export function V1App() {
                             >
                               {tickerShort}
                             </span>
+                            {book.quoteBook && (
+                              <span className="text-[11px] font-medium text-[var(--color-secondary)]">
+                                Book {book.quoteBook}
+                              </span>
+                            )}
                             {!book.liveBook && (
                               <span
                                 className="kmm-chip kmm-chip--warn text-[10px]"

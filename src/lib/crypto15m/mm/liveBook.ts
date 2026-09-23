@@ -13,11 +13,22 @@
  */
 
 import type { KalshiMarketRaw } from '../../../types/kalshi'
-import { parseOrderbookFp, type OrderBookSnapshot } from './orderbook'
+import {
+  parseOrderbookFp,
+  type OrderBookSnapshot,
+  type OrderbookPrimarySide,
+} from './orderbook'
 import { localApiUrl } from './localApiBase'
 
 /** Debounce window before flushing pending L2 tickers into one batch GET. */
 export const LIVE_BOOK_COALESCE_MS = 60
+
+export type LiveBookSide = OrderbookPrimarySide
+
+export type FetchLiveOrderbookOpts = {
+  side?: LiveBookSide
+  signal?: AbortSignal
+}
 
 export interface LocalApiHealth {
   ok: boolean
@@ -64,6 +75,7 @@ type BatchOrderbooksResponse = {
 
 type CoalesceWaiter = {
   ticker: string
+  side: LiveBookSide
   resolve: (book: OrderBookSnapshot | null) => void
   reject: (err: unknown) => void
   signal?: AbortSignal
@@ -115,15 +127,17 @@ export async function fetchLocalHealth(signal?: AbortSignal): Promise<LocalApiHe
 function parseBookFromPayload(
   ticker: string,
   data: OrderbookRawPayload,
+  side: LiveBookSide = 'yes',
 ): OrderBookSnapshot | null {
   if (data.error) throw new Error(data.error)
-  return parseOrderbookFp(ticker, data, Boolean(data.authenticated))
+  return parseOrderbookFp(ticker, data, Boolean(data.authenticated), Date.now(), side)
 }
 
 /** Single-ticker GET — used as fail-loud fallback when batch fails entirely. */
 async function fetchLiveOrderbookSingle(
   ticker: string,
   signal?: AbortSignal,
+  side: LiveBookSide = 'yes',
 ): Promise<OrderBookSnapshot | null> {
   const url = localApiUrl(
     `/local-api/orderbook?ticker=${encodeURIComponent(ticker)}&depth=25`,
@@ -131,25 +145,28 @@ async function fetchLiveOrderbookSingle(
   const res = await fetch(url, { signal, headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`orderbook HTTP ${res.status}`)
   const data = (await res.json()) as OrderbookRawPayload
-  return parseBookFromPayload(ticker, data)
+  return parseBookFromPayload(ticker, data, side)
 }
 
 /**
- * Batch L2 fetch via GET /local-api/orderbooks?tickers=…
- * Returns a map of ticker → parsed book (or null if empty/unparseable).
- * Throws if the batch HTTP call fails entirely (caller may fall back).
- * Per-ticker upstream errors are recorded in `errors` and omitted from `books`.
+ * Batch L2 fetch. `side` applies to every ticker in this call (same side per flush).
+ * Mixed YES/NO waiters are grouped by side in the coalesce flusher.
  */
 export async function fetchLiveOrderbooks(
   tickers: string[],
-  signal?: AbortSignal,
+  opts?: FetchLiveOrderbookOpts | AbortSignal,
 ): Promise<{
   books: Record<string, OrderBookSnapshot | null>
   errors: Record<string, string>
+  /** Raw payloads for per-waiter side re-parse in coalesce. */
+  rawBooks: Record<string, OrderbookRawPayload>
 }> {
+  const signal = opts instanceof AbortSignal ? opts : opts?.signal
+  const side: LiveBookSide =
+    opts instanceof AbortSignal ? 'yes' : (opts?.side ?? 'yes')
   const unique = [...new Set(tickers.map((t) => String(t).trim()).filter(Boolean))]
   if (unique.length === 0) {
-    return { books: {}, errors: {} }
+    return { books: {}, errors: {}, rawBooks: {} }
   }
   const url = localApiUrl(
     `/local-api/orderbooks?tickers=${unique.map(encodeURIComponent).join(',')}&depth=25`,
@@ -165,17 +182,19 @@ export async function fetchLiveOrderbooks(
   }
 
   const books: Record<string, OrderBookSnapshot | null> = {}
-  const rawBooks = data.books ?? {}
+  const rawBooks: Record<string, OrderbookRawPayload> = {}
+  const rawMap = data.books ?? {}
   for (const ticker of unique) {
     if (errors[ticker]) continue
-    const raw = rawBooks[ticker]
+    const raw = rawMap[ticker]
     if (!raw) {
       books[ticker] = null
       continue
     }
-    books[ticker] = parseBookFromPayload(ticker, raw)
+    rawBooks[ticker] = raw
+    books[ticker] = parseBookFromPayload(ticker, raw, side)
   }
-  return { books, errors }
+  return { books, errors, rawBooks }
 }
 
 async function flushCoalescedOrderbooksBody(waiters: CoalesceWaiter[]): Promise<void> {
@@ -185,14 +204,18 @@ async function flushCoalescedOrderbooksBody(waiters: CoalesceWaiter[]): Promise<
     }
   }
 
+  // Group by side — one HTTP batch for all tickers, parse with each waiter's side.
   const tickers = [...new Set(waiters.map((w) => w.ticker))]
 
-  let batch: { books: Record<string, OrderBookSnapshot | null>; errors: Record<string, string> } | null =
-    null
+  let batch: {
+    books: Record<string, OrderBookSnapshot | null>
+    errors: Record<string, string>
+    rawBooks: Record<string, OrderbookRawPayload>
+  } | null = null
   let batchErr: unknown = null
   try {
-    // No shared AbortSignal — individual waiters may already be aborted.
-    batch = await fetchLiveOrderbooks(tickers)
+    // Fetch raw once (side='yes' parse discarded; we re-parse per waiter).
+    batch = await fetchLiveOrderbooks(tickers, { side: 'yes' })
   } catch (e) {
     batchErr = e
   }
@@ -209,7 +232,13 @@ async function flushCoalescedOrderbooksBody(waiters: CoalesceWaiter[]): Promise<
         continue
       }
       try {
-        w.resolve(batch.books[w.ticker] ?? null)
+        const raw = batch.rawBooks[w.ticker]
+        if (!raw) {
+          w.resolve(null)
+          continue
+        }
+        // Re-parse with the waiter's requested primary side (YES or NO).
+        w.resolve(parseBookFromPayload(w.ticker, raw, w.side))
       } catch (e) {
         w.reject(e)
       }
@@ -225,7 +254,7 @@ async function flushCoalescedOrderbooksBody(waiters: CoalesceWaiter[]): Promise<
         return
       }
       try {
-        const book = await fetchLiveOrderbookSingle(w.ticker, w.signal)
+        const book = await fetchLiveOrderbookSingle(w.ticker, w.signal, w.side)
         w.resolve(book)
       } catch (e) {
         w.reject(e instanceof Error ? e : new Error(String(e ?? batchErr)))
@@ -274,14 +303,18 @@ async function flushCoalescedOrderbooks(): Promise<void> {
  * Live L2 for one ticker. Coalesces concurrent callers into one batch GET
  * within LIVE_BOOK_COALESCE_MS. On total batch failure, falls back to single
  * /orderbook?ticker= (fail-loud). Flushes are single-flight (U2.12).
+ * U2.13: `opts.side` selects YES- or NO-primary L2 view for queue fills.
  */
 export async function fetchLiveOrderbook(
   ticker: string,
-  signal?: AbortSignal,
+  opts?: FetchLiveOrderbookOpts | AbortSignal,
 ): Promise<OrderBookSnapshot | null> {
+  const signal = opts instanceof AbortSignal ? opts : opts?.signal
+  const side: LiveBookSide =
+    opts instanceof AbortSignal ? 'yes' : (opts?.side ?? 'yes')
   if (signal?.aborted) throw new Error('aborted')
   return new Promise<OrderBookSnapshot | null>((resolve, reject) => {
-    const waiter: CoalesceWaiter = { ticker, resolve, reject, signal }
+    const waiter: CoalesceWaiter = { ticker, side, resolve, reject, signal }
     const onAbort = () => {
       const idx = pendingWaiters.indexOf(waiter)
       if (idx >= 0) pendingWaiters.splice(idx, 1)

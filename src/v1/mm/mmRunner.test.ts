@@ -59,6 +59,7 @@ function baseSnap(over: Partial<MmSnapshot> = {}): MmSnapshot {
       marketTicker: null,
       message: 'Idle',
       liveBook: false,
+      quoteBookSide: 'yes',
       cash: MM_SESSION_STARTING_CASH,
       inventory: 0,
       midYes: 0.5,
@@ -195,16 +196,16 @@ function makeStubPortfolio(
 }
 
 describe('deriveUpdateError', () => {
-  it('maps L2/orderbook failure to U2.2 + mm-proxy dependency', () => {
+  it('maps L2 off to U2.13 + mm-proxy dependency', () => {
     const err = deriveUpdateError(
       baseSnap({
         liveBook: false,
-        message: 'L2 book poll failed (falling back to soft sim): fetch failed',
+        message: 'L2 off — no soft fills (U2.13): fetch failed',
       }),
     )
     expect(err).toEqual({
-      code: 'U2.2',
-      message: 'orderbook failed',
+      code: 'U2.13',
+      message: 'L2 off — no soft fills',
       dependency: 'mm-proxy :8787',
     })
   })
@@ -487,6 +488,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
       liveBook: true,
       midYes: 0.52,
       message: 'ok',
+      quoteBook: 'YES',
     })
     expect(store.getState().books[1]).toMatchObject({
       slotId: 'slot-2',
@@ -499,6 +501,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
       liveBook: false,
       midYes: 0.47,
       message: 'soft sim',
+      quoteBook: 'YES',
     })
 
     runner.reset()

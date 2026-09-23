@@ -290,55 +290,10 @@ export function fmtDeltaCents(delta: number | null): string {
   return '0¢'
 }
 
-/** Mid for the NO book (complement of YES when NO touch missing). YES+NO ≈ $1. */
-export function midNo(
-  m: Pick<Crypto15mMarket, 'noBid' | 'noAsk' | 'midYes'>,
-): number {
-  if (m.noBid > 0 && m.noAsk > 0) return (m.noBid + m.noAsk) / 2
-  if (m.noBid > 0) return m.noBid
-  if (m.noAsk > 0) return m.noAsk
-  if (Number.isFinite(m.midYes)) return Math.max(0, Math.min(1, 1 - m.midYes))
-  return 0.5
-}
-
-/** YES touch spread in cents (uses market.spreadCents when book is two-sided). */
-export function spreadCentsYes(
-  m: Pick<Crypto15mMarket, 'yesBid' | 'yesAsk' | 'spreadCents'>,
-): number {
-  if (m.yesBid > 0 && m.yesAsk > 0) {
-    if (Number.isFinite(m.spreadCents) && m.spreadCents >= 0) return m.spreadCents
-    return Math.max(0, (m.yesAsk - m.yesBid) * 100)
-  }
-  return Number.POSITIVE_INFINITY
-}
-
-/** NO touch spread in cents. */
-export function spreadCentsNo(
-  m: Pick<Crypto15mMarket, 'noBid' | 'noAsk'>,
-): number {
-  if (m.noBid > 0 && m.noAsk > 0) return Math.max(0, (m.noAsk - m.noBid) * 100)
-  return Number.POSITIVE_INFINITY
-}
-
-/**
- * Better book by tighter touch spread (proxy for queue until L2 sizes exist on both).
- * True queue-ahead needs L2 sizes on YES and NO books (future).
- * Same economic outcome either side (complements); different queues → fill rates.
- */
-export function betterBookHint(
-  m: Pick<Crypto15mMarket, 'yesBid' | 'yesAsk' | 'noBid' | 'noAsk' | 'spreadCents'>,
-): 'YES' | 'NO' | 'TIE' {
-  const ys = spreadCentsYes(m)
-  const ns = spreadCentsNo(m)
-  const yOk = Number.isFinite(ys)
-  const nOk = Number.isFinite(ns)
-  if (!yOk && !nOk) return 'TIE'
-  if (!yOk) return 'NO'
-  if (!nOk) return 'YES'
-  // Round to 0.01¢ so float noise (e.g. 0.6-0.55) does not fake a winner
-  const yr = Math.round(ys * 100) / 100
-  const nr = Math.round(ns * 100) / 100
-  if (yr < nr) return 'YES'
-  if (nr < yr) return 'NO'
-  return 'TIE'
-}
+// Book-touch helpers live in lib (shared with portfolio / engine U2.13).
+export {
+  betterBookHint,
+  midNo,
+  spreadCentsNo,
+  spreadCentsYes,
+} from '../lib/crypto15m/mm/quoteBook'

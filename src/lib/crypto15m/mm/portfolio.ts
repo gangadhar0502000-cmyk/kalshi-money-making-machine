@@ -27,6 +27,12 @@ import {
 import { isMarketOpen, pickBestOpenMarket, pickRollTarget } from './marketSelect'
 import type { MmCancelEvent, MmEngineState, MmFill, MmSnapshot } from './types'
 import {
+  marketForQuoteBook,
+  quoteBookToL2Side,
+  resolveQuoteBook,
+  type QuoteBook,
+} from './quoteBook'
+import {
   clearPaperMmSession,
   deserializePaperMmSession,
   loadPaperMmSession,
@@ -114,6 +120,8 @@ export class PaperMmPortfolio {
   private running = false
   private books = new Map<string, PaperMmEngine>()
   private slotOfTicker = new Map<string, string>()
+  /** U2.13: sticky YES/NO book per slot while |inventory| >= 1. */
+  private quoteBookSticky = new Map<string, QuoteBook>()
   private listeners = new Set<() => void>()
   private spotsByAsset: Record<string, number> = {}
   private lastScan: RankedMarket[] = []
@@ -251,7 +259,9 @@ export class PaperMmPortfolio {
     this.config = clampConfig({ ...this.config, ...partial })
     this.refreshPortfolioFillCap()
     for (const eng of this.books.values()) {
-      eng.setConfig(this.config)
+      // Preserve per-slot YES/NO L2 side (U2.13 sticky) across portfolio knobs.
+      const side = eng.getConfig().quoteBookSide
+      eng.setConfig({ ...this.config, quoteBookSide: side })
     }
     // Cap may shrink — drop lowest-edge extras only when a valid ranked set exists
     if (this.lastMarkets.length > 0 && this.openCount(this.lastMarkets) > 0) {
@@ -410,6 +420,31 @@ export class PaperMmPortfolio {
     }
   }
 
+
+  /**
+   * U2.13: resolve better YES/NO book, set engine quoteBookSide (true L2 side),
+   * and return market mapped for the YES-oriented engine.
+   */
+  private routeQuoteBook(
+    slotId: string,
+    eng: PaperMmEngine,
+    raw: Crypto15mMarket,
+  ): Crypto15mMarket {
+    const inv = eng.getState().snapshot.inventory
+    const sticky = this.quoteBookSticky.get(slotId) ?? null
+    const resolved = resolveQuoteBook(raw, sticky, inv)
+    this.quoteBookSticky.set(slotId, resolved.book)
+    const side = quoteBookToL2Side(resolved.book)
+    if (eng.getConfig().quoteBookSide !== side) {
+      eng.setQuoteBookSide(side)
+    }
+    return marketForQuoteBook(raw, resolved.book)
+  }
+
+  private tickBook(slotId: string, eng: PaperMmEngine, raw: Crypto15mMarket): void {
+    eng.onMarketTick(this.routeQuoteBook(slotId, eng, raw))
+  }
+
   /**
    * Feed update: roll same-asset, free dead slots only when a non-empty open
    * ranked set exists, fill from ranked edge list.
@@ -424,12 +459,12 @@ export class PaperMmPortfolio {
     // Empty / all-closed feed: never wipe live books or reshuffle by "top-N".
     // Still settle closed inventory so P&L is realized while we wait for refresh.
     if (openN === 0 || !hasValidRanked) {
-      for (const eng of this.books.values()) {
+      for (const [slotId, eng] of this.books) {
         const snap = eng.getState().snapshot
         const current =
           (snap.marketTicker && markets.find((m) => m.ticker === snap.marketTicker)) || null
         if (current) {
-          eng.onMarketTick(current)
+          this.tickBook(slotId, eng, current)
         } else if (!snap.settled) {
           eng.settleNow()
         }
@@ -477,17 +512,17 @@ export class PaperMmPortfolio {
           // Dead with only cross-asset option → free slot for next-best edge
           toRemove.push(slotId)
         } else {
-          eng.onMarketTick(current)
+          this.tickBook(slotId, eng, current)
         }
       } else if (!isMarketOpen(current)) {
         // Closed, no roll target — free only when we have a valid open ranked set
         if (hasValidRanked) {
           toRemove.push(slotId)
         } else {
-          eng.onMarketTick(current)
+          this.tickBook(slotId, eng, current)
         }
       } else {
-        eng.onMarketTick(current)
+        this.tickBook(slotId, eng, current)
       }
     }
 
@@ -550,7 +585,10 @@ export class PaperMmPortfolio {
   private rollBook(slotId: string, eng: PaperMmEngine, target: Crypto15mMarket): void {
     const prev = eng.getState().snapshot.marketTicker
     if (prev) this.slotOfTicker.delete(prev)
-    eng.rollToMarket(target)
+    // Flat after settle-on-roll; re-resolve book for the new window.
+    this.quoteBookSticky.delete(slotId)
+    const mapped = this.routeQuoteBook(slotId, eng, target)
+    eng.rollToMarket(mapped)
     this.slotOfTicker.set(target.ticker, slotId)
     const spotKey = normalizeSpotAsset(target.asset)
     const spot = spotKey != null ? this.spotsByAsset[spotKey] : undefined
@@ -566,6 +604,7 @@ export class PaperMmPortfolio {
   private removeBook(slotId: string, reason: string): void {
     const eng = this.books.get(slotId)
     if (!eng) return
+    this.quoteBookSticky.delete(slotId)
     eng.settleNow()
     this.bankEngineIntoSession(eng)
     const t = eng.getState().snapshot.marketTicker
@@ -670,7 +709,8 @@ export class PaperMmPortfolio {
     const eng = new PaperMmEngine()
     eng.setFillCapStore(this.fillCapStore)
     eng.setConfig(this.config)
-    eng.setMarket(market)
+    const mapped = this.routeQuoteBook(slotId, eng, market)
+    eng.setMarket(mapped)
     // New book: cash/inventory start fresh; session ledger keeps historical realized/fills
     const spotKey = normalizeSpotAsset(market.asset)
     const spot = spotKey != null ? this.spotsByAsset[spotKey] : undefined
@@ -765,6 +805,7 @@ export class PaperMmPortfolio {
       }
       this.books.delete(slotId)
     }
+    this.quoteBookSticky.clear()
     this.books.clear()
     this.slotOfTicker.clear()
     this.sessionLedger = emptyLedger()

@@ -255,7 +255,7 @@ describe('U2.2 / U2.3 error object shape', () => {
   })
 })
 
-describe('U2.4 error format', () => {
+describe('U2.4 / U2.13 error format', () => {
   it('makeUpdateError with U2.4 code formats U2.4 line', () => {
     const err = makeUpdateError(
       'no markets in feed',
@@ -265,6 +265,18 @@ describe('U2.4 error format', () => {
     expect(err.code).toBe('U2.4')
     expect(formatUpdateError(err)).toBe(
       'U2.4: no markets in feed — needs continuous feed / mm-proxy :8787',
+    )
+  })
+
+  it('makeUpdateError with U2.13 code formats U2.13 line', () => {
+    const err = makeUpdateError(
+      'L2 off — no soft fills',
+      'mm-proxy :8787',
+      'U2.13',
+    )
+    expect(err.code).toBe('U2.13')
+    expect(formatUpdateError(err)).toBe(
+      'U2.13: L2 off — no soft fills — needs mm-proxy :8787',
     )
   })
 
@@ -298,6 +310,7 @@ describe('U2.5 books panel state', () => {
           liveBook: true,
           midYes: 0.5,
           message: 'ok',
+          quoteBook: 'YES',
         },
       ],
     }
@@ -321,6 +334,7 @@ describe('U2.5 books panel state', () => {
         liveBook: true,
         midYes: 0.51,
         message: 'quoting',
+        quoteBook: 'YES',
       },
       {
         slotId: 'slot-2',
@@ -333,6 +347,7 @@ describe('U2.5 books panel state', () => {
         liveBook: false,
         midYes: 0.48,
         message: 'L2 book poll failed',
+        quoteBook: 'NO',
       },
     ]
     store.patchStats({ books: rows, activeBooks: 2 })

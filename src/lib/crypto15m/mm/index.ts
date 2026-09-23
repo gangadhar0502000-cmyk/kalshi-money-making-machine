@@ -11,6 +11,13 @@ export { PaperMmEngine, paperMmEngine } from './engine'
 export { asDollarPrice, formatPnlDual, clampPx, roundPx, isValidQuoteMid } from './prices'
 export { fetchLiveOrderbook, fetchLiveOrderbooks, fetchLocalHealth, fetchLocalCrypto15m, LIVE_BOOK_COALESCE_MS } from './liveBook'
 export { parseOrderbookFp, detectBookFills } from './orderbook'
+export {
+  betterBookHint,
+  marketForQuoteBook,
+  resolveQuoteBook,
+  quoteBookToL2Side,
+  type QuoteBook,
+} from './quoteBook'
 export type {
   MmCancelEvent,
   MmEngineState,
