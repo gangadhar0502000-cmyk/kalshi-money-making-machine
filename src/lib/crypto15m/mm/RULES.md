@@ -18,6 +18,18 @@
 
 Config: `quotingEnabled: true` (default for new sessions / v1 Start / headless). Set `false` to restore U3.0 pause strip. Do **not** resurrect S1–S5.
 
+
+## U3.1.1 — refuse opens at extreme mid
+
+Pinned books near **0¢ / 100¢** must not open new risk (last-minute 100¢ buys were a bug, not “print money”).
+
+- **No new longs** (`buy_yes`) when `mid ≥ toxicMidHigh` (default 0.95).
+- **No new shorts** (`sell_yes`) when `mid ≤ toxicMidLow` (default 0.05).
+- Same gate on quote arms (`decideQuoteSides`) and fill accept (`isToxicExtremeMid` / `applyFill`).
+- **Flatten/reduce** still allowed when inventory ≠ 0 and the side reduces.
+- Flat + extreme mid → park both with `U3.1.1: extreme mid — no new opens`.
+- Prefer this explicit gate over silently widening blackout.
+
 ## Slot ops (not quote scenarios)
 
 - **SLOT_EVICT** — sanity-parked + flat inventory → free an active slot for the next candidate.

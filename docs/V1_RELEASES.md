@@ -204,6 +204,11 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - UI: quiet FV ¢ on strip/book row; remove U3.0 “paused / S*” copy when E is on.
 - Paper-only · read-only · never places live orders.
 
+
+## U3.1.1 — refuse opens at extreme mid (no last-min 100¢ buys)
+
+- Symmetric open refuse: no new longs when mid ≥ toxicMidHigh; no new shorts when mid ≤ toxicMidLow. Flatten/reduce still allowed. Flat+extreme parks with `U3.1.1: extreme mid — no new opens`. Quote + fill paths. Paper-only.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

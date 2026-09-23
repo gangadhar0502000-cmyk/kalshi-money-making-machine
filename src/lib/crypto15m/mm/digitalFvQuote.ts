@@ -16,7 +16,7 @@ export const U31_NO_FV = 'U3.1: no fair value — needs spot + strike + τ'
 export const U31_BLACKOUT = 'U3.1: settlement blackout'
 
 /** Plain tags for journal — not S1–S5. */
-export type FamilyETag = 'open' | 'flatten' | 'blackout' | 'max_inv' | 'paused'
+export type FamilyETag = 'open' | 'flatten' | 'blackout' | 'max_inv' | 'paused' | 'extreme_mid'
 
 export interface FamilyESkewConfig {
   inventorySkewCentsPerUnit: number

@@ -31,6 +31,8 @@ export function parkStatusLabel(opts: {
   if (both.includes('edge flicker') || both.includes('flicker')) return 'flicker'
   if (both.includes('clamp killed edge')) return 'clamp killed'
   if (both.includes('one-sided')) return 'one-sided'
+  if (both.includes('extreme mid') || both.includes('u3.1.1') || both.includes('no new long') || both.includes('no new short')) return 'extreme mid'
+  if (both.includes('blackout') || both.includes('settlement blackout')) return 'blackout'
   if (both.includes('toxic')) return 'toxic'
   if (both.includes('expiry')) return 'expiry'
   if (both.includes('no fv')) return 'no FV'

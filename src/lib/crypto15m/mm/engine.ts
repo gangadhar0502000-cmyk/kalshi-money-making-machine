@@ -742,6 +742,7 @@ export class PaperMmEngine {
             mid,
             this.config.toxicMidLow,
             this.config.toxicMidHigh,
+            this.inventory,
           )
         ) {
           this.midCrossRejectCount += 1
@@ -775,7 +776,7 @@ export class PaperMmEngine {
       this.message = QUOTING_PAUSED_REASON
     } else if (
       !/U2\.14:\s*L2 off — holding inv/i.test(this.message) &&
-      !/^U3\.1:/.test(this.message)
+      !/^U3\.1/.test(this.message)
     ) {
       this.message = this.liveBookAuthenticated
         ? 'LIVE BOOK (read-only) · never places trades'
@@ -1130,12 +1131,12 @@ export class PaperMmEngine {
         this.message = QUOTING_PAUSED_REASON
       } else if (
         decision.bothOffReason &&
-        /^U3\.1:/.test(decision.bothOffReason)
+        /^U3\.1/.test(decision.bothOffReason)
       ) {
         this.message = decision.bothOffReason
       } else if (
         decision.active &&
-        /^U3\.1:/.test(this.message)
+        /^U3\.1/.test(this.message)
       ) {
         // Clear prior U3.1 park once quotes arm again.
         this.message = this.config.strictRealism
@@ -1173,7 +1174,7 @@ export class PaperMmEngine {
         this.config.maxInventory,
         this.config.unwindThreshold,
       ) &&
-      !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+      !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh, this.inventory)
     ) {
       if (Math.random() < this.config.midCrossFillProb) {
         if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
@@ -1195,7 +1196,7 @@ export class PaperMmEngine {
         this.config.maxInventory,
         this.config.unwindThreshold,
       ) &&
-      !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+      !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh, this.inventory)
     ) {
       if (Math.random() < this.config.midCrossFillProb) {
         if (Date.now() - this.lastFillAt < this.config.fillCooldownMs) return
@@ -1229,7 +1230,7 @@ export class PaperMmEngine {
         this.config.maxInventory,
         this.config.unwindThreshold,
       ) &&
-      !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+      !isToxicExtremeMid('buy_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh, this.inventory)
     const canSell =
       q.askActive !== false &&
       canAcceptInventoryIncreasingFill(
@@ -1238,7 +1239,7 @@ export class PaperMmEngine {
         this.config.maxInventory,
         this.config.unwindThreshold,
       ) &&
-      !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+      !isToxicExtremeMid('sell_yes', mid, this.config.toxicMidLow, this.config.toxicMidHigh, this.inventory)
     if (r < buyProb && canBuy) {
       this.applyFill(
         'buy_yes',
@@ -1299,13 +1300,13 @@ export class PaperMmEngine {
     // Hard refuse: do not accumulate into near-certain settlement loss at extreme mids
     if (
       reason !== 'settlement' &&
-      isToxicExtremeMid(side, mid, this.config.toxicMidLow, this.config.toxicMidHigh)
+      isToxicExtremeMid(side, mid, this.config.toxicMidLow, this.config.toxicMidHigh, this.inventory)
     ) {
       this.midCrossRejectCount += 1
       this.message =
-        `TOXIC SKIP ${side} @ mid $${mid.toFixed(4)} (extreme mid guard ` +
+        `U3.1.1: TOXIC SKIP ${side} @ mid $${mid.toFixed(4)} (extreme mid open guard ` +
         `${this.config.toxicMidLow}–${this.config.toxicMidHigh}). ` +
-        `Pulled adverse side. Read-only · never places trades.`
+        `No new opens at pinned mid. Read-only · never places trades.`
       // Force requote with adverse side off
       this.rebuildQuote(true)
       return

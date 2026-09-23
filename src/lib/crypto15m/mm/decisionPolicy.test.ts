@@ -9,6 +9,7 @@ import {
   DEFAULT_DECISION_POLICY,
   QUOTING_PAUSED_REASON,
   U31_BLACKOUT,
+  U311_EXTREME_MID,
   U31_NO_FV,
   type DecisionPolicyConfig,
   type DecisionPolicyInput,
@@ -168,4 +169,81 @@ describe('decisionPolicy U3.1 Family E', () => {
   it('DEFAULT_DECISION_POLICY.quotingEnabled is true', () => {
     expect(DEFAULT_DECISION_POLICY.quotingEnabled).toBe(true)
   })
+
+  it('U3.1.1: flat @ mid 0.99 parks both — no new opens', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.99,
+        fairValue: 0.96,
+        inventory: 0,
+        bookBestBid: 0.98,
+        bookBestAsk: 0.99,
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toBe(U311_EXTREME_MID)
+    expect(d.activeScenario).toBe('extreme_mid')
+  })
+
+  it('U3.1.1: flat @ mid 0.01 parks both — no new opens', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.01,
+        fairValue: 0.04,
+        inventory: 0,
+        bookBestBid: 0.01,
+        bookBestAsk: 0.02,
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toBe(U311_EXTREME_MID)
+  })
+
+  it('U3.1.1: long @ mid 0.99 — bid OFF, flatten ask may stay', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.99,
+        fairValue: 0.96,
+        inventory: 2,
+        minutesRemaining: 8,
+        bookBestBid: 0.98,
+        bookBestAsk: 0.99,
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(String(d.bidReason)).toMatch(/U3\.1\.1|no new longs/i)
+  })
+
+  it('U3.1.1: short @ mid 0.01 — ask OFF, flatten bid may stay', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.01,
+        fairValue: 0.04,
+        inventory: -2,
+        minutesRemaining: 8,
+        bookBestBid: 0.01,
+        bookBestAsk: 0.02,
+      }),
+    )
+    expect(d.askActive).toBe(false)
+    expect(d.bidActive).toBe(true)
+  })
+
+  it('blackout still parks both (unchanged)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.99,
+        inventory: 0,
+        minutesRemaining: 0.5,
+        config: baseConfig({ blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toBe(U31_BLACKOUT)
+  })
+
 })

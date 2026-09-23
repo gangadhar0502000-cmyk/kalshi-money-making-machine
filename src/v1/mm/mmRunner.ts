@@ -76,6 +76,9 @@ export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
   if (/U3\.1:\s*settlement blackout/i.test(msg)) {
     return makeUpdateError('settlement blackout', 'minutesRemaining > blackoutMinutes', 'U3.1')
   }
+  if (/U3\.1\.1:\s*extreme mid/i.test(msg)) {
+    return makeUpdateError('extreme mid — no new opens', 'mid inside toxic band', 'U3.1.1')
+  }
   if (/U3\.1:\s*no spot/i.test(msg)) {
     return makeUpdateError('no spot', 'Binance US/Coinbase', 'U3.1')
   }

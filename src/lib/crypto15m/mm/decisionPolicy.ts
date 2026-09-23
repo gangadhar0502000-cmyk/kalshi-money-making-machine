@@ -1,6 +1,7 @@
 /**
  * Explicit, testable decision policy for paper MM quoting.
- * U3.1: Family E — Digital FV + inventory skew + hard τ-flatten
+ * U3.1 / U3.1.1: Family E — Digital FV + inventory skew + hard τ-flatten
+ * + symmetric extreme-mid open refuse
  * (see docs/research/U3_QUOTE_LOGIC_RESEARCH.md §9 Family E).
  * S1–S5 scenario playbook is not used. Paper research only — never places live orders.
  */
@@ -25,6 +26,9 @@ export {
   U31_NO_STRIKE,
   U31_NO_TAU,
 } from './digitalFvQuote'
+
+/** U3.1.1: flat inventory + pinned extreme mid — no new opens. */
+export const U311_EXTREME_MID = 'U3.1.1: extreme mid — no new opens'
 
 export interface DecisionPolicyConfig {
   halfSpreadCents: number
@@ -425,15 +429,27 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   const unwindActive = arms.unwindActive
   let tag: FamilyETag = arms.tag
 
-  // Toxic extreme mid overlays (safety; not S-scenarios)
+  // U3.1.1 symmetric extreme-mid: refuse opens; keep reduce/flatten side.
   const mid = isValidQuoteMid(input.mid) ? input.mid : null
-  if (mid != null && mid < cfg.toxicMidLow && bidActive) {
-    bidActive = false
-    bidReason = `toxic mid < ${(cfg.toxicMidLow * 100).toFixed(0)}¢`
-  }
-  if (mid != null && mid > cfg.toxicMidHigh && askActive) {
-    askActive = false
-    askReason = `toxic mid > ${(cfg.toxicMidHigh * 100).toFixed(0)}¢`
+  const inv = input.inventory
+  if (mid != null) {
+    const atLow = mid <= cfg.toxicMidLow
+    const atHigh = mid >= cfg.toxicMidHigh
+    if ((atLow || atHigh) && inv === 0) {
+      return parkBoth(U311_EXTREME_MID, blank, persist, stuck, 'extreme_mid')
+    }
+    if ((atLow || atHigh) && bidActive && inv >= 0) {
+      bidActive = false
+      bidReason = atHigh
+        ? `U3.1.1: no new longs @ mid ≥ ${(cfg.toxicMidHigh * 100).toFixed(0)}¢`
+        : `U3.1.1: no new longs @ mid ≤ ${(cfg.toxicMidLow * 100).toFixed(0)}¢`
+    }
+    if ((atLow || atHigh) && askActive && inv <= 0) {
+      askActive = false
+      askReason = atLow
+        ? `U3.1.1: no new shorts @ mid ≤ ${(cfg.toxicMidLow * 100).toFixed(0)}¢`
+        : `U3.1.1: no new shorts @ mid ≥ ${(cfg.toxicMidHigh * 100).toFixed(0)}¢`
+    }
   }
 
   if (input.now < input.toxicBidPullUntil && bidActive) {

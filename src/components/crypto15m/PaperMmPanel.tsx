@@ -942,7 +942,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                                   ? ` · skew ${snap.quote.skewCents >= 0 ? '+' : ''}${snap.quote.skewCents.toFixed(2)}¢`
                                   : ''
                               }`
-                            : snap.message?.startsWith('U3.1:')
+                            : snap.message?.startsWith('U3.1')
                               ? snap.message
                               : `Family E parked · ${snap.quote.bidReason}`}
                         </span>
