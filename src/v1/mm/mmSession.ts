@@ -1,8 +1,9 @@
 /**
- * U2.1 / U2.2 / U2.3 / U2.4 / U2.5 — Paper MM session store.
+ * U2.1 / U2.2 / U2.3 / U2.4 / U2.5 / U2.6 — Paper MM session store.
  * Start / Stop / Reset shell + paper P&L stats (portfolio attached via mmRunner).
  * U2.4: multi-book loose portfolio; activeBooks in strip.
  * U2.5: per-book rows for Active books panel (`books: MmBookRow[]`).
+ * U2.6: strip metric formatters (`formatSignedDollars`).
  * Paper-only · read-only Kalshi · never places live orders.
  */
 
@@ -254,6 +255,14 @@ export function createMmSessionStore(
 
 /** Shared singleton for the Apple-clean V1 UI. */
 export const mmSessionStore = createMmSessionStore()
+
+/** Signed dollar string for strip metrics, e.g. +$1.25 / -$0.50 / $0.00 */
+export function formatSignedDollars(n: number): string {
+  const abs = Math.abs(n).toFixed(2)
+  if (n > 0) return `+$${abs}`
+  if (n < 0) return `-$${abs}`
+  return `$${abs}`
+}
 
 export function formatElapsed(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000))

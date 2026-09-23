@@ -86,12 +86,19 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Session store gains `books: MmBookRow[]` (slotId, ticker, asset, inventory, realized/unrealized, fills, liveBook, midYes, message). Runner maps `portfolio.getState().books` → rows (skips null tickers); Reset clears to `[]`.
 - Each row: asset + truncated ticker, mid ¢, signed inv, realized/unrealized (profit green / danger), fills, quiet live-off chip when `!liveBook`. Click row → `setSelected(ticker)` focuses hero (same selection state as market cards).
 - Shown when `status !== 'idle'` or books remain; empty running state shows quiet “Waiting for books…”.
-- **Next:** U2.6 strip metric polish · U2.7 market-rail highlight for active books.
+- Paper-only / read-only; never places live trades.
+
+## U2.6 — MM strip metric polish
+
+- Apple-clean **metric grid** in the Paper MM strip: Cash, Inv, Realized, Unrealized, Fills, Fees (when >0), quiet **Mark** (realized + unrealized).
+- Hierarchy: larger tabular nums for **Cash** + **Realized**; secondary for the rest. Grouped elevated cells via `.kmm-mm-metrics` / `.kmm-mm-metric` (existing `--color-*` tokens only).
+- Drop lone `activeTicker` chip when Active books panel has rows (Books N/5 stays); ticker chip only when books empty.
+- Pure helper `formatSignedDollars` (+$ / −$ / $0.00). Status/help + fail-loud error lines unchanged. Books panel / market rail untouched.
+- **Next:** U2.7 market-rail highlight for active/quoted books.
 - Paper-only / read-only; never places live trades.
 
 ## Upcoming
 
-- **U2.6** — strip metric density polish (aggregate strip only).
 - **U2.7** — market-rail highlight for quoted books.
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.
 - **U3** — feed + engine observability (richer health, divergence alarms).

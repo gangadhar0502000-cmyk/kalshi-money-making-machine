@@ -4,7 +4,12 @@ import { getMidHistory } from '../lib/crypto15m/midHistory'
 import { normalizeSpotAsset } from '../lib/crypto15m/spot'
 import { useContinuousFeed } from './useContinuousFeed'
 import { useSpotMap } from './useSpotMap'
-import { formatUpdateError, MM_MAX_ACTIVE_BOOKS, statusPillLabel } from './mm/mmSession'
+import {
+  formatSignedDollars,
+  formatUpdateError,
+  MM_MAX_ACTIVE_BOOKS,
+  statusPillLabel,
+} from './mm/mmSession'
 import { useMmSession } from './mm/useMmSession'
 import {
   assetShortName,
@@ -27,6 +32,7 @@ import {
  * Dark iOS-style surface. Continuous feed + YES/NO + Paper MM Start/Stop/Reset.
  * U2.4 Start runs loose multi-book paper portfolio (up to 5 books).
  * U2.5 Active books panel under the MM strip (per-book P&L; click focuses hero).
+ * U2.6 Apple-clean MM strip metric polish (scannable cash / P&L grid).
  * Paper / read-only. YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
@@ -103,7 +109,7 @@ export function V1App() {
           </div>
         </header>
 
-        {/* Paper MM control strip — U2.4 multi-book loose portfolio */}
+        {/* Paper MM control strip — U2.4–U2.6 multi-book + metric polish */}
         <section className="kmm-mm-strip mb-6 px-4 py-3.5 sm:px-5" aria-label="Paper market making">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
@@ -124,7 +130,8 @@ export function V1App() {
                 )}
                 <span className="num">{statusPillLabel(mm, nowMs)}</span>
               </span>
-              {mm.activeTicker && (
+              {/* Ticker chip only when books panel is empty (U2.6 — avoid double-focus noise) */}
+              {mm.activeTicker && mm.books.length === 0 && (
                 <span className="kmm-chip num text-[11px]">{mm.activeTicker}</span>
               )}
               {mm.quoteBook && (
@@ -160,61 +167,63 @@ export function V1App() {
               </button>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[12px] text-[var(--color-secondary)]">
-            <span>
-              Cash{' '}
-              <span className="num font-semibold text-[var(--color-label)]">
+
+          <div className="kmm-mm-metrics" role="group" aria-label="Paper MM metrics">
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Cash</span>
+              <span className="kmm-mm-metric__value kmm-mm-metric__value--lg num">
                 ${mm.cash.toFixed(2)}
               </span>
-            </span>
-            <span>
-              Inv{' '}
-              <span className="num font-semibold text-[var(--color-label)]">
+            </div>
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Inv</span>
+              <span className="kmm-mm-metric__value num">
                 {mm.inventory > 0 ? '+' : ''}
                 {mm.inventory}
               </span>
-            </span>
-            <span>
-              Realized{' '}
+            </div>
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Realized</span>
               <span
-                className={`num font-semibold ${
+                className={`kmm-mm-metric__value kmm-mm-metric__value--lg num ${
                   mm.realizedPnl >= 0
-                    ? 'text-[var(--color-profit)]'
-                    : 'text-[var(--color-danger)]'
+                    ? 'kmm-mm-metric__value--profit'
+                    : 'kmm-mm-metric__value--danger'
                 }`}
               >
-                {mm.realizedPnl >= 0 ? '+' : ''}
-                ${mm.realizedPnl.toFixed(2)}
+                {formatSignedDollars(mm.realizedPnl)}
               </span>
-            </span>
-            <span>
-              Unrealized{' '}
+            </div>
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Unrealized</span>
               <span
-                className={`num font-semibold ${
+                className={`kmm-mm-metric__value num ${
                   mm.unrealizedPnl >= 0
-                    ? 'text-[var(--color-profit)]'
-                    : 'text-[var(--color-danger)]'
+                    ? 'kmm-mm-metric__value--profit'
+                    : 'kmm-mm-metric__value--danger'
                 }`}
               >
-                {mm.unrealizedPnl >= 0 ? '+' : ''}
-                ${mm.unrealizedPnl.toFixed(2)}
+                {formatSignedDollars(mm.unrealizedPnl)}
               </span>
-            </span>
-            <span>
-              Fills{' '}
-              <span className="num font-semibold text-[var(--color-label)]">
-                {mm.fillsCount}
-              </span>
-            </span>
+            </div>
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Fills</span>
+              <span className="kmm-mm-metric__value num">{mm.fillsCount}</span>
+            </div>
             {mm.fees > 0 && (
-              <span>
-                Fees{' '}
-                <span className="num font-semibold text-[var(--color-label)]">
-                  ${mm.fees.toFixed(2)}
-                </span>
-              </span>
+              <div className="kmm-mm-metric">
+                <span className="kmm-mm-metric__label">Fees</span>
+                <span className="kmm-mm-metric__value num">${mm.fees.toFixed(2)}</span>
+              </div>
             )}
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Mark</span>
+              <span className="kmm-mm-metric__value kmm-mm-metric__value--muted num">
+                {formatSignedDollars(mm.realizedPnl + mm.unrealizedPnl)}
+              </span>
+            </div>
           </div>
+
           {mm.updateError ? (
             <p
               className={`mt-2 text-[12px] font-medium ${

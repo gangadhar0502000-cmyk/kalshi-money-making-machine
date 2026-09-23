@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createMmSessionStore,
   formatElapsed,
+  formatSignedDollars,
   formatUpdateError,
   makeUpdateError,
   MM_SESSION_STARTING_CASH,
@@ -366,3 +367,12 @@ describe('statusPillLabel / formatElapsed', () => {
     ).toBe('Running · 1:05')
   })
 })
+
+describe('formatSignedDollars', () => {
+  it('formats positive, negative, and zero', () => {
+    expect(formatSignedDollars(1.25)).toBe('+$1.25')
+    expect(formatSignedDollars(-0.5)).toBe('-$0.50')
+    expect(formatSignedDollars(0)).toBe('$0.00')
+  })
+})
+
