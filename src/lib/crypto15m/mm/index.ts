@@ -9,7 +9,7 @@ export {
 } from './config'
 export { PaperMmEngine, paperMmEngine } from './engine'
 export { asDollarPrice, formatPnlDual, clampPx, roundPx, isValidQuoteMid } from './prices'
-export { fetchLiveOrderbook, fetchLocalHealth, fetchLocalCrypto15m } from './liveBook'
+export { fetchLiveOrderbook, fetchLiveOrderbooks, fetchLocalHealth, fetchLocalCrypto15m, LIVE_BOOK_COALESCE_MS } from './liveBook'
 export { parseOrderbookFp, detectBookFills } from './orderbook'
 export type {
   MmCancelEvent,

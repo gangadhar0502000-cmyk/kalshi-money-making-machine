@@ -6,11 +6,11 @@
 /** Default in-memory TTL before a background Kalshi fan-out refresh. */
 export const CRYPTO15M_CACHE_TTL_MS = 2_500
 
-/** Client continuous-feed poll interval (safe because proxy caches). */
-export const CONTINUOUS_FEED_POLL_MS = 1_000
+/** Client continuous-feed poll interval (U2.10: 500ms; safe because proxy caches). */
+export const CONTINUOUS_FEED_POLL_MS = 500
 
 /** UI: lastSuccessAt older than this → amber. */
-export const FEED_AMBER_AFTER_MS = 15_000
+export const FEED_AMBER_AFTER_MS = 8_000
 
 /** UI: lastSuccessAt older than this → red. */
 export const FEED_RED_AFTER_MS = 60_000

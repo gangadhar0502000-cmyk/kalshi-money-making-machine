@@ -1,0 +1,121 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  LIVE_BOOK_COALESCE_MS,
+  __resetLiveBookCoalesceForTests,
+  fetchLiveOrderbook,
+  fetchLiveOrderbooks,
+} from './liveBook'
+
+const bookPayload = (ticker: string) => ({
+  ticker,
+  authenticated: true,
+  orderbook_fp: {
+    yes_dollars: [['0.40', '10']] as [string, string][],
+    no_dollars: [['0.55', '8']] as [string, string][],
+  },
+})
+
+describe('liveBook coalescing (U2.10)', () => {
+  beforeEach(() => {
+    __resetLiveBookCoalesceForTests()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    __resetLiveBookCoalesceForTests()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('exports LIVE_BOOK_COALESCE_MS in 50–75ms band', () => {
+    expect(LIVE_BOOK_COALESCE_MS).toBeGreaterThanOrEqual(50)
+    expect(LIVE_BOOK_COALESCE_MS).toBeLessThanOrEqual(75)
+  })
+
+  it('two parallel fetchLiveOrderbook → one batch HTTP', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      expect(url).toContain('/local-api/orderbooks?tickers=')
+      expect(url).toMatch(/T-A/)
+      expect(url).toMatch(/T-B/)
+      expect(url).not.toContain('/local-api/orderbook?ticker=')
+      return {
+        ok: true,
+        json: async () => ({
+          readOnly: true,
+          depth: 25,
+          fetchedAt: '2026-09-22T12:00:00.000Z',
+          books: {
+            'T-A': bookPayload('T-A'),
+            'T-B': bookPayload('T-B'),
+          },
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const p1 = fetchLiveOrderbook('T-A')
+    const p2 = fetchLiveOrderbook('T-B')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(LIVE_BOOK_COALESCE_MS)
+    const [a, b] = await Promise.all([p1, p2])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(a?.ticker).toBe('T-A')
+    expect(b?.ticker).toBe('T-B')
+    expect(a?.bestBid).toBeCloseTo(0.4)
+    expect(b?.authenticated).toBe(true)
+  })
+
+  it('batch total failure falls back to single /orderbook per caller', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/local-api/orderbooks?')) {
+        throw new Error('batch down')
+      }
+      if (url.includes('/local-api/orderbook?ticker=')) {
+        const u = new URL(url, 'http://localhost')
+        const ticker = u.searchParams.get('ticker') || 'X'
+        return {
+          ok: true,
+          json: async () => bookPayload(ticker),
+        }
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const p1 = fetchLiveOrderbook('T-A')
+    const p2 = fetchLiveOrderbook('T-B')
+    await vi.advanceTimersByTimeAsync(LIVE_BOOK_COALESCE_MS)
+    const [a, b] = await Promise.all([p1, p2])
+
+    expect(a?.ticker).toBe('T-A')
+    expect(b?.ticker).toBe('T-B')
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    expect(urls.filter((u) => u.includes('/orderbooks?')).length).toBe(1)
+    expect(urls.filter((u) => u.includes('/orderbook?ticker=')).length).toBe(2)
+  })
+
+  it('fetchLiveOrderbooks parses books + per-ticker errors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          readOnly: true,
+          depth: 25,
+          fetchedAt: '2026-09-22T12:00:00.000Z',
+          books: { 'T-OK': bookPayload('T-OK') },
+          errors: [{ ticker: 'T-BAD', message: 'Kalshi 404' }],
+        }),
+      })),
+    )
+
+    const { books, errors } = await fetchLiveOrderbooks(['T-OK', 'T-BAD'])
+    expect(books['T-OK']?.ticker).toBe('T-OK')
+    expect(books['T-BAD']).toBeUndefined()
+    expect(errors['T-BAD']).toBe('Kalshi 404')
+  })
+})

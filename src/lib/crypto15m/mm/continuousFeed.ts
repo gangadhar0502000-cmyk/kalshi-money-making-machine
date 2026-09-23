@@ -1,5 +1,5 @@
 /**
- * Shared continuous crypto15m universe feed — proxy-only, ~1s poll.
+ * Shared continuous crypto15m universe feed — proxy-only, ~500ms poll.
  * Paper MM and Lab subscribe so they cannot diverge on universe freshness.
  */
 import type { Crypto15mMarket } from '../../../types/crypto15m'
@@ -14,7 +14,7 @@ import {
 } from './universeCache'
 
 /** Per-poll AbortSignal timeout — hung /local-api/crypto15m must not freeze inFlight. */
-export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 8_000
+export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 4_000
 
 function isAbortReason(e: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true
@@ -181,7 +181,7 @@ export function getContinuousFeedSnapshot(): ContinuousFeedSnapshot {
 }
 
 /**
- * Subscribe to continuous proxy feed. Starts the 1s poller on first subscriber;
+ * Subscribe to continuous proxy feed. Starts the 500ms poller on first subscriber;
  * stops when the last unsubscribes.
  */
 export function subscribeContinuousFeed(listener: Listener): () => void {

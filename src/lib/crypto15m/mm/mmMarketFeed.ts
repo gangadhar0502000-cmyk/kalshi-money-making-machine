@@ -24,5 +24,5 @@ export type MmFeedStatus = {
   cacheAgeMs?: number | null
 }
 
-/** @deprecated U1 uses CONTINUOUS_FEED_POLL_MS (1s); kept for any legacy imports. */
+/** @deprecated U1 uses CONTINUOUS_FEED_POLL_MS (500ms); kept for any legacy imports. */
 export const MM_MARKET_POLL_MS = CONTINUOUS_FEED_POLL_MS

@@ -7,6 +7,7 @@
  *   GET /local-api/status
  *   GET /local-api/exchange-status
  *   GET /local-api/orderbook?ticker=
+ *   GET /local-api/orderbooks?tickers=T1,T2,...&depth=25
  *   GET /local-api/market?ticker=
  *   GET /local-api/crypto15m
  *   GET /local-api/markets?series_ticker=
@@ -454,6 +455,53 @@ async function handleLocal(req, res, url) {
       authenticated: data.authenticated,
       ...data.json,
     })
+  }
+
+  // U2.10: batch L2 so many PaperMmEngines share one browser connection.
+  if (route === '/local-api/orderbooks') {
+    const raw = url.searchParams.get('tickers') || ''
+    const tickers = raw
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+    if (tickers.length === 0) {
+      return sendJson(res, 400, { error: 'tickers required' })
+    }
+    if (tickers.length > 12) {
+      return sendJson(res, 400, { error: 'max 12 tickers' })
+    }
+    for (const ticker of tickers) {
+      if (!/^[A-Z0-9\-]+$/i.test(ticker)) {
+        return sendJson(res, 400, { error: `invalid ticker: ${ticker}` })
+      }
+    }
+    const depth = url.searchParams.get('depth') || '25'
+    const books = {}
+    const errors = []
+    await mapPool(tickers, 4, async (ticker) => {
+      try {
+        const data = await kalshiGet(
+          `/markets/${encodeURIComponent(ticker)}/orderbook?depth=${encodeURIComponent(depth)}`,
+        )
+        books[ticker] = {
+          authenticated: data.authenticated,
+          ...data.json,
+        }
+      } catch (e) {
+        errors.push({
+          ticker,
+          message: e instanceof Error ? e.message : String(e),
+        })
+      }
+    })
+    const body = {
+      readOnly: true,
+      depth: Number(depth) || 25,
+      fetchedAt: new Date().toISOString(),
+      books,
+    }
+    if (errors.length) body.errors = errors
+    return sendJson(res, 200, body)
   }
 
   if (route === '/local-api/market') {

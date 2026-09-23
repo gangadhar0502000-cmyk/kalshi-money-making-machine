@@ -61,8 +61,8 @@ describe('continuousFeed', () => {
     const first = getContinuousFeedSnapshot()
     expect(first.everSucceeded).toBe(true)
     expect(first.lastSuccessAt).toBeTruthy()
-    expect(CONTINUOUS_FEED_POLL_MS).toBe(1000)
-    expect(CONTINUOUS_FEED_FETCH_TIMEOUT_MS).toBe(8000)
+    expect(CONTINUOUS_FEED_POLL_MS).toBe(500)
+    expect(CONTINUOUS_FEED_FETCH_TIMEOUT_MS).toBe(4000)
 
     // Second poll 1s later — lastSuccessAt must advance (cache hit still counts)
     const prevOk = first.lastSuccessAt!
@@ -158,18 +158,18 @@ describe('continuousFeed', () => {
     expect(__continuousFeedInFlightForTests()).toBe(true)
     expect(getContinuousFeedSnapshot().lastSuccessAt).toBe(prevOk)
 
-    // Hung poll must self-abort after 8s — lastSuccessAt unchanged; lastError set
+    // Hung poll must self-abort after 4s — lastSuccessAt unchanged; lastError set
     await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_FETCH_TIMEOUT_MS)
     await Promise.resolve()
     await Promise.resolve()
 
     const afterTimeout = getContinuousFeedSnapshot()
     expect(afterTimeout.lastSuccessAt).toBe(prevOk)
-    expect(afterTimeout.lastError).toMatch(/feed poll timeout \(8s\)/)
+    expect(afterTimeout.lastError).toMatch(/feed poll timeout \(4s\)/)
     // Abort cleared inFlight; interval may immediately start another hang — either is OK.
     // Flip to success and ensure a later poll can run and advance lastSuccessAt.
     mode = 'ok-again'
-    // If a hang is in flight from the same tick, wait for its timeout; else next 1s tick.
+    // If a hang is in flight from the same tick, wait for its timeout; else next poll tick.
     if (__continuousFeedInFlightForTests()) {
       await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_FETCH_TIMEOUT_MS)
       await Promise.resolve()

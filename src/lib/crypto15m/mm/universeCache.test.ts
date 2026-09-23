@@ -115,6 +115,10 @@ describe('buildCachedCrypto15mPayload', () => {
 })
 
 describe('feedFreshnessTone', () => {
+  it('amber threshold is 8s (U2.10)', () => {
+    expect(FEED_AMBER_AFTER_MS).toBe(8_000)
+  })
+
   it('ok / amber / red thresholds from lastSuccessAt', () => {
     const now = 1_000_000
     expect(feedFreshnessTone(new Date(now - 1_000).toISOString(), now)).toBe('ok')

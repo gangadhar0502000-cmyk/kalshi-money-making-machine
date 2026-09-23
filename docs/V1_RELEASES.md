@@ -120,6 +120,15 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Stops false multi-minute **Degraded** while Paper MM is running 5/5. Amber threshold unchanged.
 - Paper-only / read-only; never places live trades.
 
+## U2.10 — batch L2 polls so feed stays sub-second
+
+- **mm-proxy:** `GET /local-api/orderbooks?tickers=T1,T2,...&depth=25` (max 12, charset-validated) fans out with `kalshiGet` + `mapPool(4)`; response `{ readOnly, depth, fetchedAt, books, errors? }`. Read-only GET only.
+- **Client coalescing:** `fetchLiveOrderbook` registers into a pending set and flushes one batch within `LIVE_BOOK_COALESCE_MS` (~60ms). `fetchLiveOrderbooks` hits the batch route; total batch failure falls back to single `/orderbook?ticker=` (fail-loud).
+- **Continuous feed:** poll **500ms** (`CONTINUOUS_FEED_POLL_MS`); fetch timeout **4s**; UI amber at **8s** (`FEED_AMBER_AFTER_MS`) so multi-book connection starvation surfaces earlier.
+- **Optional spacing:** portfolio loose Start also sets `bookPollMs: 1000` so engines do not stampede pre-coalesce.
+- Fixes feed age showing **6–10s ago** with MM Running 5/5 (browser ~6 conn/host queueing crypto15m behind five L2 polls). Success: header age usually **0–2s ago**.
+- Paper-only / read-only; never places live trades.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.

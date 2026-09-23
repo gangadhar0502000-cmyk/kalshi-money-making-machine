@@ -290,6 +290,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
         multiBook: true,
         maxActiveMarkets: MM_MAX_ACTIVE_BOOKS,
         strictRealism: false,
+        bookPollMs: 1000,
       }),
     )
     expect(portfolio.syncMarketUniverse).toHaveBeenCalled()

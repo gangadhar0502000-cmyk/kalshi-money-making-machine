@@ -306,6 +306,8 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           ...presetsForMode(false),
           strictRealism: false,
           useLiveBook: true,
+          // U2.10: slightly slower L2 polls under multi so coalesce flush + feed share connections
+          bookPollMs: 1000,
         })
         portfolio.syncMarketUniverse(markets)
         portfolio.start()
