@@ -4,6 +4,9 @@
  *
  * U2.11: abort-previous (not skip-if-inFlight) so a hung browser fetch cannot
  * freeze lastSuccessAt while the UI clock ages to 8–10s+.
+ *
+ * U2.12: lastSuccessAt = proxy `fetchedAt` (Kalshi universe data time), never
+ * wall-clock HTTP RTT / cache-hit time. Browser polls :8787 directly.
  */
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import { normalizeCrypto15m } from '../normalize'
@@ -16,8 +19,8 @@ import {
   type FeedFreshnessTone,
 } from './universeCache'
 
-/** Per-poll AbortSignal timeout — hung /local-api/crypto15m must not freeze age. */
-export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 2_500
+/** Per-poll AbortSignal timeout — direct :8787; hung fetch must not freeze age. */
+export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 5_000
 
 function isAbortReason(e: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true
@@ -27,12 +30,21 @@ function isAbortReason(e: unknown, signal?: AbortSignal): boolean {
   return false
 }
 
+function isValidFetchedAt(value: unknown): value is string {
+  if (typeof value !== 'string' || !value) return false
+  const t = Date.parse(value)
+  return Number.isFinite(t)
+}
+
 export { CONTINUOUS_FEED_POLL_MS, feedFreshnessTone }
 export type { FeedFreshnessTone }
 
 export type ContinuousFeedSnapshot = {
   markets: Crypto15mMarket[]
-  /** ISO — updated on every successful HTTP poll (including cache hits). */
+  /**
+   * ISO — proxy universe data time (`fetchedAt`), not HTTP success time.
+   * Stale cache hits do not advance this beyond the proxy's fetchedAt.
+   */
   lastSuccessAt?: string
   lastAttemptAt?: string
   lastError?: string
@@ -150,22 +162,31 @@ async function pollOnce(): Promise<void> {
     }
 
     const markets = normalizeProxyMarkets(raw)
-    const nowIso = new Date().toISOString()
     const errParts = [...(raw.errors ?? [])]
     const keepLast =
       markets.length === 0 &&
       snapshot.markets.length > 0 &&
       (Boolean(raw.stale) || (errParts.length > 0 && Boolean(raw.refreshing)))
 
+    const fetchedOk = isValidFetchedAt(raw.fetchedAt)
+    // Honest age: stamp from proxy data time only — never Date.now() / HTTP RTT.
+    const lastSuccessAt = fetchedOk ? raw.fetchedAt : snapshot.lastSuccessAt
+    let lastError: string | undefined
+    if (!fetchedOk) {
+      lastError = 'proxy missing fetchedAt — not claiming fresh'
+    } else if (errParts.length) {
+      lastError = errParts.slice(0, 3).join(' | ')
+    } else if (keepLast) {
+      lastError = 'Empty/stale proxy — keeping last markets'
+    } else {
+      lastError = undefined
+    }
+
     snapshot = {
       markets: keepLast ? snapshot.markets : markets,
-      lastSuccessAt: nowIso,
+      lastSuccessAt,
       lastAttemptAt: attemptedAt,
-      lastError: errParts.length
-        ? errParts.slice(0, 3).join(' | ')
-        : keepLast
-          ? 'Empty/stale proxy — keeping last markets'
-          : undefined,
+      lastError,
       stale: Boolean(raw.stale) || keepLast,
       refreshing: Boolean(raw.refreshing),
       cacheAgeMs: raw.cacheAgeMs ?? null,

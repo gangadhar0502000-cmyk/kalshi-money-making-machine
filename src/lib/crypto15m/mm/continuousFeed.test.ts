@@ -28,11 +28,13 @@ const sampleMarket = {
   open_time: new Date(Date.now() - 300_000).toISOString(),
 } as never
 
+const PROXY_FETCHED_AT = '2026-09-22T12:00:00.000Z'
+
 const okPayload = {
   readOnly: true,
   authenticated: true,
   markets: [sampleMarket],
-  fetchedAt: '2026-09-22T12:00:00.000Z',
+  fetchedAt: PROXY_FETCHED_AT,
   cacheAgeMs: 50,
   stale: false,
   refreshing: false,
@@ -49,53 +51,92 @@ describe('continuousFeed', () => {
     vi.restoreAllMocks()
   })
 
-  it('polls proxy-only and updates lastSuccessAt on cache hits', async () => {
+  it('lastSuccessAt equals raw.fetchedAt, not wall clock, on success', async () => {
     const spy = vi.spyOn(liveBook, 'fetchLocalCrypto15m').mockResolvedValue({
-      readOnly: true,
-      authenticated: true,
-      markets: [sampleMarket],
-      fetchedAt: '2026-09-22T12:00:00.000Z',
+      ...okPayload,
+      fetchedAt: PROXY_FETCHED_AT,
       cacheAgeMs: 100,
-      stale: false,
-      refreshing: false,
     })
 
-    const snaps: string[] = []
-    const unsub = subscribeContinuousFeed((s) => {
-      if (s.lastSuccessAt) snaps.push(s.lastSuccessAt)
-    })
+    const unsub = subscribeContinuousFeed(() => {})
 
-    await vi.advanceTimersByTimeAsync(0) // flush first poll
+    await vi.advanceTimersByTimeAsync(0)
     await Promise.resolve()
     await Promise.resolve()
 
     expect(spy).toHaveBeenCalled()
     const first = getContinuousFeedSnapshot()
     expect(first.everSucceeded).toBe(true)
-    expect(first.lastSuccessAt).toBeTruthy()
+    expect(first.lastSuccessAt).toBe(PROXY_FETCHED_AT)
+    expect(first.fetchedAt).toBe(PROXY_FETCHED_AT)
+    // Must not stamp wall-clock HTTP time
+    expect(first.lastSuccessAt).not.toBe(first.lastAttemptAt)
     expect(CONTINUOUS_FEED_POLL_MS).toBe(500)
-    expect(CONTINUOUS_FEED_FETCH_TIMEOUT_MS).toBe(2500)
+    expect(CONTINUOUS_FEED_FETCH_TIMEOUT_MS).toBe(5000)
 
-    // Second poll ~500ms later — lastSuccessAt must advance (cache hit still counts)
-    const prevOk = first.lastSuccessAt!
+    unsub()
+  })
+
+  it('stale cache hit does not advance lastSuccessAt beyond fetchedAt', async () => {
+    const spy = vi.spyOn(liveBook, 'fetchLocalCrypto15m').mockResolvedValue({
+      ...okPayload,
+      fetchedAt: PROXY_FETCHED_AT,
+      cacheAgeMs: 100,
+      stale: false,
+    })
+
+    subscribeContinuousFeed(() => {})
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const first = getContinuousFeedSnapshot()
+    expect(first.lastSuccessAt).toBe(PROXY_FETCHED_AT)
+
+    // Second poll ~500ms later — same proxy fetchedAt (cache hit). Age must not lie.
     await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_POLL_MS)
     await Promise.resolve()
     await Promise.resolve()
 
     const second = getContinuousFeedSnapshot()
-    expect(second.lastSuccessAt).toBeTruthy()
-    expect(Date.parse(second.lastSuccessAt!) >= Date.parse(prevOk)).toBe(true)
+    expect(second.lastSuccessAt).toBe(PROXY_FETCHED_AT)
+    expect(Date.parse(second.lastSuccessAt!)).toBe(Date.parse(PROXY_FETCHED_AT))
     expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
 
-    unsub()
+  it('missing fetchedAt leaves lastSuccessAt unchanged and sets lastError', async () => {
+    vi.spyOn(liveBook, 'fetchLocalCrypto15m')
+      .mockResolvedValueOnce({ ...okPayload })
+      .mockResolvedValueOnce({
+        readOnly: true,
+        authenticated: true,
+        markets: [sampleMarket],
+        // no fetchedAt
+        cacheAgeMs: 200,
+        stale: false,
+        refreshing: false,
+      })
+
+    subscribeContinuousFeed(() => {})
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(getContinuousFeedSnapshot().lastSuccessAt).toBe(PROXY_FETCHED_AT)
+
+    await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_POLL_MS)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const snap = getContinuousFeedSnapshot()
+    expect(snap.lastSuccessAt).toBe(PROXY_FETCHED_AT)
+    expect(snap.lastError).toMatch(/proxy missing fetchedAt/)
+    expect(snap.markets.length).toBeGreaterThan(0)
   })
 
   it('keeps last markets on stale empty proxy response', async () => {
     vi.spyOn(liveBook, 'fetchLocalCrypto15m')
       .mockResolvedValueOnce({
-        readOnly: true,
-        authenticated: true,
-        markets: [sampleMarket],
+        ...okPayload,
         stale: false,
         refreshing: false,
         cacheAgeMs: 0,
@@ -104,6 +145,7 @@ describe('continuousFeed', () => {
         readOnly: true,
         authenticated: true,
         markets: [],
+        fetchedAt: PROXY_FETCHED_AT,
         stale: true,
         refreshing: true,
         errors: ['refresh failed — kept last good'],
@@ -122,6 +164,7 @@ describe('continuousFeed', () => {
     const snap = getContinuousFeedSnapshot()
     expect(snap.markets.length).toBeGreaterThan(0)
     expect(snap.stale).toBe(true)
+    expect(snap.lastSuccessAt).toBe(PROXY_FETCHED_AT)
   })
 
   it('times out hung fetch: clears inFlight, leaves lastSuccessAt, allows next poll', async () => {
@@ -152,9 +195,9 @@ describe('continuousFeed', () => {
     const first = getContinuousFeedSnapshot()
     expect(first.everSucceeded).toBe(true)
     const prevOk = first.lastSuccessAt!
-    expect(prevOk).toBeTruthy()
+    expect(prevOk).toBe(PROXY_FETCHED_AT)
 
-    // Next poll hangs until self-abort (2.5s)
+    // Next poll hangs until self-abort (5s)
     mode = 'hang'
     await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_POLL_MS)
     await Promise.resolve()
@@ -167,7 +210,7 @@ describe('continuousFeed', () => {
 
     const afterTimeout = getContinuousFeedSnapshot()
     expect(afterTimeout.lastSuccessAt).toBe(prevOk)
-    expect(afterTimeout.lastError).toMatch(/feed poll timeout \(2\.5s\)/)
+    expect(afterTimeout.lastError).toMatch(/feed poll timeout \(5s\)/)
 
     mode = 'ok-again'
     if (__continuousFeedInFlightForTests()) {
@@ -182,8 +225,7 @@ describe('continuousFeed', () => {
     const afterNext = getContinuousFeedSnapshot()
     expect(spy.mock.calls.length).toBeGreaterThanOrEqual(3)
     expect(afterNext.everSucceeded).toBe(true)
-    expect(afterNext.lastSuccessAt).toBeTruthy()
-    expect(Date.parse(afterNext.lastSuccessAt!) >= Date.parse(prevOk)).toBe(true)
+    expect(afterNext.lastSuccessAt).toBe(PROXY_FETCHED_AT)
     expect(__continuousFeedInFlightForTests()).toBe(false)
   })
 
@@ -213,7 +255,7 @@ describe('continuousFeed', () => {
 
     const afterFirst = getContinuousFeedSnapshot()
     expect(afterFirst.everSucceeded).toBe(true)
-    const prevOk = afterFirst.lastSuccessAt!
+    expect(afterFirst.lastSuccessAt).toBe(PROXY_FETCHED_AT)
     const genAfterFirst = __continuousFeedGenerationForTests()
 
     // Scheduled tick starts hung poll (gen N) that ignores abort
@@ -233,10 +275,9 @@ describe('continuousFeed', () => {
     expect(pending.length).toBe(2)
     const genSecond = __continuousFeedGenerationForTests()
     expect(genSecond).toBeGreaterThan(genHung)
-    // inFlight tracks the *current* gen, which is still outstanding
     expect(__continuousFeedInFlightForTests()).toBe(true)
 
-    // Second gen succeeds
+    // Second gen succeeds with newer proxy fetchedAt
     pending[1]!.resolve({
       ...okPayload,
       fetchedAt: '2026-09-22T12:00:01.000Z',
@@ -247,8 +288,7 @@ describe('continuousFeed', () => {
     await Promise.resolve()
 
     const afterSecond = getContinuousFeedSnapshot()
-    expect(afterSecond.lastSuccessAt).toBeTruthy()
-    expect(Date.parse(afterSecond.lastSuccessAt!) >= Date.parse(prevOk)).toBe(true)
+    expect(afterSecond.lastSuccessAt).toBe('2026-09-22T12:00:01.000Z')
     expect(afterSecond.fetchedAt).toBe('2026-09-22T12:00:01.000Z')
     expect(__continuousFeedInFlightForTests()).toBe(false)
 

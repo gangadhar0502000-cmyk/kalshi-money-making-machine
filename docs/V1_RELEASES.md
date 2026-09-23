@@ -139,6 +139,17 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Success: MM 5/5 Running keeps feed age **0–2s** in the active tab; failures surface `lastError` within ~2.5s instead of freezing at 10s+.
 - Paper-only / read-only; never places live trades. Batch L2 (U2.10) unchanged.
 
+## U2.12 — real feed via :8787 + honest proxy fetchedAt
+
+- **Root cause after U2.11:** Mac curl to Vite/proxy `/local-api/crypto15m` is 2–5ms, but browser GETs to **same-origin :5173** were starved by L2 traffic (6-conn/host limit) and aborted at the feed timeout forever. Proxy already sends `Access-Control-Allow-Origin: *`.
+- **Direct proxy base:** `getLocalApiBase()` / `localApiUrl()` — browser hits `http://127.0.0.1:8787` (or `VITE_MM_PROXY_BASE`) so crypto15m uses a **separate connection pool** from Vite. Node/Vitest keep relative `/local-api`.
+- **Honest `lastSuccessAt`:** continuousFeed stamps from proxy `fetchedAt` only (Kalshi universe data time). **Never** `Date.now()` on HTTP 200 / cache hits. Missing `fetchedAt` → leave previous age, `lastError: proxy missing fetchedAt — not claiming fresh`.
+- **Fetch timeout** 5s (`CONTINUOUS_FEED_FETCH_TIMEOUT_MS`); poll interval stays 500ms.
+- **Single-flight L2 flush:** `liveBook` serializes coalesced batch GETs (`flushInFlight`) so N parallel flushes cannot re-saturate even the :8787 pool.
+- **Strip:** `U2.8: feed data stale (age) — … / needs mm-proxy :8787` (clearer; codes unchanged).
+- Success: MM 5/5 Running → browser polls `:8787` without timeout storm; header age tracks **proxy fetchedAt**, not HTTP cache-hit time.
+- Paper-only / read-only; never places live trades. No soft DEMO feed.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.

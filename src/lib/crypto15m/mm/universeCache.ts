@@ -101,7 +101,7 @@ export function buildCachedCrypto15mPayload(opts: {
   }
 }
 
-/** Honest feed badge tone from client lastSuccessAt (not proxy fetchedAt). */
+/** Honest feed badge tone from lastSuccessAt (proxy data time / fetchedAt). */
 export function feedFreshnessTone(
   lastSuccessAt: string | undefined | null,
   nowMs: number = Date.now(),

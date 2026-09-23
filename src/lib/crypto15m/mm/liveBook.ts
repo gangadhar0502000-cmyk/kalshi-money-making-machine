@@ -6,10 +6,15 @@
  * GET /local-api/orderbooks?tickers=… within LIVE_BOOK_COALESCE_MS so five
  * PaperMmEngines do not exhaust the browser’s ~6 connections/host and starve
  * /local-api/crypto15m.
+ *
+ * U2.12: browser URLs use getLocalApiBase() → http://127.0.0.1:8787 (separate
+ * pool from Vite :5173). Batch flushes are single-flight serialized so N
+ * parallel coalesces cannot re-saturate even the :8787 pool.
  */
 
 import type { KalshiMarketRaw } from '../../../types/kalshi'
 import { parseOrderbookFp, type OrderBookSnapshot } from './orderbook'
+import { localApiUrl } from './localApiBase'
 
 /** Debounce window before flushing pending L2 tickers into one batch GET. */
 export const LIVE_BOOK_COALESCE_MS = 60
@@ -67,6 +72,10 @@ type CoalesceWaiter = {
 
 let pendingWaiters: CoalesceWaiter[] = []
 let coalesceTimer: ReturnType<typeof setTimeout> | null = null
+/** Single-flight: at most one batch flush HTTP in flight at a time. */
+let flushInFlight: Promise<void> | null = null
+let flushing = false
+let flushAgain = false
 
 /** Test helper — clear coalesce queue / timer (drop waiters without rejecting). */
 export function __resetLiveBookCoalesceForTests(): void {
@@ -80,11 +89,22 @@ export function __resetLiveBookCoalesceForTests(): void {
     }
   }
   pendingWaiters = []
+  flushInFlight = null
+  flushing = false
+  flushAgain = false
+}
+
+/** Test helper — whether a batch flush is currently in flight. */
+export function __liveBookFlushInFlightForTests(): boolean {
+  return flushInFlight != null || flushing
 }
 
 export async function fetchLocalHealth(signal?: AbortSignal): Promise<LocalApiHealth | null> {
   try {
-    const res = await fetch('/local-api/health', { signal, headers: { Accept: 'application/json' } })
+    const res = await fetch(localApiUrl('/local-api/health'), {
+      signal,
+      headers: { Accept: 'application/json' },
+    })
     if (!res.ok) return null
     return (await res.json()) as LocalApiHealth
   } catch {
@@ -105,7 +125,9 @@ async function fetchLiveOrderbookSingle(
   ticker: string,
   signal?: AbortSignal,
 ): Promise<OrderBookSnapshot | null> {
-  const url = `/local-api/orderbook?ticker=${encodeURIComponent(ticker)}&depth=25`
+  const url = localApiUrl(
+    `/local-api/orderbook?ticker=${encodeURIComponent(ticker)}&depth=25`,
+  )
   const res = await fetch(url, { signal, headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`orderbook HTTP ${res.status}`)
   const data = (await res.json()) as OrderbookRawPayload
@@ -129,8 +151,9 @@ export async function fetchLiveOrderbooks(
   if (unique.length === 0) {
     return { books: {}, errors: {} }
   }
-  const url =
-    `/local-api/orderbooks?tickers=${unique.map(encodeURIComponent).join(',')}&depth=25`
+  const url = localApiUrl(
+    `/local-api/orderbooks?tickers=${unique.map(encodeURIComponent).join(',')}&depth=25`,
+  )
   const res = await fetch(url, { signal, headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(`orderbooks HTTP ${res.status}`)
   const data = (await res.json()) as BatchOrderbooksResponse
@@ -155,12 +178,7 @@ export async function fetchLiveOrderbooks(
   return { books, errors }
 }
 
-async function flushCoalescedOrderbooks(): Promise<void> {
-  coalesceTimer = null
-  const waiters = pendingWaiters
-  pendingWaiters = []
-  if (waiters.length === 0) return
-
+async function flushCoalescedOrderbooksBody(waiters: CoalesceWaiter[]): Promise<void> {
   for (const w of waiters) {
     if (w.signal && w.onAbort) {
       w.signal.removeEventListener('abort', w.onAbort)
@@ -217,9 +235,45 @@ async function flushCoalescedOrderbooks(): Promise<void> {
 }
 
 /**
+ * Serialize batch flushes (single-flight). If a flush is already running,
+ * mark flushAgain and return; the active flusher drains new waiters when done.
+ * Prevents N parallel batch GETs re-saturating the :8787 connection pool.
+ */
+async function flushCoalescedOrderbooks(): Promise<void> {
+  if (flushing) {
+    flushAgain = true
+    return
+  }
+  flushing = true
+  const run = (async () => {
+    try {
+      do {
+        flushAgain = false
+        if (coalesceTimer != null) {
+          clearTimeout(coalesceTimer)
+          coalesceTimer = null
+        }
+        const waiters = pendingWaiters
+        pendingWaiters = []
+        if (waiters.length === 0) continue
+        await flushCoalescedOrderbooksBody(waiters)
+      } while (flushAgain || pendingWaiters.length > 0)
+    } finally {
+      flushing = false
+    }
+  })()
+  flushInFlight = run
+  try {
+    await run
+  } finally {
+    if (flushInFlight === run) flushInFlight = null
+  }
+}
+
+/**
  * Live L2 for one ticker. Coalesces concurrent callers into one batch GET
  * within LIVE_BOOK_COALESCE_MS. On total batch failure, falls back to single
- * /orderbook?ticker= (fail-loud).
+ * /orderbook?ticker= (fail-loud). Flushes are single-flight (U2.12).
  */
 export async function fetchLiveOrderbook(
   ticker: string,
@@ -265,7 +319,7 @@ export async function fetchLocalCrypto15m(
 ): Promise<LocalCrypto15mResponse> {
   if (signal?.aborted) throw new Error('aborted')
   try {
-    const res = await fetch('/local-api/crypto15m', {
+    const res = await fetch(localApiUrl('/local-api/crypto15m'), {
       signal,
       cache: 'no-store',
       headers: { Accept: 'application/json' },

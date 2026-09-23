@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   LIVE_BOOK_COALESCE_MS,
   __resetLiveBookCoalesceForTests,
+  __liveBookFlushInFlightForTests,
   fetchLiveOrderbook,
   fetchLiveOrderbooks,
 } from './liveBook'
@@ -15,7 +16,7 @@ const bookPayload = (ticker: string) => ({
   },
 })
 
-describe('liveBook coalescing (U2.10)', () => {
+describe('liveBook coalescing (U2.10 / U2.12)', () => {
   beforeEach(() => {
     __resetLiveBookCoalesceForTests()
     vi.useFakeTimers()
@@ -117,5 +118,68 @@ describe('liveBook coalescing (U2.10)', () => {
     expect(books['T-OK']?.ticker).toBe('T-OK')
     expect(books['T-BAD']).toBeUndefined()
     expect(errors['T-BAD']).toBe('Kalshi 404')
+  })
+
+  it('U2.12 serialize: second flush waits until prior batch completes (single-flight)', async () => {
+    let batchReleases: Array<() => void> = []
+    let batchStarts = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.includes('/local-api/orderbooks?')) {
+        throw new Error(`unexpected ${url}`)
+      }
+      batchStarts++
+      await new Promise<void>((resolve) => {
+        batchReleases.push(resolve)
+      })
+      const tickers = new URL(url, 'http://localhost').searchParams.get('tickers')!.split(',')
+      const books: Record<string, ReturnType<typeof bookPayload>> = {}
+      for (const t of tickers) books[t] = bookPayload(t)
+      return {
+        ok: true,
+        json: async () => ({
+          readOnly: true,
+          depth: 25,
+          fetchedAt: '2026-09-22T12:00:00.000Z',
+          books,
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const p1 = fetchLiveOrderbook('T-A')
+    await vi.advanceTimersByTimeAsync(LIVE_BOOK_COALESCE_MS)
+    await Promise.resolve()
+    expect(batchStarts).toBe(1)
+    expect(__liveBookFlushInFlightForTests()).toBe(true)
+
+    // New waiters while first flush in flight — must not start a second HTTP yet
+    const p2 = fetchLiveOrderbook('T-B')
+    await vi.advanceTimersByTimeAsync(LIVE_BOOK_COALESCE_MS)
+    await Promise.resolve()
+    expect(batchStarts).toBe(1)
+
+    // Release first batch
+    batchReleases[0]!()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    // Drain of T-B should start (or complete) after prior finishes
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Allow second batch if pending
+    if (batchReleases.length > 1) {
+      batchReleases[1]!()
+    }
+    const [a, b] = await Promise.all([p1, p2])
+    expect(a?.ticker).toBe('T-A')
+    expect(b?.ticker).toBe('T-B')
+    // Never more than one overlapping batch start before prior release
+    expect(batchStarts).toBeGreaterThanOrEqual(1)
+    expect(batchStarts).toBeLessThanOrEqual(2)
+    // Critical: while first was blocked, second must not have started
+    // (asserted above at batchStarts === 1 before release)
   })
 })

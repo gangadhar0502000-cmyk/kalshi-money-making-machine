@@ -263,8 +263,8 @@ export function V1App() {
               role="alert"
             >
               {status.lastError
-                ? `U2.8: feed stale (${status.feedAgeShort}) — ${status.lastError}`
-                : `U2.8: feed stale (${status.feedAgeShort}) — needs continuous feed / mm-proxy :8787`}
+                ? `U2.8: feed data stale (${status.feedAgeShort}) — ${status.lastError}`
+                : `U2.8: feed data stale (${status.feedAgeShort}) — needs mm-proxy :8787`}
             </p>
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
