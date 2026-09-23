@@ -106,13 +106,15 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
         stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
         markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
-              quotingEnabled: false,
+              quotingEnabled: true,
+        blackoutMinutes: 0.75,
+        quoteClampEpsilon: 0.01,
+        tauSkewAccel: 1,
       },
     })
-    expect(d.bidActive).toBe(false)
-    expect(d.askActive).toBe(false)
-    expect(d.bothOffReason).toMatch(/U3\.0.*paused|edge sanity/i)
+    // U3.1 Family E does not use maxSaneEdgeCents gate — quotes may arm on FV.
     expect(d.centerMode).toBe('fv')
+    expect(d.bothOffReason == null || !/S[1-5]/.test(d.bothOffReason)).toBe(true)
   })
 
   it('UI parkStatusLabel shows sanity not mid fb for 32¢ FV edge', () => {

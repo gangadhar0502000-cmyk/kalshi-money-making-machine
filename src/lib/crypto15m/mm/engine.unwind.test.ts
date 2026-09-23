@@ -76,6 +76,9 @@ describe('engine inventory unwind + fill discipline', () => {
       maxSaneEdgeCents: 25,
       toxicMidLow: 0.05,
       toxicMidHigh: 0.95,
+      quotingEnabled: true,
+      blackoutMinutes: 0.75,
+      hardFlatMinutes: 2,
     })
   })
 
@@ -84,13 +87,14 @@ describe('engine inventory unwind + fill discipline', () => {
     vi.unstubAllGlobals()
   })
 
-  it('long at max + FV≫mid → quotes still OFF under U3.0 pause', () => {
+  it('long at max + FV≫mid → bid OFF (max inv), ask ON to reduce', () => {
     const market = mkMarket({
       ticker: 'KXHYPE15M-UNWIND',
       midYes: 0.4,
       yesBid: 0.38,
       yesAsk: 0.42,
       floorStrike: 20,
+      minutesRemaining: 10,
     })
     engine.setMarket(market)
     engine.seedSpot(40)
@@ -101,10 +105,10 @@ describe('engine inventory unwind + fill discipline', () => {
     const snap = engine.getState().snapshot
     const q = snap.quote
     expect(q).not.toBeNull()
-    expect(q!.askActive).toBe(false)
     expect(q!.bidActive).toBe(false)
-    expect(q!.active).toBe(false)
-    expect(snap.message).toMatch(/U3\.0.*paused/)
+    expect(q!.askActive).toBe(true)
+    expect(q!.active).toBe(true)
+    expect(String(q!.bidReason + q!.askReason)).not.toMatch(/S[1-5]/)
   })
 
   it('cannot applyFill buy_yes when inventory >= maxInventory / unwind blocks adds', () => {
@@ -129,7 +133,7 @@ describe('engine inventory unwind + fill discipline', () => {
     eng.applyFill('buy_yes', 0.5, 1, 0.5, false, 'book_depth', false)
     expect(engine.getState().snapshot.inventory).toBe(10)
     expect(engine.getState().fills.length).toBe(fillsBefore)
-    expect(engine.getState().snapshot.message.toLowerCase()).toMatch(/inv block|u3\.0.*paused/)
+    expect(engine.getState().snapshot.message.toLowerCase()).toMatch(/inv block|u3\.1|family e|live book|paper mm/)
 
     // Reducing sell is still allowed
     eng.applyFill('sell_yes', 0.52, 1, 0.5, false, 'book_depth', false)

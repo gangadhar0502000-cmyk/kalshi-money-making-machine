@@ -208,10 +208,23 @@ export interface PaperMmConfig {
    */
   l2OffDropTicks: number
   /**
-   * U3.0: when false (default), paper quotes never arm — awaiting user-defined logic.
-   * Flip later when a replacement quote path exists; do not re-enable S1–S5 playbook.
+   * U3.1: when true (default), Family E digital FV quoting arms.
+   * When false, U3.0 pause — both sides OFF.
    */
   quotingEnabled: boolean
+  /**
+   * U3.1 Family E: both sides OFF when minutesRemaining ≤ this (settlement blackout).
+   * Default 0.75 min (~45s).
+   */
+  blackoutMinutes: number
+  /**
+   * U3.1: clamp posted YES probs to (ε, 1−ε). Default 0.01.
+   */
+  quoteClampEpsilon: number
+  /**
+   * U3.1: inventory skew acceleration × (hardFlatMinutes / τ). Default 1.
+   */
+  tauSkewAccel: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -269,7 +282,10 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   stuckUnwindTicks: 30,
   markBleedCents: 5,
   l2OffDropTicks: 10,
-  quotingEnabled: false,
+  quotingEnabled: true,
+  blackoutMinutes: 0.75,
+  quoteClampEpsilon: 0.01,
+  tauSkewAccel: 1,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -380,6 +396,9 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     markBleedCents: clamp(c.markBleedCents ?? 5, 0, 50),
     l2OffDropTicks: Math.round(clamp(c.l2OffDropTicks ?? 10, 1, 600)),
     quotingEnabled: Boolean(c.quotingEnabled),
+    blackoutMinutes: clamp(c.blackoutMinutes ?? 0.75, 0, 5),
+    quoteClampEpsilon: clamp(c.quoteClampEpsilon ?? 0.01, 0.001, 0.2),
+    tauSkewAccel: clamp(c.tauSkewAccel ?? 1, 0, 20),
   }
 }
 
@@ -481,7 +500,20 @@ export function migratePersistedScarcityConfig(
   if (partial.markBleedCents == null || !Number.isFinite(partial.markBleedCents)) {
     out.markBleedCents = STRICT_PAPER_MM_CONFIG.markBleedCents
   }
-  // U3.0: never restore old sessions into an armed quoting state.
-  out.quotingEnabled = false
+  // U3.1 Family E knobs on older saves.
+  if (partial.blackoutMinutes == null || !Number.isFinite(partial.blackoutMinutes)) {
+    out.blackoutMinutes = STRICT_PAPER_MM_CONFIG.blackoutMinutes
+  }
+  if (partial.quoteClampEpsilon == null || !Number.isFinite(partial.quoteClampEpsilon)) {
+    out.quoteClampEpsilon = STRICT_PAPER_MM_CONFIG.quoteClampEpsilon
+  }
+  if (partial.tauSkewAccel == null || !Number.isFinite(partial.tauSkewAccel)) {
+    out.tauSkewAccel = STRICT_PAPER_MM_CONFIG.tauSkewAccel
+  }
+  // Do not force-disable quoting: old U3.0 saves may still have quotingEnabled:false
+  // until Start (v1 / headless / panel) sets true + Family E.
+  if (partial.quotingEnabled == null) {
+    out.quotingEnabled = STRICT_PAPER_MM_CONFIG.quotingEnabled
+  }
   return out
 }

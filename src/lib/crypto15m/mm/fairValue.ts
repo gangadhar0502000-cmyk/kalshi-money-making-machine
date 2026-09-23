@@ -3,9 +3,9 @@
  *
  * Assumptions (document for research — not a live edge claim):
  * - YES pays $1 iff spot at expiry ≥ floorStrike (Kalshi crypto 15m up/down).
- * - Spot ~ GBM with **zero drift** over the remaining window (short horizon).
- * - Constant annualized vol σ (`annualVol`, default 0.70). No jumps in FV.
- * - P(YES) = Φ( ln(S/K) / (σ √T) ), T in years from minutes remaining.
+ * - Spot ~ GBM; risk-neutral digital / cash-or-nothing with r=q=0:
+ *   P(YES) ≈ N(d₂), d₂ = [ln(S/K) − σ²/2 · T] / (σ √T).
+ * - Constant annualized vol σ (`annualVol`, default 0.70 ≈ 70% crypto prior). No jumps in FV.
  * - Clamp to [0.01, 0.99]. T→0: S≥K → 0.99 else 0.01.
  * - Missing/invalid spot or strike → null (decision policy parks both sides when FV mode is on).
  *
@@ -26,7 +26,7 @@ export interface FairValueInput {
 export interface FairValueEstimate {
   /** P(YES) in dollars [0.01, 0.99]. */
   fairProb: number
-  /** ln(S/K) / (σ√T); ±Infinity when T≈0. */
+  /** d₂ = [ln(S/K)−σ²T/2]/(σ√T); ±Infinity when T≈0. */
   d: number
   /** Time in years used. */
   tYears: number
@@ -79,13 +79,14 @@ export function estimateYesFairValue(input: FairValueInput): FairValueEstimate |
   }
 
   const denom = annualVol * Math.sqrt(tYears)
-  const d = logMoneyness / denom
+  // Digital / cash-or-nothing RN ITM prob: N(d2) with r = q = 0
+  const d = (logMoneyness - 0.5 * annualVol * annualVol * tYears) / denom
   const fairProb = clamp01(normCdf(d))
   return {
     fairProb,
     d,
     tYears,
-    formula: `Φ(ln(S/K)/(σ√T)) S=${spot.toFixed(2)} K=${strike.toFixed(2)} σ=${annualVol} T=${(tYears * 525960).toFixed(2)}m d=${d.toFixed(3)}`,
+    formula: `N(d2) S=${spot.toFixed(2)} K=${strike.toFixed(2)} σ=${annualVol} T=${(tYears * 525960).toFixed(2)}m d2=${d.toFixed(3)}`,
   }
 }
 

@@ -1,15 +1,30 @@
 /**
  * Explicit, testable decision policy for paper MM quoting.
- * U3.0: S1–S5 scenario playbook removed. Paper quoting is paused until the user
- * defines new quote logic (`quotingEnabled` + replacement path).
- * Paper research only — never places live orders.
+ * U3.1: Family E — Digital FV + inventory skew + hard τ-flatten
+ * (see docs/research/U3_QUOTE_LOGIC_RESEARCH.md §9 Family E).
+ * S1–S5 scenario playbook is not used. Paper research only — never places live orders.
  */
 
 import { clampPx, isValidQuoteMid } from './prices'
+import {
+  U31_BLACKOUT,
+  U31_NO_FV,
+  familyEQuotePrices,
+  familyESideArms,
+  type FamilyETag,
+} from './digitalFvQuote'
 
-/** Fail-loud strip / reason when paper quotes stay OFF (U3.0). */
+/** Fail-loud strip / reason when paper quotes stay OFF (U3.0 legacy pause). */
 export const QUOTING_PAUSED_REASON =
   'U3.0: paper quoting paused — needs new quote logic'
+
+export {
+  U31_BLACKOUT,
+  U31_NO_FV,
+  U31_NO_SPOT,
+  U31_NO_STRIKE,
+  U31_NO_TAU,
+} from './digitalFvQuote'
 
 export interface DecisionPolicyConfig {
   halfSpreadCents: number
@@ -20,7 +35,7 @@ export interface DecisionPolicyConfig {
   toxicMidLow: number
   toxicMidHigh: number
   minEdgeCents: number
-  /** Pull both sides when minutesRemaining < this (default 0.5). */
+  /** Legacy alias; blackoutMinutes is preferred for U3.1. */
   expiryPullMinutes: number
   fvQuoting: boolean
   sizeDownEdgeMult: number
@@ -38,10 +53,22 @@ export interface DecisionPolicyConfig {
   stuckUnwindTicks: number
   markBleedCents: number
   /**
-   * U3.0: when false (default), never arm bid/ask — awaiting user-defined logic.
-   * Flip later when a replacement quote path exists; do not re-enable S1–S5.
+   * When false, never arm bid/ask (U3.0 pause). Default true once Family E is wired.
    */
   quotingEnabled: boolean
+  /**
+   * U3.1: both sides OFF when minutesRemaining ≤ this (settlement blackout).
+   * Default ~0.75 min.
+   */
+  blackoutMinutes: number
+  /**
+   * U3.1: clamp posted probs to (ε, 1−ε). Default 0.01.
+   */
+  quoteClampEpsilon: number
+  /**
+   * U3.1: skew accel × (hardFlatMinutes / τ). Default 1.
+   */
+  tauSkewAccel: number
 }
 
 export const DEFAULT_DECISION_POLICY: Pick<
@@ -62,6 +89,9 @@ export const DEFAULT_DECISION_POLICY: Pick<
   | 'stuckUnwindTicks'
   | 'markBleedCents'
   | 'quotingEnabled'
+  | 'blackoutMinutes'
+  | 'quoteClampEpsilon'
+  | 'tauSkewAccel'
 > = {
   expiryPullMinutes: 0.5,
   sizeDownEdgeMult: 1.5,
@@ -78,7 +108,10 @@ export const DEFAULT_DECISION_POLICY: Pick<
   minCloseProfitCents: 1.0,
   stuckUnwindTicks: 30,
   markBleedCents: 5,
-  quotingEnabled: false,
+  quotingEnabled: true,
+  blackoutMinutes: 0.75,
+  quoteClampEpsilon: 0.01,
+  tauSkewAccel: 1,
 }
 
 /** Mutable edge-persistence counters carried across quote rebuilds. */
@@ -91,7 +124,7 @@ export function emptyEdgePersistState(): EdgePersistState {
   return { bidTicks: 0, askTicks: 0 }
 }
 
-/** Per-book counter retained for session/journal compat (unused while quoting paused). */
+/** Per-book counter retained for session/journal compat. */
 export interface StuckUnwindState {
   ticks: number
   invSign: number
@@ -101,7 +134,7 @@ export function emptyStuckUnwindState(): StuckUnwindState {
   return { ticks: 0, invSign: 0 }
 }
 
-/** Effective minimum |edge| to *open* (add inventory). Kept for config/UI; unused while paused. */
+/** Effective minimum |edge| to *open* (add inventory). Kept for config/UI compat. */
 export function effectiveOpeningMinEdgeCents(cfg: DecisionPolicyConfig): number {
   const openMin =
     Number.isFinite(cfg.openMinEdgeCents) && cfg.openMinEdgeCents > 0
@@ -132,6 +165,8 @@ export interface DecisionPolicyInput {
   now: number
   config: DecisionPolicyConfig
   feedDownReason?: string | null
+  /** U3.1 fail-loud from engine when spot/strike/τ missing. */
+  fvBlockReason?: string | null
   edgePersist?: EdgePersistState | null
   avgEntry?: number | null
   stuckUnwind?: StuckUnwindState | null
@@ -153,7 +188,7 @@ export interface DecisionPolicyResult {
   unwindActive: boolean
   edgePersist: EdgePersistState
   stuckUnwind: StuckUnwindState
-  /** Optional legacy / journal id — not used to drive quotes (U3.0). */
+  /** Plain Family E tags: open / flatten / blackout — not S1–S5. */
   bidScenario?: string
   askScenario?: string
   activeScenario?: string
@@ -168,6 +203,7 @@ function parkBoth(
     >,
   persist: EdgePersistState = emptyEdgePersistState(),
   stuck: StuckUnwindState = emptyStuckUnwindState(),
+  tag?: FamilyETag,
 ): DecisionPolicyResult {
   return {
     bidActive: false,
@@ -179,9 +215,9 @@ function parkBoth(
     unwindActive: false,
     edgePersist: persist,
     stuckUnwind: stuck,
-    bidScenario: undefined,
-    askScenario: undefined,
-    activeScenario: undefined,
+    bidScenario: tag,
+    askScenario: tag,
+    activeScenario: tag,
     ...partial,
   }
 }
@@ -262,35 +298,67 @@ export function clampQuotesMakerOnly(
 
 /**
  * Decide which sides (if any) to quote.
- * U3.0: always both OFF while quotingEnabled is false (default), or until a
- * replacement quote path is implemented. Does not use S1–S5 scenarios.
+ * U3.1 Family E when quotingEnabled; else U3.0 pause. No S1–S5.
  */
 export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResult {
   const cfg = input.config
   let half = cfg.halfSpreadCents
   if (input.guardWiden) half += cfg.guardWidenCents
 
-  const skewCents = input.inventory * cfg.inventorySkewCentsPerUnit
-  const skew = skewCents / 100
   const size = Math.max(1, Math.floor(cfg.quoteSize))
+  const eps =
+    Number.isFinite(cfg.quoteClampEpsilon) && cfg.quoteClampEpsilon > 0
+      ? cfg.quoteClampEpsilon
+      : 0.01
+  const tauAccel =
+    Number.isFinite(cfg.tauSkewAccel) && cfg.tauSkewAccel >= 0 ? cfg.tauSkewAccel : 1
+  const blackout =
+    Number.isFinite(cfg.blackoutMinutes) && cfg.blackoutMinutes >= 0
+      ? cfg.blackoutMinutes
+      : cfg.expiryPullMinutes
+
+  const persist = emptyEdgePersistState()
+  const stuck = emptyStuckUnwindState()
+
+  const hasFv =
+    cfg.fvQuoting && input.fairValue != null && Number.isFinite(input.fairValue)
+  const mins =
+    input.minutesRemaining != null && Number.isFinite(input.minutesRemaining)
+      ? input.minutesRemaining
+      : null
 
   let yesBid = 0.01
   let yesAsk = 0.99
+  let skewCents = 0
   let centerMode: 'fv' | 'mid' = 'mid'
-  if (isValidQuoteMid(input.mid)) {
-    const center =
-      cfg.fvQuoting && input.fairValue != null && Number.isFinite(input.fairValue)
-        ? input.fairValue
-        : input.mid
-    centerMode =
-      cfg.fvQuoting && input.fairValue != null && Number.isFinite(input.fairValue)
-        ? 'fv'
-        : 'mid'
-    yesBid = clampPx(center - half / 100 - skew)
-    yesAsk = clampPx(center + half / 100 - skew)
-    if (!(yesAsk > yesBid)) {
-      yesAsk = clampPx(yesBid + 0.01)
-    }
+
+  if (hasFv && mins != null) {
+    const priced = familyEQuotePrices({
+      fairValue: input.fairValue!,
+      inventory: input.inventory,
+      minutesRemaining: mins,
+      halfSpreadCents: half,
+      inventorySkewCentsPerUnit: cfg.inventorySkewCentsPerUnit,
+      hardFlatMinutes: cfg.hardFlatMinutes,
+      tauSkewAccel: tauAccel,
+      quoteClampEpsilon: eps,
+      bookBestBid: input.bookBestBid,
+      bookBestAsk: input.bookBestAsk,
+      makerOnly: true,
+      clampQuotesMakerOnly,
+    })
+    yesBid = priced.yesBid
+    yesAsk = priced.yesAsk
+    skewCents = priced.skewCents
+    half = priced.halfSpreadCents
+    centerMode = 'fv'
+  } else if (isValidQuoteMid(input.mid)) {
+    // Display-only mid center when FV unavailable (still parked if quoting on).
+    skewCents = input.inventory * cfg.inventorySkewCentsPerUnit
+    const skew = skewCents / 100
+    yesBid = clampPx(input.mid - half / 100 - skew)
+    yesAsk = clampPx(input.mid + half / 100 - skew)
+    if (!(yesAsk > yesBid)) yesAsk = clampPx(yesBid + 0.01)
     const clamped = clampQuotesMakerOnly(
       yesBid,
       yesAsk,
@@ -299,6 +367,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     )
     yesBid = clamped.bid
     yesAsk = clamped.ask
+    centerMode = 'mid'
   }
 
   const blank = {
@@ -309,9 +378,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     halfSpreadCents: half,
     centerMode,
   }
-
-  const persist = emptyEdgePersistState()
-  const stuck = emptyStuckUnwindState()
 
   if (input.moneyPrinterBug) {
     return parkBoth('money printer freeze', blank, persist, stuck)
@@ -326,11 +392,92 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     return parkBoth(input.feedDownReason, blank, persist, stuck)
   }
 
-  // U3.0 hard pause — no S1–S5 / FV-edge opens even if quotingEnabled flipped early.
   if (!cfg.quotingEnabled) {
-    return parkBoth(QUOTING_PAUSED_REASON, blank, persist, stuck)
+    return parkBoth(QUOTING_PAUSED_REASON, blank, persist, stuck, 'paused')
   }
 
-  // Flag on but no replacement logic yet (do not resurrect scenario playbook).
-  return parkBoth(QUOTING_PAUSED_REASON, blank, persist, stuck)
+  // --- Family E path ---
+  if (input.fvBlockReason) {
+    return parkBoth(input.fvBlockReason, blank, persist, stuck)
+  }
+  if (!hasFv) {
+    return parkBoth(U31_NO_FV, blank, persist, stuck)
+  }
+  if (mins == null) {
+    return parkBoth(U31_NO_TAU, blank, persist, stuck)
+  }
+
+  if (mins <= blackout) {
+    return parkBoth(U31_BLACKOUT, blank, persist, stuck, 'blackout')
+  }
+
+  const arms = familyESideArms({
+    inventory: input.inventory,
+    maxInventory: cfg.maxInventory,
+    minutesRemaining: mins,
+    hardFlatMinutes: cfg.hardFlatMinutes,
+  })
+
+  let bidActive = arms.bidActive
+  let askActive = arms.askActive
+  let bidReason = arms.bidReason
+  let askReason = arms.askReason
+  const unwindActive = arms.unwindActive
+  let tag: FamilyETag = arms.tag
+
+  // Toxic extreme mid overlays (safety; not S-scenarios)
+  const mid = isValidQuoteMid(input.mid) ? input.mid : null
+  if (mid != null && mid < cfg.toxicMidLow && bidActive) {
+    bidActive = false
+    bidReason = `toxic mid < ${(cfg.toxicMidLow * 100).toFixed(0)}¢`
+  }
+  if (mid != null && mid > cfg.toxicMidHigh && askActive) {
+    askActive = false
+    askReason = `toxic mid > ${(cfg.toxicMidHigh * 100).toFixed(0)}¢`
+  }
+
+  if (input.now < input.toxicBidPullUntil && bidActive) {
+    bidActive = false
+    bidReason = 'toxic fill pull'
+  }
+  if (input.now < input.toxicAskPullUntil && askActive) {
+    askActive = false
+    askReason = 'toxic fill pull'
+  }
+
+  // Spot-guard cancel parks opens; flatten reduce may stay (engine may also gate).
+  if (input.spotGuardCancel && !unwindActive) {
+    return parkBoth('spot guard cancel', blank, persist, stuck, tag)
+  }
+  if (input.spotGuardCancel && unwindActive) {
+    if (input.inventory > 0) {
+      bidActive = false
+      bidReason = 'guard: flatten ask only'
+    } else if (input.inventory < 0) {
+      askActive = false
+      askReason = 'guard: flatten bid only'
+    }
+  }
+
+  const active = bidActive || askActive
+  return {
+    bidActive,
+    askActive,
+    bidReason,
+    askReason,
+    bothOffReason: active ? null : `${bidReason} / ${askReason}`,
+    yesBid,
+    yesAsk,
+    size,
+    skewCents,
+    halfSpreadCents: half,
+    centerMode: 'fv',
+    active,
+    unwindActive,
+    edgePersist: persist,
+    stuckUnwind: stuck,
+    bidScenario: bidActive ? tag : undefined,
+    askScenario: askActive ? tag : undefined,
+    activeScenario: tag,
+  }
 }

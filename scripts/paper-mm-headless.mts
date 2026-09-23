@@ -175,7 +175,11 @@ async function runPaperMmLoop(): Promise<void> {
     multiBook: true,
     strictRealism: true,
     fvQuoting: true,
-    quotingEnabled: false, // U3.0 — no paper quotes until new logic
+    quotingEnabled: true, // U3.1 Family E
+    blackoutMinutes: 0.75,
+    hardFlatMinutes: 2,
+    quoteClampEpsilon: 0.01,
+    tauSkewAccel: 1,
   })
 
   const seenFillIds = new Set<string>()
@@ -300,7 +304,7 @@ async function runPaperMmLoop(): Promise<void> {
   if (!portfolio.getState().running) {
     portfolio.start()
   }
-  log('U3.0: paper quoting paused — needs new quote logic (engines observe feed/L2 only)')
+  log('U3.1: Family E digital FV quoting')
   log(
     `running books=${portfolio.getState().books.length} msg=${portfolio.getState().message.slice(0, 120)}`,
   )

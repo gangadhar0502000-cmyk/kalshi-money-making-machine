@@ -77,6 +77,11 @@ export {
 export {
   decideQuoteSides,
   QUOTING_PAUSED_REASON,
+  U31_BLACKOUT,
+  U31_NO_FV,
+  U31_NO_SPOT,
+  U31_NO_STRIKE,
+  U31_NO_TAU,
   canAcceptInventoryIncreasingFill,
   clampQuotesMakerOnly,
   makerCaptureCents,
@@ -90,6 +95,15 @@ export {
   type EdgePersistState,
   type StuckUnwindState,
 } from './decisionPolicy'
+
+export {
+  familyESkewCents,
+  familyEReservation,
+  familyEQuotePrices,
+  familyESideArms,
+  clampProbEps,
+  type FamilyETag,
+} from './digitalFvQuote'
 
 export {
   TickerFillCapStore,

@@ -1,15 +1,18 @@
 /**
- * U3.0 — paper quoting paused; rebuildQuote yields no active bid/ask.
+ * U3.1 — Family E quotes arm when enabled; blackout / no-spot fail-loud.
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import { PaperMmEngine } from './engine'
-import { QUOTING_PAUSED_REASON } from './decisionPolicy'
+import { QUOTING_PAUSED_REASON, U31_BLACKOUT, U31_NO_SPOT } from './decisionPolicy'
 import { STRICT_PAPER_MM_CONFIG } from './config'
 import type { OrderBookSnapshot } from './orderbook'
 
-function mkMarket(ticker = 'KXBTC15M-U30'): Crypto15mMarket {
+function mkMarket(
+  ticker = 'KXBTC15M-U31',
+  mins = 10,
+): Crypto15mMarket {
   return {
     eventTicker: ticker,
     seriesTicker: 'KXBTC15M',
@@ -17,7 +20,7 @@ function mkMarket(ticker = 'KXBTC15M-U30'): Crypto15mMarket {
     title: 'BTC 15m',
     status: 'active',
     openTime: new Date(Date.now() - 5 * 60_000).toISOString(),
-    closeTime: new Date(Date.now() + 10 * 60_000).toISOString(),
+    closeTime: new Date(Date.now() + mins * 60_000).toISOString(),
     yesBid: 0.48,
     yesAsk: 0.52,
     noBid: 0.48,
@@ -34,8 +37,8 @@ function mkMarket(ticker = 'KXBTC15M-U30'): Crypto15mMarket {
     rulesPrimary: '',
     kalshiUrl: '',
     windowMinutes: 15,
-    minutesElapsed: 5,
-    minutesRemaining: 10,
+    minutesElapsed: 15 - mins,
+    minutesRemaining: mins,
     feeEstimate1: 0,
     thinBook: false,
     raw: {} as Crypto15mMarket['raw'],
@@ -56,7 +59,7 @@ function wideBook(ticker: string): OrderBookSnapshot {
   }
 }
 
-describe('U3.0 quoting paused (quotingEnabled false)', () => {
+describe('U3.1 Family E engine', () => {
   let engine: PaperMmEngine
 
   beforeEach(() => {
@@ -67,9 +70,11 @@ describe('U3.0 quoting paused (quotingEnabled false)', () => {
     engine = new PaperMmEngine()
     engine.setConfig({
       ...STRICT_PAPER_MM_CONFIG,
-      quotingEnabled: false,
+      quotingEnabled: true,
       edgePersistTicks: 1,
       useLiveBook: true,
+      blackoutMinutes: 0.75,
+      hardFlatMinutes: 2,
     })
   })
 
@@ -78,7 +83,7 @@ describe('U3.0 quoting paused (quotingEnabled false)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('Start Running → rebuildQuote both sides OFF + U3.0 message', () => {
+  it('Start with spot → quotes can arm (Family E)', () => {
     const market = mkMarket()
     engine.setMarket(market)
     engine.seedSpot(100_100)
@@ -88,12 +93,46 @@ describe('U3.0 quoting paused (quotingEnabled false)', () => {
     const s = engine.getState().snapshot
     expect(s.running).toBe(true)
     expect(s.quote).not.toBeNull()
+    expect(s.fairValue).not.toBeNull()
+    expect(s.quote!.active).toBe(true)
+    expect(s.quote!.bidActive || s.quote!.askActive).toBe(true)
+    expect(s.message).not.toBe(QUOTING_PAUSED_REASON)
+    expect(STRICT_PAPER_MM_CONFIG.quotingEnabled).toBe(true)
+  })
+
+  it('no spot → U3.1 fail-loud, both OFF', () => {
+    const market = mkMarket()
+    engine.setMarket(market)
+    // do not seedSpot
+    engine.start()
+    engine.onBook(wideBook(market.ticker))
+
+    const s = engine.getState().snapshot
     expect(s.quote!.bidActive).toBe(false)
     expect(s.quote!.askActive).toBe(false)
-    expect(s.quote!.active).toBe(false)
-    expect(s.message).toBe(QUOTING_PAUSED_REASON)
-    expect(s.quote!.bidReason).toMatch(/U3\.0.*paused/)
-    // STRICT default is now true (Family E); this test forces false.
-    expect(engine.getState().snapshot.config.quotingEnabled).toBe(false)
+    expect(s.message).toBe(U31_NO_SPOT)
+  })
+
+  it('near expiry blackout → both OFF', () => {
+    const market = mkMarket('KXBTC15M-BO', 0.4)
+    engine.setMarket(market)
+    engine.seedSpot(100_000)
+    engine.start()
+    engine.onBook(wideBook(market.ticker))
+
+    const s = engine.getState().snapshot
+    expect(s.quote!.bidActive).toBe(false)
+    expect(s.quote!.askActive).toBe(false)
+    expect(s.message).toBe(U31_BLACKOUT)
+  })
+
+  it('quotingEnabled false still pauses with U3.0', () => {
+    engine.setConfig({ quotingEnabled: false })
+    const market = mkMarket()
+    engine.setMarket(market)
+    engine.seedSpot(100_100)
+    engine.start()
+    engine.onBook(wideBook(market.ticker))
+    expect(engine.getState().snapshot.message).toBe(QUOTING_PAUSED_REASON)
   })
 })

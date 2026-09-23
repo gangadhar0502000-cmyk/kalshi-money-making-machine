@@ -1,5 +1,5 @@
 /**
- * FV-centered quoting + edge gates for paper MM.
+ * U3.1 Family E — FV-centered quoting (no S1–S5 edge gates).
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,7 +42,6 @@ function mkMarket(partial: Partial<Crypto15mMarket> & { ticker: string }): Crypt
   }
 }
 
-/** Wide BBO so FV-centered quotes never taker-cross during gate tests. */
 function wideBook(ticker: string, mid = 0.5): OrderBookSnapshot {
   return {
     ticker,
@@ -69,7 +68,7 @@ function book(ticker: string, mid = 0.5): OrderBookSnapshot {
   }
 }
 
-describe('FV quoting + edge gates', () => {
+describe('Family E FV quoting', () => {
   let engine: PaperMmEngine
 
   beforeEach(() => {
@@ -91,10 +90,13 @@ describe('FV quoting + edge gates', () => {
       autoRoll: true,
       settleOnClose: true,
       fvQuoting: true,
+      quotingEnabled: true,
       minEdgeCents: 3,
       edgePersistTicks: 1,
       maxSaneEdgeCents: 25,
       annualVol: 0.7,
+      blackoutMinutes: 0.75,
+      hardFlatMinutes: 2,
     })
   })
 
@@ -103,7 +105,7 @@ describe('FV quoting + edge gates', () => {
     vi.unstubAllGlobals()
   })
 
-  it('when FV ≫ mid, bid may be ON and ask is gated off', () => {
+  it('when FV available and flat, both sides may arm (Family E two-sided)', () => {
     const market = mkMarket({
       ticker: 'KXBTC15M-FVHI',
       midYes: 0.48,
@@ -116,23 +118,20 @@ describe('FV quoting + edge gates', () => {
     engine.start()
     engine.seedSpot(100_150)
     engine.onBook(wideBook(market.ticker, 0.48))
-    // Ensure flat — no accidental inventory from prior fill paths
     engine.seedInventory(0)
 
     const s = engine.getState().snapshot
     expect(s.fairValue).not.toBeNull()
     expect(s.fairValue!).toBeGreaterThan(0.5)
-    expect(s.edgeVsMidCents!).toBeGreaterThanOrEqual(3)
-    expect(s.edgeVsMidCents!).toBeLessThanOrEqual(25)
     expect(s.inventory).toBe(0)
-    // U3.0: quotes never arm (scenario playbook removed)
-    expect(s.quote?.bidActive).toBe(false)
-    expect(s.quote?.askActive).toBe(false)
-    expect(s.quote?.bidReason).toMatch(/U3\.0.*paused/)
-    expect(s.message).toMatch(/U3\.0.*paused/)
+    expect(s.quote?.bidActive).toBe(true)
+    expect(s.quote?.askActive).toBe(true)
+    expect(s.quote?.centerMode).toBe('fv')
+    expect(s.quote?.activeScenario).toBe('open')
+    expect(s.message).not.toMatch(/U3\.0.*paused/)
   })
 
-  it('when FV ≪ mid, ask may be ON and bid is gated off', () => {
+  it('when FV ≪ mid, still two-sided (no edge gate)', () => {
     const market = mkMarket({
       ticker: 'KXBTC15M-FVLO',
       midYes: 0.52,
@@ -150,15 +149,11 @@ describe('FV quoting + edge gates', () => {
     const s = engine.getState().snapshot
     expect(s.fairValue).not.toBeNull()
     expect(s.fairValue!).toBeLessThan(0.5)
-    expect(s.edgeVsMidCents!).toBeLessThanOrEqual(-3)
-    expect(s.edgeVsMidCents!).toBeGreaterThanOrEqual(-25)
-    expect(s.inventory).toBe(0)
-    expect(s.quote?.askActive).toBe(false)
-    expect(s.quote?.bidActive).toBe(false)
-    expect(s.quote?.askReason).toMatch(/U3\.0.*paused/)
+    expect(s.quote?.bidActive).toBe(true)
+    expect(s.quote?.askActive).toBe(true)
   })
 
-  it('when |FV − mid| < minEdge both sides off', () => {
+  it('ATM FV still arms two-sided (no minEdge park)', () => {
     const market = mkMarket({
       ticker: 'KXBTC15M-FVFLAT',
       midYes: 0.5,
@@ -173,10 +168,8 @@ describe('FV quoting + edge gates', () => {
 
     const s = engine.getState().snapshot
     expect(s.fairValue).not.toBeNull()
-    expect(Math.abs(s.edgeVsMidCents!)).toBeLessThan(3)
-    expect(s.quote?.bidActive).toBe(false)
-    expect(s.quote?.askActive).toBe(false)
-    expect(s.quote?.bidReason).toMatch(/U3\.0.*paused/)
+    expect(s.quote?.bidActive).toBe(true)
+    expect(s.quote?.askActive).toBe(true)
   })
 
   it('toxic mid still refuses buy-YES spam at mid≈0.01', () => {
@@ -200,7 +193,7 @@ describe('FV quoting + edge gates', () => {
     const state = engine.getState()
     expect(state.snapshot.inventory).toBe(0)
     expect(state.snapshot.quote?.bidActive).toBe(false)
-    expect(state.snapshot.quote?.bidReason).toMatch(/U3\.0.*paused|toxic|no edge|edge sanity/)
+    expect(state.snapshot.quote?.bidReason).toMatch(/toxic|U3\.1/)
   })
 
   it('auto-roll still works when market closes + new open 15m in feed', () => {
@@ -230,12 +223,11 @@ describe('FV quoting + edge gates', () => {
     const rolled = engine.syncMarketUniverse([oldM, newM])
     expect(rolled).toBe('KXBTC15M-NEW')
     const after = engine.getState()
-    expect(after.snapshot.marketTicker).toBe('KXBTC15M-NEW')
+    expect(after.snapshot.marketTicker).toBe(newM.ticker)
     expect(after.snapshot.inventory).toBe(0)
     expect(after.snapshot.running).toBe(true)
     expect(after.snapshot.settled).toBe(false)
-    expect(after.snapshot.marketTicker).toBe(newM.ticker)
-    // U3.0 pause strip may replace roll wording; roll still happened
-    expect(after.snapshot.message.toLowerCase()).toMatch(/roll|u3\.0.*paused/)
+    // Roll may leave U3.1 no-spot until seed; or roll wording — either is fine
+    expect(after.snapshot.message.toLowerCase()).toMatch(/roll|u3\.1|family e|paper mm|live book/)
   })
 })

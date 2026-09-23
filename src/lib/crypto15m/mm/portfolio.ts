@@ -855,7 +855,7 @@ export class PaperMmPortfolio {
     this.message = !this.config.quotingEnabled
       ? QUOTING_PAUSED_REASON
       : (
-          'Multi-book paper MM running. Scans all open crypto 15m by |FV−mid|; ' +
+          'Multi-book paper MM running (Family E). Scans open crypto 15m; ' +
           `up to ${this.config.maxActiveMarkets} books. ` +
           'Read-only · never places trades.'
         )

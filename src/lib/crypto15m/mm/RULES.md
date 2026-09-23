@@ -2,11 +2,21 @@
 
 **PAPER ONLY.** Read-only research sim — never places live Kalshi orders. Green paper P&L ≠ live edge.
 
-## U3.0 — quoting paused
+## U3.1 — Family E quote logic
 
-**Quoting is paused (U3.0).** The S1–S5 scenario playbook (and S4.1 / S4.2 / S5.1 *scenario naming* as the quote decision system) has been **removed**. Engines may still Run for feed / L2 / inventory observability, but **no paper quotes arm** and **no quote-matching fills** until the user defines new quote logic (`quotingEnabled` + replacement path).
+**Family E — Digital FV + inventory skew + hard τ-flatten** (research brief `docs/research/U3_QUOTE_LOGIC_RESEARCH.md` §9 Family E; LAS [0,1] clamp insight).
 
-Config: `quotingEnabled: false` (default). Do not resurrect S1–S5.
+- **FV:** risk-neutral ITM ≈ `N(d₂)` digital/cash-or-nothing from spot `S`, strike `K`, τ, vol `σ` (`annualVol` default **0.70** ≈ 70% annualized crypto prior). Fail-loud without spot/strike/τ: `U3.1: … — needs …`.
+- **Reservation:** `r = FV − skew(q,τ)` with AS-style skew that grows with inventory and as τ→0 (`tauSkewAccel`).
+- **Quotes:** bid/ask around `r` with config half-spread; clamp to `(ε, 1−ε)` (`quoteClampEpsilon` default 0.01); maker-only join when L2 BBO present.
+- **Hard τ:**
+  - **Blackout:** `minutesRemaining ≤ blackoutMinutes` (default **0.75**) → both OFF, `U3.1: settlement blackout`.
+  - **Flatten:** `minutesRemaining ≤ hardFlatMinutes` (default **2**) and `q ≠ 0` → only reducing side ON.
+- **Hard Q:** `|q| ≥ maxInventory` → withdraw the adding side (Guéant-style).
+- **Fills:** U2.13 L2 queue fills only when live book; no soft fills when L2 off.
+- **Tags:** optional `open` / `flatten` / `blackout` — **not** S1–S5.
+
+Config: `quotingEnabled: true` (default for new sessions / v1 Start / headless). Set `false` to restore U3.0 pause strip. Do **not** resurrect S1–S5.
 
 ## Slot ops (not quote scenarios)
 
@@ -17,8 +27,7 @@ Config: `quotingEnabled: false` (default). Do not resurrect S1–S5.
 
 - Per-ticker + portfolio rolling fill caps.
 - Maker-only under strict; `fillMidFallback: false` under strict.
-- Fail-loud strip while paused: `U3.0: paper quoting paused — needs new quote logic`.
 
 ## Journal / digests
 
-Optional `scenarioId` on old journal fills may remain for historical digests — **never** drives quotes.
+Optional `scenarioId` on fills may be plain Family E tags or historical S* digests — **never** drives quotes via S1–S5 gates.

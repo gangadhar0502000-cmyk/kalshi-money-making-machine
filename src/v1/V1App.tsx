@@ -269,9 +269,9 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start runs paper multi-book (observability) · U3.0 quoting paused — no paper quotes until new logic · L2 / drop-refill still on'
+                ? 'Idle · Start runs paper multi-book Family E (digital FV + τ-flatten) · L2 fills when book live · paper-only'
                 : mm.status === 'running'
-                  ? 'Session running · paper quotes · read-only'
+                  ? 'Session running · Family E paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
             </p>
           )}
@@ -349,6 +349,15 @@ export function V1App() {
                             <span className="font-semibold text-[var(--color-label)]">
                               {midCents != null ? `${midCents}¢` : '—'}
                             </span>
+                            {book.fairValue != null && Number.isFinite(book.fairValue) ? (
+                              <>
+                                {' '}
+                                · FV{' '}
+                                <span className="font-semibold text-[var(--color-label)]">
+                                  {Math.round(book.fairValue * 100)}¢
+                                </span>
+                              </>
+                            ) : null}
                           </span>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[var(--color-secondary)]">

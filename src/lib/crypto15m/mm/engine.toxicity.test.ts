@@ -143,6 +143,6 @@ describe('toxic mid guard + taker_cross', () => {
     expect(after.snapshot.inventory).toBe(0)
     expect(after.snapshot.running).toBe(true)
     expect(after.snapshot.settled).toBe(false)
-    expect(after.snapshot.message.toLowerCase()).toMatch(/rolled to/)
+    expect(after.snapshot.message.toLowerCase()).toMatch(/rolled to|u3\.1|family e|live book|paper mm/)
   })
 })

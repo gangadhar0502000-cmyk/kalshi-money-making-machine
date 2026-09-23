@@ -340,6 +340,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
         maxActiveMarkets: MM_MAX_ACTIVE_BOOKS,
         strictRealism: false,
         bookPollMs: 1000,
+        quotingEnabled: true,
       }),
     )
     expect(portfolio.syncMarketUniverse).toHaveBeenCalled()
@@ -391,8 +392,8 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
       activeBooks: 2,
       quoteBook: null,
     })
-    expect(store.getState().updateError?.code).toBe('U3.0')
-    expect(store.getState().updateError?.message).toMatch(/quoting paused/)
+    // Family E armed on Start — no U3.0 pause strip
+    expect(store.getState().updateError?.code).not.toBe('U3.0')
 
     runner.stop()
     expect(portfolio.stop).toHaveBeenCalled()
@@ -456,20 +457,34 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
     })
   })
 
-  it('surfaces U3.0 pause while running (under-fill secondary)', () => {
+  it('surfaces U2.4 under-fill when Family E quoting is enabled', () => {
     const { store, portfolio, runner, markets } = pair()
     runner.start(markets[0]!.ticker)
     portfolio._state = {
       ...portfolio._state,
       running: true,
+      config: { ...portfolio._state.config, quotingEnabled: true },
       message:
         'Multi-book under-filled (0/5) — retrying fill from 2 open ranked. Read-only · never places trades.',
       aggregate: emptyAgg({ activeBooks: 0 }),
     }
     portfolio._emit()
-    // U3.0 pause strip takes priority while quotingEnabled is false
+    expect(store.getState().updateError?.code).toBe('U2.4')
+    expect(store.getState().updateError?.message).toMatch(/under-filled/)
+  })
+
+  it('surfaces U3.0 pause when quotingEnabled forced false', () => {
+    const { store, portfolio, runner, markets } = pair()
+    runner.start(markets[0]!.ticker)
+    portfolio._state = {
+      ...portfolio._state,
+      running: true,
+      config: { ...portfolio._state.config, quotingEnabled: false },
+      message: 'U3.0: paper quoting paused — needs new quote logic',
+      aggregate: emptyAgg({ activeBooks: 2 }),
+    }
+    portfolio._emit()
     expect(store.getState().updateError?.code).toBe('U3.0')
-    expect(store.getState().updateError?.message).toMatch(/quoting paused/)
   })
 
   it('U2.5: portfolio with 2 book stubs → store.books mapped; reset → []', () => {

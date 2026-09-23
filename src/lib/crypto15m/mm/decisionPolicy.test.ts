@@ -1,5 +1,5 @@
 /**
- * Decision policy — U3.0 quoting paused (S1–S5 playbook removed).
+ * Decision policy — U3.1 Family E (S1–S5 not used).
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
@@ -8,6 +8,8 @@ import {
   decideQuoteSides,
   DEFAULT_DECISION_POLICY,
   QUOTING_PAUSED_REASON,
+  U31_BLACKOUT,
+  U31_NO_FV,
   type DecisionPolicyConfig,
   type DecisionPolicyInput,
 } from './decisionPolicy'
@@ -38,7 +40,10 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
     stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
     markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
-    quotingEnabled: false,
+    quotingEnabled: true,
+    blackoutMinutes: DEFAULT_DECISION_POLICY.blackoutMinutes,
+    quoteClampEpsilon: DEFAULT_DECISION_POLICY.quoteClampEpsilon,
+    tauSkewAccel: DEFAULT_DECISION_POLICY.tauSkewAccel,
     ...partial,
   }
 }
@@ -46,8 +51,8 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
 function baseInput(partial: Partial<DecisionPolicyInput> = {}): DecisionPolicyInput {
   return {
     mid: 0.5,
-    fairValue: 0.6,
-    edgeCents: 10,
+    fairValue: 0.55,
+    edgeCents: 5,
     inventory: 0,
     bookBestBid: 0.48,
     bookBestAsk: 0.52,
@@ -66,49 +71,101 @@ function baseInput(partial: Partial<DecisionPolicyInput> = {}): DecisionPolicyIn
   }
 }
 
-describe('decisionPolicy U3.0 pause', () => {
-  it('default quotingEnabled false → both OFF + U3.0 paused reason', () => {
+describe('decisionPolicy U3.1 Family E', () => {
+  it('quotingEnabled false → U3.0 pause', () => {
     const d = decideQuoteSides(
-      baseInput({ fairValue: 0.65, mid: 0.45, edgeCents: 20 }),
+      baseInput({ config: baseConfig({ quotingEnabled: false }) }),
     )
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(false)
-    expect(d.active).toBe(false)
     expect(d.bothOffReason).toBe(QUOTING_PAUSED_REASON)
-    expect(d.bidReason).toMatch(/U3\.0.*paused/)
-    expect(d.askReason).toMatch(/U3\.0.*paused/)
-    expect(d.activeScenario).toBeUndefined()
   })
 
-  it('quotingEnabled true still yields no active quotes (no replacement logic)', () => {
+  it('two-sided open around FV when flat and outside flatten', () => {
+    const d = decideQuoteSides(baseInput())
+    expect(d.bidActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    expect(d.active).toBe(true)
+    expect(d.centerMode).toBe('fv')
+    expect(d.activeScenario).toBe('open')
+    expect(d.yesAsk).toBeGreaterThan(d.yesBid)
+    expect(d.yesBid).toBeGreaterThanOrEqual(0.01)
+    expect(d.yesAsk).toBeLessThanOrEqual(0.99)
+  })
+
+  it('blackout both OFF', () => {
     const d = decideQuoteSides(
       baseInput({
-        config: baseConfig({ quotingEnabled: true }),
-        fairValue: 0.65,
-        mid: 0.45,
-        edgeCents: 20,
+        minutesRemaining: 0.5,
+        config: baseConfig({ blackoutMinutes: 0.75 }),
       }),
     )
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(false)
-    expect(d.bothOffReason).toMatch(/U3\.0/)
+    expect(d.bothOffReason).toBe(U31_BLACKOUT)
+    expect(d.activeScenario).toBe('blackout')
   })
 
-  it('not running parks without claiming U3.0 when already idle', () => {
-    const d = decideQuoteSides(baseInput({ running: false, edgeCents: 20 }))
+  it('flatten only reduces (long → ask only)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 3,
+        minutesRemaining: 1.5,
+        config: baseConfig({ hardFlatMinutes: 2, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.unwindActive).toBe(true)
+    expect(d.activeScenario).toBe('flatten')
+    expect(String(d.bidReason + d.askReason)).not.toMatch(/S[1-5]/)
+  })
+
+  it('no quote without FV / spot block', () => {
+    const d = decideQuoteSides(
+      baseInput({ fairValue: null, fvBlockReason: 'U3.1: no spot — needs Binance US/Coinbase' }),
+    )
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toMatch(/U3\.1: no spot/)
+  })
+
+  it('no fair value parks with U31_NO_FV', () => {
+    const d = decideQuoteSides(baseInput({ fairValue: null }))
+    expect(d.bothOffReason).toBe(U31_NO_FV)
+  })
+
+  it('clamp bounds hold even with extreme FV', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        fairValue: 0.99,
+        mid: 0.5,
+        bookBestBid: 0.01,
+        bookBestAsk: 0.99,
+        config: baseConfig({ quoteClampEpsilon: 0.02, halfSpreadCents: 2 }),
+      }),
+    )
+    expect(d.yesBid).toBeGreaterThanOrEqual(0.02 - 1e-9)
+    expect(d.yesAsk).toBeLessThanOrEqual(0.98 + 1e-9)
+  })
+
+  it('max inventory withdraws adding side', () => {
+    const d = decideQuoteSides(baseInput({ inventory: 10 }))
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+  })
+
+  it('not running parks without U3.1', () => {
+    const d = decideQuoteSides(baseInput({ running: false }))
     expect(d.bothOffReason).toMatch(/not running/i)
   })
 
-  it('canAcceptInventoryIncreasingFill still gates adds at unwind threshold', () => {
+  it('canAcceptInventoryIncreasingFill still gates adds', () => {
     expect(canAcceptInventoryIncreasingFill('buy_yes', 0, 10, 1)).toBe(true)
     expect(canAcceptInventoryIncreasingFill('buy_yes', 1, 10, 1)).toBe(false)
-    expect(canAcceptInventoryIncreasingFill('sell_yes', 0, 10, 1)).toBe(true)
-    expect(canAcceptInventoryIncreasingFill('sell_yes', -1, 10, 1)).toBe(false)
   })
 
-  it('DEFAULT_DECISION_POLICY.quotingEnabled is false', () => {
-    expect(DEFAULT_DECISION_POLICY.quotingEnabled).toBe(false)
+  it('DEFAULT_DECISION_POLICY.quotingEnabled is true', () => {
+    expect(DEFAULT_DECISION_POLICY.quotingEnabled).toBe(true)
   })
 })

@@ -194,10 +194,19 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Cancelled:** prior **U3.1 scenario-observability** plan (and prior U3 “feed + engine observability” as next after U2.14) — awaiting user-defined quote logic before any re-arm.
 - Paper-only · read-only · never places live orders.
 
+## U3.1 — Family E digital FV quotes with τ-flatten
+
+- **Chosen quote family** (research brief `docs/research/U3_QUOTE_LOGIC_RESEARCH.md` §9): **Family E** — digital `N(d₂)` FV + inventory skew + hard τ-flatten; [0,1] clamp (LAS insight). **No S1–S5** playbook.
+- **`quotingEnabled: true`** default for new sessions; v1 Start / headless / legacy panel Start arm Family E (old paused saves enable on Start).
+- Knobs: `annualVol` 0.70, `blackoutMinutes` 0.75, `hardFlatMinutes` 2, `quoteClampEpsilon` 0.01, `tauSkewAccel` 1, `inventorySkewCentsPerUnit` 0.15, `halfSpreadCents` 2, `maxInventory` 10.
+- Fail-loud: `U3.1: no spot — needs Binance US/Coinbase` / strike / τ / `settlement blackout` (v1 `updateError` code `U3.1`).
+- Fills: L2 queue only when live book (U2.13); paper-only.
+- UI: quiet FV ¢ on strip/book row; remove U3.0 “paused / S*” copy when E is on.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.
-- **U3.x** — user-defined quote logic (then optionally flip `quotingEnabled`); not S1–S5 resurrection.
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
 

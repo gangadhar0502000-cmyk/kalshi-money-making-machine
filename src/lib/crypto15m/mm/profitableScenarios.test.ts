@@ -116,3 +116,30 @@ describe('legacy evaluateClose (journal-only helper)', () => {
     expect(allow.allow).toBe(true)
   })
 })
+
+
+describe('U3.1 Family E — no S1–S5 stamps', () => {
+  it('open path uses plain tags only', () => {
+    const d = decideQuoteSides({
+      mid: 0.45,
+      fairValue: 0.55,
+      edgeCents: 10,
+      inventory: 0,
+      bookBestBid: 0.44,
+      bookBestAsk: 0.46,
+      minutesRemaining: 10,
+      running: true,
+      settled: false,
+      moneyPrinterBug: false,
+      spotGuardCancel: false,
+      guardWiden: false,
+      toxicBidPullUntil: 0,
+      toxicAskPullUntil: 0,
+      now: 1,
+      config: { ...baseConfig(), quotingEnabled: true },
+    })
+    expect(d.active).toBe(true)
+    expect(String(d.activeScenario ?? '')).not.toMatch(/^S[1-5]/)
+    expect(String(d.bidReason + d.askReason)).not.toMatch(/S1 OPEN|S2 OPEN|S3 CLOSE|S4|S5/)
+  })
+})

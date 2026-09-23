@@ -33,6 +33,9 @@ import {
   canAcceptInventoryIncreasingFill,
   decideQuoteSides,
   QUOTING_PAUSED_REASON,
+  U31_NO_SPOT,
+  U31_NO_STRIKE,
+  U31_NO_TAU,
   DEFAULT_DECISION_POLICY,
   emptyEdgePersistState,
   emptyStuckUnwindState,
@@ -523,8 +526,8 @@ export class PaperMmEngine {
     this.message = !this.config.quotingEnabled
       ? QUOTING_PAUSED_REASON
       : this.config.strictRealism
-        ? 'Paper MM running (strict realism). Read-only API · never places trades.'
-        : 'Paper MM running (LOOSE debug). Fills are soft — not live edge.'
+        ? 'Paper MM running (strict realism · Family E). Read-only API · never places trades.'
+        : 'Paper MM running (LOOSE · Family E). Fills soft — not live edge.'
     this.rebuildQuote(true)
     this.armTimers()
     void this.pollSpot()
@@ -770,7 +773,10 @@ export class PaperMmEngine {
     this.lastMid = mid
     if (!this.config.quotingEnabled) {
       this.message = QUOTING_PAUSED_REASON
-    } else {
+    } else if (
+      !/U2\.14:\s*L2 off — holding inv/i.test(this.message) &&
+      !/^U3\.1:/.test(this.message)
+    ) {
       this.message = this.liveBookAuthenticated
         ? 'LIVE BOOK (read-only) · never places trades'
         : 'LIVE BOOK via public/proxy · Read-only API · never places trades'
@@ -1005,13 +1011,14 @@ export class PaperMmEngine {
     const strike = resolved.strike
     let fair: number | null = null
     let edgeCents: number | null = null
-    if (
-      spot != null &&
-      strike != null &&
-      Number.isFinite(spot) &&
-      Number.isFinite(strike) &&
-      mins != null
-    ) {
+    let fvBlockReason: string | null = null
+    if (spot == null || !Number.isFinite(spot) || !(spot > 0)) {
+      fvBlockReason = U31_NO_SPOT
+    } else if (strike == null || !Number.isFinite(strike) || !(strike > 0)) {
+      fvBlockReason = U31_NO_STRIKE
+    } else if (mins == null || !Number.isFinite(mins)) {
+      fvBlockReason = U31_NO_TAU
+    } else {
       const est = estimateYesFairValue({
         spot,
         strike,
@@ -1023,6 +1030,8 @@ export class PaperMmEngine {
         if (isValidQuoteMid(mid)) {
           edgeCents = edgeVsMidCents(est.fairProb, mid)
         }
+      } else {
+        fvBlockReason = U31_NO_SPOT
       }
     }
     this.lastFairValue = fair
@@ -1060,6 +1069,9 @@ export class PaperMmEngine {
       stuckUnwindTicks: this.config.stuckUnwindTicks ?? 30,
       markBleedCents: this.config.markBleedCents ?? 5,
       quotingEnabled: this.config.quotingEnabled === true,
+      blackoutMinutes: this.config.blackoutMinutes ?? DEFAULT_DECISION_POLICY.blackoutMinutes,
+      quoteClampEpsilon: this.config.quoteClampEpsilon ?? DEFAULT_DECISION_POLICY.quoteClampEpsilon,
+      tauSkewAccel: this.config.tauSkewAccel ?? DEFAULT_DECISION_POLICY.tauSkewAccel,
     }
 
     const decision = decideQuoteSides({
@@ -1079,6 +1091,7 @@ export class PaperMmEngine {
       toxicAskPullUntil: this.toxicAskPullUntil,
       now,
       config: policyCfg,
+      fvBlockReason,
       edgePersist: this.edgePersistState,
       avgEntry: this.avgEntry,
       stuckUnwind: this.stuckUnwindState,
@@ -1110,13 +1123,25 @@ export class PaperMmEngine {
       activeScenario: decision.activeScenario,
     }
 
-    // U3.0: keep pause strip visible while running (do not erase U2.14 hold advisories).
-    if (
-      this.running &&
-      !this.config.quotingEnabled &&
-      !/U2\.14:\s*L2 off — holding inv/i.test(this.message)
-    ) {
-      this.message = QUOTING_PAUSED_REASON
+    // U3.0 pause / U3.1 fail-loud or blackout on strip (do not erase U2.14 hold advisories).
+    const holdL2 = /U2\.14:\s*L2 off — holding inv/i.test(this.message)
+    if (this.running && !holdL2) {
+      if (!this.config.quotingEnabled) {
+        this.message = QUOTING_PAUSED_REASON
+      } else if (
+        decision.bothOffReason &&
+        /^U3\.1:/.test(decision.bothOffReason)
+      ) {
+        this.message = decision.bothOffReason
+      } else if (
+        decision.active &&
+        /^U3\.1:/.test(this.message)
+      ) {
+        // Clear prior U3.1 park once quotes arm again.
+        this.message = this.config.strictRealism
+          ? 'Paper MM running (strict realism · Family E). Read-only API · never places trades.'
+          : 'Paper MM running (LOOSE · Family E). Fills soft — not live edge.'
+      }
     }
 
     this.lastQuoteAt = now

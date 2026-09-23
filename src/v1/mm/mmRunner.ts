@@ -2,7 +2,7 @@
  * U2.4 / U2.5 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
  * Default Start → multi-book + strictRealism: false (LOOSE presets).
  * U2.5: map portfolio books → MmBookRow[] for Active books panel.
- * Reuses existing PaperMmPortfolio / engines as-is — U3.0 quoting paused — no S* scenario playbook.
+ * Reuses existing PaperMmPortfolio / engines — U3.1 Family E digital FV quotes — no S* playbook.
  * U2.2/U2.3 helpers remain for residual single-engine / error mapping.
  * Paper-only · never places live orders.
  */
@@ -72,6 +72,18 @@ export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
       'user-defined quote logic (quotingEnabled)',
       'U3.0',
     )
+  }
+  if (/U3\.1:\s*settlement blackout/i.test(msg)) {
+    return makeUpdateError('settlement blackout', 'minutesRemaining > blackoutMinutes', 'U3.1')
+  }
+  if (/U3\.1:\s*no spot/i.test(msg)) {
+    return makeUpdateError('no spot', 'Binance US/Coinbase', 'U3.1')
+  }
+  if (/U3\.1:\s*no strike/i.test(msg)) {
+    return makeUpdateError('no strike', 'floor_strike', 'U3.1')
+  }
+  if (/U3\.1:\s*no τ|U3\.1:\s*no fair value/i.test(msg)) {
+    return makeUpdateError('no fair value', 'spot + strike + closeTime', 'U3.1')
   }
   if (/U2\.14:.*holding inv/i.test(msg)) {
     return makeUpdateError('L2 off — holding inv until flat', 'mm-proxy :8787', 'U2.14')
@@ -189,6 +201,8 @@ function booksFromPortfolio(state: PortfolioState): MmBookRow[] {
       midYes: b.snapshot.midYes ?? 0,
       message: b.snapshot.message ?? '',
       quoteBook: side,
+      fairValue: b.snapshot.fairValue ?? null,
+      skewCents: b.snapshot.quote?.skewCents ?? null,
     })
   }
   return rows
@@ -347,6 +361,13 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           useLiveBook: true,
           // U2.10: slightly slower L2 polls under multi so coalesce flush + feed share connections
           bookPollMs: 1000,
+          // U3.1 Family E — arm quoting on Start (migrates old paused sessions)
+          quotingEnabled: true,
+          fvQuoting: true,
+          blackoutMinutes: 0.75,
+          hardFlatMinutes: 2,
+          quoteClampEpsilon: 0.01,
+          tauSkewAccel: 1,
         })
         portfolio.syncMarketUniverse(markets)
         portfolio.start()

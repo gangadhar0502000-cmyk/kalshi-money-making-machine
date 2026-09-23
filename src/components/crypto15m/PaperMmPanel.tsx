@@ -334,7 +334,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
         <div className="rounded-xl border border-amber-500/60 bg-amber-950/40 px-4 py-3 text-sm font-medium text-amber-100">
           ⚠ Fills rising but flat P&amp;L — likely round-trip churn at ~avgEntry (last 15m realized
           delta {formatDollars(realizedDelta15m)}, avg {avgCaptureCents15m.toFixed(2)}¢/fill). Churn
-          filter is idle while quoting is paused (U3.0).
+          filter idle under Family E flatten/blackout when applicable.
         </div>
       )}
 
@@ -344,7 +344,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
           Rules · paper MM playbook
         </p>
         <p className="mt-1 text-slate-400">
-          <span className="font-mono text-amber-200">U3.0: paper quoting paused</span> — S1–S5 scenario playbook removed; awaiting new quote logic. Feed / L2 / inventory still run.
+          <span className="font-mono text-sky-200">U3.1 Family E</span> — digital FV (N(d₂)) + inventory skew + τ-flatten / blackout. No S1–S5. Paper-only · L2 fills when live book.
         </p>
       </div>
 
@@ -547,8 +547,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
               }}
             />
             <span>
-              <strong>FV quoting</strong> (default ON) — center on spot/strike fair value + edge
-              gate (vs mid-centered)
+              <strong>FV quoting</strong> (default ON) — Family E centers on digital N(d₂) fair value
             </span>
           </label>
         </div>
@@ -579,11 +578,22 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
+                  const startCfg = {
+                    ...draft,
+                    quotingEnabled: true,
+                    fvQuoting: true,
+                    blackoutMinutes: draft.blackoutMinutes ?? 0.75,
+                    hardFlatMinutes: draft.hardFlatMinutes ?? 2,
+                    quoteClampEpsilon: draft.quoteClampEpsilon ?? 0.01,
+                    tauSkewAccel: draft.tauSkewAccel ?? 1,
+                  }
+                  setDraft(startCfg)
                   if (multiBook) {
-                    paperMmPortfolio.setConfig(draft)
+                    paperMmPortfolio.setConfig(startCfg)
                     paperMmPortfolio.syncMarketUniverse(mmMarkets)
                     paperMmPortfolio.start()
                   } else {
+                    paperMmEngine.setConfig(startCfg)
                     paperMmEngine.start()
                   }
                 }}
@@ -921,8 +931,20 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                         {formatCents(snap.quote.yesAsk)}
                         {snap.quote.askActive ? '' : ' OFF'} · {snap.quote.centerMode}
                         <br />
-                        <span className="text-amber-200/90">
-                          Quote status: paused (U3.0) — S1–S5 removed
+                        <span className="text-sky-200/90">
+                          {snap.quote.active
+                            ? `Family E · ${snap.quote.activeScenario ?? 'open'}${
+                                snap.fairValue != null
+                                  ? ` · FV ${(snap.fairValue * 100).toFixed(0)}¢`
+                                  : ''
+                              }${
+                                Number.isFinite(snap.quote.skewCents)
+                                  ? ` · skew ${snap.quote.skewCents >= 0 ? '+' : ''}${snap.quote.skewCents.toFixed(2)}¢`
+                                  : ''
+                              }`
+                            : snap.message?.startsWith('U3.1:')
+                              ? snap.message
+                              : `Family E parked · ${snap.quote.bidReason}`}
                         </span>
                         <br />
                         <span className="text-violet-200/80">
