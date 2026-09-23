@@ -169,7 +169,7 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
   - **Open inventory** → do **not** invent flatten prices; hold with `U2.14: L2 off — holding inv until flat` on the row/strip.
 - Extends existing SLOT_EVICT / `syncMarketUniverse` path — no parallel eviction system.
 - Active books idle help mentions drop+refill when L2 stays off; quiet `L2 hold` chip when holding inv.
-- **U2 complete** with this slice. **U3 next** — feed + engine observability (richer health, divergence alarms). Fill observability strip deferred to U3.
+- **U2 complete** with this slice. **U3.0** (landed) removes S1–S5 playbook and pauses quoting — see below.
 - Paper-only · read-only · never places live orders.
 
 
@@ -182,10 +182,22 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **E)** Browser L2 path remains **GET** `/local-api/orderbooks?tickers=…` (batch coalesce in `liveBook.ts`) — no POST regression.
 - Paper-only · read-only · never places live orders.
 
+## U3.0 — remove S1–S5 scenarios; pause paper quoting
+
+- **Hard decision:** S1–S5 (and S4.1 / S4.2 / S5.1 *scenario naming/playbook*) removed as the quote decision system. Do **not** build on the old scenario path (`64a255a`+).
+- **`quotingEnabled: false`** (default) — Start may enter Running for feed / L2 / books / cash observability, but **quotes never arm** (both sides OFF); no soft or L2 fills from quote matching.
+- Fail-loud strip: `U3.0: paper quoting paused — needs new quote logic` (v1 `updateError` code `U3.0`).
+- `decisionPolicy.decideQuoteSides` no longer opens/closes via S scenarios; `RULES.md` replaced with short pause note.
+- Slot ops kept: sanity **SLOT_EVICT** + **U2.14 L2_OFF_EVICT** (user-facing strings renamed away from S5.x). Engine/portfolio/L2/feed/U2.14 stack kept.
+- Journal optional `scenarioId` retained for old digests only — does not drive quotes.
+- Headless runner: same pause (`quotingEnabled: false`) + log line U3.0 paused.
+- **Cancelled:** prior **U3.1 scenario-observability** plan (and prior U3 “feed + engine observability” as next after U2.14) — awaiting user-defined quote logic before any re-arm.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.
-- **U3** — feed + engine observability (richer health, divergence alarms). **U2 complete as of U2.14 / U2.14.1.**
+- **U3.x** — user-defined quote logic (then optionally flip `quotingEnabled`); not S1–S5 resurrection.
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
 

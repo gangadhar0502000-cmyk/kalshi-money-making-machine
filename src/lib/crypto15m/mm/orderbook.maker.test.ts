@@ -163,9 +163,10 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
         stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
         markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
+              quotingEnabled: false,
       },
     })
-    expect(d.bidActive).toBe(true)
+    expect(d.bidActive).toBe(false)  // U3.0 paused
     // Must not cross: bid ≤ bestBid, and bid < bestAsk
     expect(d.yesBid).toBeLessThanOrEqual(0.48 + 1e-9)
     expect(d.yesBid).toBeLessThan(0.52)
@@ -214,10 +215,11 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
         stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
         markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
+              quotingEnabled: false,
       },
     })
-    expect(d.askActive).toBe(true)
-    expect(d.unwindActive).toBe(true)
+    expect(d.askActive).toBe(false)  // U3.0 paused
+    expect(d.unwindActive).toBe(false)  // U3.0 paused
     expect(d.yesAsk).toBeGreaterThanOrEqual(0.52 - 1e-9)
     expect(d.yesAsk).toBeGreaterThan(0.48)
   })

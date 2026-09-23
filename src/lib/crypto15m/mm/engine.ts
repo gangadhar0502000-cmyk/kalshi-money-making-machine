@@ -32,6 +32,7 @@ import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue
 import {
   canAcceptInventoryIncreasingFill,
   decideQuoteSides,
+  QUOTING_PAUSED_REASON,
   DEFAULT_DECISION_POLICY,
   emptyEdgePersistState,
   emptyStuckUnwindState,
@@ -519,9 +520,11 @@ export class PaperMmEngine {
     this.lastFillAt = 0
     // Keep fillCapStore — caps must survive start/rebuild/sync.
     this.midWalkState = { ...DEFAULT_DETECT_STATE }
-    this.message = this.config.strictRealism
-      ? 'Paper MM running (strict realism). Read-only API · never places trades.'
-      : 'Paper MM running (LOOSE debug). Fills are soft — not live edge.'
+    this.message = !this.config.quotingEnabled
+      ? QUOTING_PAUSED_REASON
+      : this.config.strictRealism
+        ? 'Paper MM running (strict realism). Read-only API · never places trades.'
+        : 'Paper MM running (LOOSE debug). Fills are soft — not live edge.'
     this.rebuildQuote(true)
     this.armTimers()
     void this.pollSpot()
@@ -765,9 +768,13 @@ export class PaperMmEngine {
 
     this.prevBook = book
     this.lastMid = mid
-    this.message = this.liveBookAuthenticated
-      ? 'LIVE BOOK (read-only) · never places trades'
-      : 'LIVE BOOK via public/proxy · Read-only API · never places trades'
+    if (!this.config.quotingEnabled) {
+      this.message = QUOTING_PAUSED_REASON
+    } else {
+      this.message = this.liveBookAuthenticated
+        ? 'LIVE BOOK (read-only) · never places trades'
+        : 'LIVE BOOK via public/proxy · Read-only API · never places trades'
+    }
     this.emit()
   }
 
@@ -1052,6 +1059,7 @@ export class PaperMmEngine {
       minCloseProfitCents: this.config.minCloseProfitCents,
       stuckUnwindTicks: this.config.stuckUnwindTicks ?? 30,
       markBleedCents: this.config.markBleedCents ?? 5,
+      quotingEnabled: this.config.quotingEnabled === true,
     }
 
     const decision = decideQuoteSides({
@@ -1100,6 +1108,15 @@ export class PaperMmEngine {
       bidScenario: decision.bidScenario,
       askScenario: decision.askScenario,
       activeScenario: decision.activeScenario,
+    }
+
+    // U3.0: keep pause strip visible while running (do not erase U2.14 hold advisories).
+    if (
+      this.running &&
+      !this.config.quotingEnabled &&
+      !/U2\.14:\s*L2 off — holding inv/i.test(this.message)
+    ) {
+      this.message = QUOTING_PAUSED_REASON
     }
 
     this.lastQuoteAt = now

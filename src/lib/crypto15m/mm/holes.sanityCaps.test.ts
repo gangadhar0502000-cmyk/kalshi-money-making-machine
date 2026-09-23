@@ -106,11 +106,12 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
         stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
         markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
+              quotingEnabled: false,
       },
     })
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(false)
-    expect(d.bothOffReason).toMatch(/edge sanity/i)
+    expect(d.bothOffReason).toMatch(/U3\.0.*paused|edge sanity/i)
     expect(d.centerMode).toBe('fv')
   })
 

@@ -224,13 +224,13 @@ export interface PickActiveOptions {
    */
   fillMidFallback?: boolean
   /**
-   * S5.1 SLOT_EVICT: inventory by ticker. Sanity-parked + flat (inv==0 / missing)
+   * SLOT_EVICT: inventory by ticker. Sanity-parked + flat (inv==0 / missing)
    * books are NOT sticky and NOT newly selected — frees the slot for the next
    * |FV−mid| candidate. Non-zero inventory sanity books stay (need unwind).
    */
   inventoryByTicker?: Readonly<Record<string, number>>
   /**
-   * When true (default), apply S5.1 eviction of sanity+flat books.
+   * When true (default), apply sanity+flat slot eviction of sanity+flat books.
    * Set false only for legacy tests that expect sanity to occupy a slot.
    */
   evictSanityFlat?: boolean
@@ -241,7 +241,7 @@ export interface PickActiveOptions {
   excludeTickers?: readonly string[]
 }
 
-/** True when S5.1 should drop this ranked row from the active set. */
+/** True when SLOT_EVICT should drop this ranked row from the active set. */
 export function shouldEvictSanityFlat(
   r: RankedMarket,
   inventoryByTicker?: Readonly<Record<string, number>>,
@@ -257,7 +257,7 @@ export function shouldEvictSanityFlat(
  * then mid-fallback fills so target is min(open, maxActive) whenever possible.
  * Cap is hard — never returns more than maxActive.
  *
- * S5.1 SLOT_EVICT: sanity-parked books with flat inventory are evicted (not sticky,
+ * SLOT_EVICT: sanity-parked books with flat inventory are evicted (not sticky,
  * not newly selected) so a quote-eligible candidate can take the slot.
  */
 export function pickActiveMarkets(
@@ -291,13 +291,13 @@ export function pickActiveMarkets(
     if (usedTickers.has(r.ticker)) return false
     if (exclude.has(r.ticker)) return false
     if (onePerAsset && usedAssets.has(r.asset)) return false
-    // S5.1: never keep / select sanity+flat (slot eviction)
+    // SLOT_EVICT: never keep / select sanity+flat (slot eviction)
     if (evictSanityFlat && shouldEvictSanityFlat(r, invMap)) {
       return false
     }
     if (mode === 'edge' && requireEdge) {
       // Quote-eligible only for *new* edge slots. Sanity+nonflat may still be
-      // sticky (handled above); sanity+flat already rejected by S5.1.
+      // sticky (handled above); sanity+flat already rejected by SLOT_EVICT.
       if (!r.quoteEligible) return false
     }
     if (mode === 'mid_fallback') {
@@ -311,7 +311,7 @@ export function pickActiveMarkets(
   }
 
   // Sticky: keep currently active tickers that are still in the open ranked set
-  // (S5.1 drops sanity+flat; sanity+inventory kept for unwind).
+  // (SLOT_EVICT drops sanity+flat; sanity+inventory kept for unwind).
   for (const t of sticky) {
     const r = byTicker.get(t)
     if (r) tryAdd(r, 'sticky')

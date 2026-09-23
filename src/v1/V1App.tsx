@@ -269,7 +269,7 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start runs paper multi-book loose (up to 5) · L2 queue fills on better YES/NO book · drops & refills when L2 stays off'
+                ? 'Idle · Start runs paper multi-book (observability) · U3.0 quoting paused — no paper quotes until new logic · L2 / drop-refill still on'
                 : mm.status === 'running'
                   ? 'Session running · paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
@@ -432,7 +432,7 @@ export function V1App() {
               <span>Open markets</span>
               {mm.status !== 'idle' && mm.books.length > 0 && (
                 <span className="num font-normal text-[var(--color-tertiary)]">
-                  {mm.books.length} quoting
+                  {mm.books.length} books
                 </span>
               )}
             </p>

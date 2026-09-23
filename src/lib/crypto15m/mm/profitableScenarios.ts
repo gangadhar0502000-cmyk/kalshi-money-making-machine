@@ -1,16 +1,8 @@
 /**
- * Named profitable scenarios — the ONLY paths allowed to open/close paper quotes.
- * Paper research only; never places live orders; positive P&L not guaranteed.
- *
- * S1 OPEN_BID  — buy cheap YES (FV ≫ mid, maker capture OK)
- * S2 OPEN_ASK  — sell rich YES (mid ≫ FV, maker capture OK)
- * S3 CLOSE_PROFIT — reduce inventory only with ≥ minCloseProfitCents vs avgEntry
- * S4 CLOSE_RISK — forced flatten without profit (hard flat / max inv / guard / toxic)
- * S4.1 STUCK_UNWIND — after N blocked S3 reduces, allow reduce at ≥ 0¢ (break-even), never loss
- * S4.2 MARK_BLEED — after same stuck ticks, allow reduce when capture ≤ −markBleedCents (lossy OK);
- *                  escalation LATCHES until flat/flip so scarce maker can rest (not one-tick)
- * S5 NO_TRADE — default; both sides OFF
- * S5.1 SLOT_EVICT — portfolio: evict sanity-parked flat books from active slots
+ * Legacy scenario helpers (U3.0).
+ * Optional journal/digest attribution only — does NOT drive paper quotes.
+ * Quote decision path removed; see decisionPolicy.ts (quoting paused).
+ * Paper research only; never places live orders.
  */
 
 export type ScenarioId = 'S1' | 'S2' | 'S3' | 'S4' | 'S4.1' | 'S4.2' | 'S5' | 'S5.1'

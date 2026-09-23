@@ -18,6 +18,7 @@ import {
   presetsForMode,
   type PaperMmConfig,
 } from './config'
+import { QUOTING_PAUSED_REASON } from './decisionPolicy'
 import { PaperMmEngine } from './engine'
 import {
   pickActiveMarkets,
@@ -566,7 +567,7 @@ export class PaperMmPortfolio {
       )
     }
 
-    // U2.14: drop flat L2-off books past threshold (S5.1-style); hold open inv.
+    // U2.14: drop flat L2-off books past threshold (slot evict); hold open inv.
     const l2Dropped = this.maybeEvictL2Off()
 
     // 2) Fill free slots / reshuffle only with a valid non-empty ranked set
@@ -609,7 +610,7 @@ export class PaperMmPortfolio {
 
   /**
    * U2.14 / U2.14.1 — after l2OffDropTicks consecutive syncs with useLiveBook && !liveBook:
-   * flat inventory → drop slot (S5.1 SLOT_EVICT pattern) and let rebalanceSlots
+   * flat inventory → drop slot (SLOT_EVICT / L2_OFF_EVICT) and let rebalanceSlots
    * refill from ranked open set (when ranked set exists). Open inventory → hold with
    * fail-loud row status (never invent flatten prices without L2).
    * Called on the main sync path and on the empty/unranked early-return path (U2.14.1).
@@ -772,13 +773,13 @@ export class PaperMmPortfolio {
       const t = eng?.getState().snapshot.marketTicker
       const row = t ? scanByTicker.get(t) : undefined
       const inv = t ? inventoryByTicker[t] ?? 0 : 0
-      const s51 =
+      const evictNote =
         row?.sanityPark && inv === 0
-          ? `S5.1 SLOT_EVICT sanity+flat; `
+          ? `SLOT_EVICT sanity+flat; `
           : ''
       this.removeBook(
         slotId,
-        `Slot released (${t ?? '?'}) — ${s51}outside top-${this.config.maxActiveMarkets} set; refilling.`,
+        `Slot released (${t ?? '?'}) — ${evictNote}outside top-${this.config.maxActiveMarkets} set; refilling.`,
       )
     }
 
@@ -814,9 +815,12 @@ export class PaperMmPortfolio {
     this.refreshPortfolioFillCap()
 
     if (this.running) eng.start()
-    this.message =
-      `Quoting ${market.ticker} (${market.asset}) — multi-book slot ${this.books.size}/` +
-      `${this.config.maxActiveMarkets}. Read-only · never places trades.`
+    this.message = !this.config.quotingEnabled
+      ? QUOTING_PAUSED_REASON
+      : (
+          `Watching ${market.ticker} (${market.asset}) — multi-book slot ${this.books.size}/` +
+          `${this.config.maxActiveMarkets}. Read-only · never places trades.`
+        )
   }
 
   private unsubEngine(eng: PaperMmEngine): void {
@@ -848,11 +852,13 @@ export class PaperMmPortfolio {
     if (!opts?.resume || this.sessionStartedAt == null) {
       this.sessionStartedAt = Date.now()
     }
-    this.message =
-      'Multi-book paper MM running. Scans all open crypto 15m by |FV−mid|; ' +
-      `quotes up to ${this.config.maxActiveMarkets} in parallel. ` +
-      'More markets = more shots at the same edge game — not independent lottery wins. ' +
-      'Read-only · never places trades.'
+    this.message = !this.config.quotingEnabled
+      ? QUOTING_PAUSED_REASON
+      : (
+          'Multi-book paper MM running. Scans all open crypto 15m by |FV−mid|; ' +
+          `up to ${this.config.maxActiveMarkets} books. ` +
+          'Read-only · never places trades.'
+        )
     if (this.lastMarkets.length > 0 && this.openCount(this.lastMarkets) > 0) {
       this.rebalanceSlots(this.lastMarkets)
     }

@@ -444,7 +444,7 @@ describe('FV missing ⇒ both sides OFF (no mid spam)', () => {
     expect(s.quote).not.toBeNull()
     expect(s.quote!.bidActive).toBe(false)
     expect(s.quote!.askActive).toBe(false)
-    expect(s.quote!.bidReason + s.quote!.askReason).toMatch(/no FV/i)
+    expect(s.quote!.bidReason + s.quote!.askReason).toMatch(/no FV|U3\.0.*paused/i)
   })
 
   it('toxic mid still blocks bid even without FV', () => {
@@ -464,7 +464,7 @@ describe('FV missing ⇒ both sides OFF (no mid spam)', () => {
     const s = engine.getState().snapshot
     expect(s.quote?.bidActive).toBe(false)
     // no FV parks both first; reason may be no FV (checked before toxic mid)
-    expect(s.quote?.bidReason.toLowerCase()).toMatch(/no fv|toxic|invalid/)
+    expect(s.quote?.bidReason.toLowerCase()).toMatch(/no fv|toxic|invalid|u3\.0.*paused/)
   })
 })
 

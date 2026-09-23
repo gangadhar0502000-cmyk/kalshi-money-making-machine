@@ -2,7 +2,7 @@
  * U2.4 / U2.5 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
  * Default Start → multi-book + strictRealism: false (LOOSE presets).
  * U2.5: map portfolio books → MmBookRow[] for Active books panel.
- * Reuses existing PaperMmPortfolio / engines as-is — no new S* rules.
+ * Reuses existing PaperMmPortfolio / engines as-is — U3.0 quoting paused — no S* scenario playbook.
  * U2.2/U2.3 helpers remain for residual single-engine / error mapping.
  * Paper-only · never places live orders.
  */
@@ -66,6 +66,13 @@ const FEED_TICK_MS = 1000
  */
 export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
   const msg = snap.message ?? ''
+  if (/U3\.0:.*quoting paused/i.test(msg)) {
+    return makeUpdateError(
+      'paper quoting paused — needs new quote logic',
+      'user-defined quote logic (quotingEnabled)',
+      'U3.0',
+    )
+  }
   if (/U2\.14:.*holding inv/i.test(msg)) {
     return makeUpdateError('L2 off — holding inv until flat', 'mm-proxy :8787', 'U2.14')
   }
@@ -109,6 +116,17 @@ export function derivePortfolioUpdateError(
   // Per-book holding advisory (inventory stuck without L2).
   if (state.running && state.books.some((b) => /U2\.14:.*holding inv/i.test(b.snapshot.message ?? ''))) {
     return makeUpdateError('L2 off — holding inv until flat', 'mm-proxy :8787', 'U2.14')
+  }
+  // U3.0: quoting paused strip while Running (after L2 advisories).
+  if (
+    state.running &&
+    (/U3\.0:.*quoting paused/i.test(msg) || state.config?.quotingEnabled === false)
+  ) {
+    return makeUpdateError(
+      'paper quoting paused — needs new quote logic',
+      'user-defined quote logic (quotingEnabled)',
+      'U3.0',
+    )
   }
   if (/under-filled/i.test(msg)) {
     return makeUpdateError(

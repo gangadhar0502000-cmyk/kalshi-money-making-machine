@@ -84,7 +84,7 @@ describe('engine inventory unwind + fill discipline', () => {
     vi.unstubAllGlobals()
   })
 
-  it('long at max + FV≫mid → ask ON unwind (not IDLE both sides)', () => {
+  it('long at max + FV≫mid → quotes still OFF under U3.0 pause', () => {
     const market = mkMarket({
       ticker: 'KXHYPE15M-UNWIND',
       midYes: 0.4,
@@ -93,18 +93,18 @@ describe('engine inventory unwind + fill discipline', () => {
       floorStrike: 20,
     })
     engine.setMarket(market)
-    // Spot deep ITM vs strike → FV ≫ mid
     engine.seedSpot(40)
     engine.seedInventory(10, 0.4)
     engine.start()
     engine.onBook(book(market.ticker, 0.4))
 
-    const q = engine.getState().snapshot.quote
+    const snap = engine.getState().snapshot
+    const q = snap.quote
     expect(q).not.toBeNull()
-    expect(q!.askActive).toBe(true)
-    expect(q!.askReason).toMatch(/S4 CLOSE_RISK|risk flat|S3 CLOSE_PROFIT/)
+    expect(q!.askActive).toBe(false)
     expect(q!.bidActive).toBe(false)
-    expect(q!.active).toBe(true)
+    expect(q!.active).toBe(false)
+    expect(snap.message).toMatch(/U3\.0.*paused/)
   })
 
   it('cannot applyFill buy_yes when inventory >= maxInventory / unwind blocks adds', () => {
@@ -129,7 +129,7 @@ describe('engine inventory unwind + fill discipline', () => {
     eng.applyFill('buy_yes', 0.5, 1, 0.5, false, 'book_depth', false)
     expect(engine.getState().snapshot.inventory).toBe(10)
     expect(engine.getState().fills.length).toBe(fillsBefore)
-    expect(engine.getState().snapshot.message.toLowerCase()).toMatch(/inv block/)
+    expect(engine.getState().snapshot.message.toLowerCase()).toMatch(/inv block|u3\.0.*paused/)
 
     // Reducing sell is still allowed
     eng.applyFill('sell_yes', 0.52, 1, 0.5, false, 'book_depth', false)
@@ -261,7 +261,7 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
       bidActive: true,
       active: true,
       bidScenario: 'S1',
-      bidReason: 'bid ON: S1 OPEN_BID +4.0¢',
+      bidReason: 'bid ON: test fixture',
     }
 
     const fill = applyFill()

@@ -76,6 +76,7 @@ export {
 
 export {
   decideQuoteSides,
+  QUOTING_PAUSED_REASON,
   canAcceptInventoryIncreasingFill,
   clampQuotesMakerOnly,
   makerCaptureCents,

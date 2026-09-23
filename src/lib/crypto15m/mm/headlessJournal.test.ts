@@ -87,7 +87,7 @@ describe('classifyFillLeg', () => {
 })
 
 describe('headlessJournal digest', () => {
-  it('aggregates fills / stuck / S5.1 by scenario', () => {
+  it('aggregates fills / stuck / SLOT_EVICT by scenario', () => {
     const t0 = Date.UTC(2026, 8, 22, 3, 10, 0) // inside a known hour UTC
     const events = [
       buildFillEvent({
@@ -160,7 +160,7 @@ describe('headlessJournal digest', () => {
     expect(digest.byScenario['S4.2']?.fills).toBe(1)
     expect(digest.byScenario['S4.2']?.markBleedS42).toBe(1)
     expect(digest.byScenario.S5?.blockedCloses).toBe(1)
-    expect(digest.byScenario['S5.1']?.s51Evictions).toBe(1)
+    expect(digest.byScenario['SLOT_EVICT']?.s51Evictions ?? digest.byScenario['S5.1']?.s51Evictions).toBe(1)
     expect(digest.totals.fills).toBe(4)
     expect(digest.totals.openFills).toBe(1)
     expect(digest.totals.closeFills).toBe(3)

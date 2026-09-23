@@ -202,11 +202,16 @@ export interface PaperMmConfig {
   markBleedCents: number
   /**
    * U2.14: consecutive syncMarketUniverse passes with useLiveBook && !liveBook
-   * before flat-slot drop+refill (S5.1-style). Default 10 (~10–20s at typical
+   * before flat-slot drop+refill (slot-evict style). Default 10 (~10–20s at typical
    * feed/sync cadence). Non-flat inventory is held with fail-loud status —
    * never invents flatten prices without L2.
    */
   l2OffDropTicks: number
+  /**
+   * U3.0: when false (default), paper quotes never arm — awaiting user-defined logic.
+   * Flip later when a replacement quote path exists; do not re-enable S1–S5 playbook.
+   */
+  quotingEnabled: boolean
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -264,6 +269,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   stuckUnwindTicks: 30,
   markBleedCents: 5,
   l2OffDropTicks: 10,
+  quotingEnabled: false,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -373,6 +379,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     stuckUnwindTicks: Math.round(clamp(c.stuckUnwindTicks ?? 30, 1, 600)),
     markBleedCents: clamp(c.markBleedCents ?? 5, 0, 50),
     l2OffDropTicks: Math.round(clamp(c.l2OffDropTicks ?? 10, 1, 600)),
+    quotingEnabled: Boolean(c.quotingEnabled),
   }
 }
 
@@ -474,5 +481,7 @@ export function migratePersistedScarcityConfig(
   if (partial.markBleedCents == null || !Number.isFinite(partial.markBleedCents)) {
     out.markBleedCents = STRICT_PAPER_MM_CONFIG.markBleedCents
   }
+  // U3.0: never restore old sessions into an armed quoting state.
+  out.quotingEnabled = false
   return out
 }

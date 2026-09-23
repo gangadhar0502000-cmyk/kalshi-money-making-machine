@@ -175,6 +175,7 @@ async function runPaperMmLoop(): Promise<void> {
     multiBook: true,
     strictRealism: true,
     fvQuoting: true,
+    quotingEnabled: false, // U3.0 — no paper quotes until new logic
   })
 
   const seenFillIds = new Set<string>()
@@ -243,7 +244,7 @@ async function runPaperMmLoop(): Promise<void> {
           const gap =
             cap != null && Number.isFinite(cap) ? minClose - cap : null
           const ev = buildBlockedCloseEvent({
-            scenarioId: scenario ?? 'S5',
+            scenarioId: scenario ?? 'paused',
             ticker: snap.marketTicker,
             asset: snap.asset,
             side,
@@ -264,7 +265,7 @@ async function runPaperMmLoop(): Promise<void> {
 
     if (st.message !== lastMessage) {
       lastMessage = st.message
-      if (/S5\.1 SLOT_EVICT/i.test(st.message)) {
+      if (/SLOT_EVICT|L2_OFF_EVICT|Slot released/i.test(st.message) && /sanity\+flat|outside top-/i.test(st.message)) {
         const m = /Slot released \(([^)]+)\)/.exec(st.message)
         const ev = buildS51EvictEvent({
           ticker: m?.[1] ?? null,
@@ -299,6 +300,7 @@ async function runPaperMmLoop(): Promise<void> {
   if (!portfolio.getState().running) {
     portfolio.start()
   }
+  log('U3.0: paper quoting paused — needs new quote logic (engines observe feed/L2 only)')
   log(
     `running books=${portfolio.getState().books.length} msg=${portfolio.getState().message.slice(0, 120)}`,
   )

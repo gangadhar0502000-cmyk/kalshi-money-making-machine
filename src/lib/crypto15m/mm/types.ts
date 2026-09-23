@@ -21,11 +21,11 @@ export interface MmQuote {
   bidReason: string
   /** Why ask is off (or 'ok'). */
   askReason: string
-  /** S1–S5 scenario id for bid side. */
+  /** Optional legacy scenario id (journal only; U3.0 does not drive quotes). */
   bidScenario?: string
-  /** S1–S5 scenario id for ask side. */
+  /** Optional legacy scenario id (journal only). */
   askScenario?: string
-  /** Dominant active scenario for UI. */
+  /** Optional legacy active scenario (unused while quoting paused). */
   activeScenario?: string
 }
 
@@ -59,8 +59,7 @@ export interface MmFill {
    */
   captureDollars?: number
   /**
-   * Scenario that authorized this fill at fill time (evaluateClose / open decision).
-   * Stamped before post-fill requote so digests are not polluted by post-flat S5.
+   * Optional legacy scenario id at fill time (journal/digest only; U3.0 quotes paused).
    */
   scenarioId?: string
   /** Remaining size-ahead queue after fill attribution (book_depth). */

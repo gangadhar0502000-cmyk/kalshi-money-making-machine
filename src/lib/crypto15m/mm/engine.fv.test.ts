@@ -125,10 +125,11 @@ describe('FV quoting + edge gates', () => {
     expect(s.edgeVsMidCents!).toBeGreaterThanOrEqual(3)
     expect(s.edgeVsMidCents!).toBeLessThanOrEqual(25)
     expect(s.inventory).toBe(0)
-    expect(s.quote?.bidActive).toBe(true)
+    // U3.0: quotes never arm (scenario playbook removed)
+    expect(s.quote?.bidActive).toBe(false)
     expect(s.quote?.askActive).toBe(false)
-    expect(s.quote?.askReason.toLowerCase()).toMatch(/no edge/)
-    expect(s.quote?.centerMode).toBe('fv')
+    expect(s.quote?.bidReason).toMatch(/U3\.0.*paused/)
+    expect(s.message).toMatch(/U3\.0.*paused/)
   })
 
   it('when FV ≪ mid, ask may be ON and bid is gated off', () => {
@@ -152,9 +153,9 @@ describe('FV quoting + edge gates', () => {
     expect(s.edgeVsMidCents!).toBeLessThanOrEqual(-3)
     expect(s.edgeVsMidCents!).toBeGreaterThanOrEqual(-25)
     expect(s.inventory).toBe(0)
-    expect(s.quote?.askActive).toBe(true)
+    expect(s.quote?.askActive).toBe(false)
     expect(s.quote?.bidActive).toBe(false)
-    expect(s.quote?.bidReason.toLowerCase()).toMatch(/no edge/)
+    expect(s.quote?.askReason).toMatch(/U3\.0.*paused/)
   })
 
   it('when |FV − mid| < minEdge both sides off', () => {
@@ -175,8 +176,7 @@ describe('FV quoting + edge gates', () => {
     expect(Math.abs(s.edgeVsMidCents!)).toBeLessThan(3)
     expect(s.quote?.bidActive).toBe(false)
     expect(s.quote?.askActive).toBe(false)
-    expect(s.quote?.bidReason.toLowerCase()).toMatch(/no edge/)
-    expect(s.quote?.askReason.toLowerCase()).toMatch(/no edge/)
+    expect(s.quote?.bidReason).toMatch(/U3\.0.*paused/)
   })
 
   it('toxic mid still refuses buy-YES spam at mid≈0.01', () => {
@@ -200,8 +200,7 @@ describe('FV quoting + edge gates', () => {
     const state = engine.getState()
     expect(state.snapshot.inventory).toBe(0)
     expect(state.snapshot.quote?.bidActive).toBe(false)
-    // toxic mid, no-edge, or edge sanity — must not be buy-spamable
-    expect(state.snapshot.quote?.bidReason.toLowerCase()).toMatch(/toxic|no edge|edge sanity/)
+    expect(state.snapshot.quote?.bidReason).toMatch(/U3\.0.*paused|toxic|no edge|edge sanity/)
   })
 
   it('auto-roll still works when market closes + new open 15m in feed', () => {
@@ -235,6 +234,8 @@ describe('FV quoting + edge gates', () => {
     expect(after.snapshot.inventory).toBe(0)
     expect(after.snapshot.running).toBe(true)
     expect(after.snapshot.settled).toBe(false)
-    expect(after.snapshot.message.toLowerCase()).toMatch(/roll/)
+    expect(after.snapshot.marketTicker).toBe(newM.ticker)
+    // U3.0 pause strip may replace roll wording; roll still happened
+    expect(after.snapshot.message.toLowerCase()).toMatch(/roll|u3\.0.*paused/)
   })
 })

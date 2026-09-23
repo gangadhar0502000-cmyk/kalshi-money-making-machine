@@ -297,7 +297,7 @@ export function buildBlockedCloseEvent(input: {
     type: 'blocked_close',
     t,
     iso: new Date(t).toISOString(),
-    scenarioId: input.scenarioId ?? 'S5',
+    scenarioId: input.scenarioId ?? 'paused',
     ticker: input.ticker ?? undefined,
     asset: input.asset ?? undefined,
     side: input.side,
@@ -312,7 +312,18 @@ export function buildBlockedCloseEvent(input: {
   }
 }
 
+/** @deprecated Prefer buildSlotEvictEvent — kept for journal type compat. */
 export function buildS51EvictEvent(input: {
+  t?: number
+  ticker?: string | null
+  asset?: string | null
+  reason?: string
+}): JournalEvent {
+  return buildSlotEvictEvent(input)
+}
+
+/** Slot eviction journal event (sanity+flat / L2-off) — not a quote scenario. */
+export function buildSlotEvictEvent(input: {
   t?: number
   ticker?: string | null
   asset?: string | null
@@ -320,13 +331,13 @@ export function buildS51EvictEvent(input: {
 }): JournalEvent {
   const t = input.t ?? Date.now()
   return {
-    type: 's51_evict',
+    type: 's51_evict', // internal journal type; scenarioId is SLOT_EVICT (not S5.x)
     t,
     iso: new Date(t).toISOString(),
-    scenarioId: 'S5.1',
+    scenarioId: 'SLOT_EVICT',
     ticker: input.ticker ?? undefined,
     asset: input.asset ?? undefined,
-    reason: input.reason ?? 'S5.1 SLOT_EVICT sanity+flat',
+    reason: input.reason ?? 'SLOT_EVICT sanity+flat',
   }
 }
 

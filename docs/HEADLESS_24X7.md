@@ -1,3 +1,4 @@
+<!-- U3.0: paper quoting paused (`quotingEnabled: false`); headless observes feed/L2 only until new quote logic. -->
 # Headless 24/7 Paper MM (Grok Bot box)
 
 **PAPER ONLY — never places live Kalshi orders.** The Mac can stay closed; this box runs continuously.

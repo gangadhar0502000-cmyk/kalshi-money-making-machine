@@ -237,6 +237,13 @@ describe('derivePortfolioUpdateError', () => {
         message:
           'Multi-book under-filled (1/5) — retrying fill from 4 open ranked. Read-only · never places trades.',
         aggregate: emptyAgg({ activeBooks: 1 }),
+        config: {
+          ...DEFAULT_PAPER_MM_CONFIG,
+          multiBook: true,
+          strictRealism: false,
+          maxActiveMarkets: MM_MAX_ACTIVE_BOOKS,
+          quotingEnabled: true, // isolate U2.4 mapping from U3.0 pause strip
+        },
       }),
     )
     expect(err?.code).toBe('U2.4')
@@ -382,9 +389,10 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
       fillsCount: 3,
       lastFillAt: 2_222,
       activeBooks: 2,
-      updateError: null,
       quoteBook: null,
     })
+    expect(store.getState().updateError?.code).toBe('U3.0')
+    expect(store.getState().updateError?.message).toMatch(/quoting paused/)
 
     runner.stop()
     expect(portfolio.stop).toHaveBeenCalled()
@@ -448,7 +456,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
     })
   })
 
-  it('surfaces under-filled portfolio message as U2.4', () => {
+  it('surfaces U3.0 pause while running (under-fill secondary)', () => {
     const { store, portfolio, runner, markets } = pair()
     runner.start(markets[0]!.ticker)
     portfolio._state = {
@@ -459,8 +467,9 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
       aggregate: emptyAgg({ activeBooks: 0 }),
     }
     portfolio._emit()
-    expect(store.getState().updateError?.code).toBe('U2.4')
-    expect(store.getState().updateError?.message).toContain('under-filled')
+    // U3.0 pause strip takes priority while quotingEnabled is false
+    expect(store.getState().updateError?.code).toBe('U3.0')
+    expect(store.getState().updateError?.message).toMatch(/quoting paused/)
   })
 
   it('U2.5: portfolio with 2 book stubs → store.books mapped; reset → []', () => {
