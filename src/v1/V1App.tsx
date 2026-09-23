@@ -26,6 +26,7 @@ import {
   timeUrgencyClass,
   windowProgress,
 } from './feedStatus'
+import { fmtMmInvHint, sortMarketsForRail } from './marketRail'
 
 /**
  * KMM v1 — Apple-clean feed UI.
@@ -33,6 +34,7 @@ import {
  * U2.4 Start runs loose multi-book paper portfolio (up to 5 books).
  * U2.5 Active books panel under the MM strip (per-book P&L; click focuses hero).
  * U2.6 Apple-clean MM strip metric polish (scannable cash / P&L grid).
+ * U2.7 Market rail: MM badge + quoted books float first while running.
  * Paper / read-only. YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
@@ -62,6 +64,21 @@ export function V1App() {
   const active = markets.find((m) => m.ticker === selected) ?? null
   const assets = useMemo(() => markets.map((m) => m.asset), [markets])
   const spots = useSpotMap(assets)
+
+  /** U2.7 — tickers the multi-book MM is actively quoting. */
+  const quotedTickers = useMemo(
+    () => new Set(mm.books.map((b) => b.ticker)),
+    [mm.books],
+  )
+  const invByTicker = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const b of mm.books) map.set(b.ticker, b.inventory)
+    return map
+  }, [mm.books])
+  const railMarkets = useMemo(() => {
+    if (mm.status === 'idle' || quotedTickers.size === 0) return markets
+    return sortMarketsForRail(markets, quotedTickers)
+  }, [markets, mm.status, quotedTickers])
 
   const chip =
     status.feedTone === 'ok'
@@ -387,52 +404,67 @@ export function V1App() {
           )}
         </section>
 
-        {/* Market list */}
+        {/* Market list — U2.7 MM highlight + quoted-first sort */}
         <section className="mb-6 flex-1">
           <div className="mb-3 flex items-center justify-between gap-2 px-0.5">
-            <p className="text-[13px] font-medium text-[var(--color-secondary)]">
-              Open markets
+            <p className="flex flex-wrap items-baseline gap-x-2 text-[13px] font-medium text-[var(--color-secondary)]">
+              <span>Open markets</span>
+              {mm.status !== 'idle' && mm.books.length > 0 && (
+                <span className="num font-normal text-[var(--color-tertiary)]">
+                  {mm.books.length} quoting
+                </span>
+              )}
             </p>
             <p className="text-[12px] text-[var(--color-tertiary)]">
               YES / NO books · same outcome
             </p>
           </div>
 
-          {markets.length === 0 ? (
+          {railMarkets.length === 0 ? (
             <div className="kmm-frame px-4 py-16 text-center text-[14px] text-[var(--color-secondary)]">
               {status.everSucceeded ? 'No open markets right now' : 'Waiting for feed…'}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {markets.map((m) => {
+              {railMarkets.map((m) => {
                 const on = m.ticker === selected
+                const isMm = quotedTickers.has(m.ticker)
                 const canon = normalizeSpotAsset(m.asset)
                 const spot = canon ? spots[canon] ?? null : null
                 const hint = betterBookHint(m)
                 const noMid = midNo(m)
+                const mmInv = isMm ? invByTicker.get(m.ticker) : undefined
                 return (
                   <button
                     key={m.ticker}
                     type="button"
                     onClick={() => setSelected(m.ticker)}
-                    className={`kmm-card p-4 ${on ? 'kmm-card--on' : ''}`}
+                    className={`kmm-card p-3.5 ${on ? 'kmm-card--on' : ''} ${isMm ? 'kmm-card--mm' : ''}`}
                   >
-                    <div className="mb-2.5 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
                         <span className="kmm-badge">{m.asset}</span>
                         <span className="text-[13px] font-medium text-[var(--color-label)]">
                           {assetShortName(m.asset)}
                         </span>
+                        {isMm && (
+                          <span
+                            className="kmm-badge kmm-badge--mm"
+                            title="Paper MM quoting this book"
+                          >
+                            MM
+                          </span>
+                        )}
                       </div>
                       <span
-                        className={`num text-[12px] font-medium ${timeUrgencyClass(m.minutesRemaining)}`}
+                        className={`num shrink-0 text-[12px] font-medium ${timeUrgencyClass(m.minutesRemaining)}`}
                       >
                         {fmtMinutesLeft(m.minutesRemaining)}
                       </span>
                     </div>
 
                     {hint !== 'TIE' && (
-                      <div className="mb-2">
+                      <div className="mb-1.5">
                         <span
                           className="kmm-badge kmm-badge--better"
                           title="Tighter touch spread (proxy until L2 sizes)"
@@ -447,9 +479,9 @@ export function V1App() {
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-tertiary)]">
                           YES
                         </div>
-                        <div className="num text-[28px] font-semibold leading-none tracking-tight text-[var(--color-label)]">
+                        <div className="num text-[26px] font-semibold leading-none tracking-tight text-[var(--color-label)] sm:text-[28px]">
                           {Math.round(m.midYes * 100)}
-                          <span className="text-[14px] font-medium text-[var(--color-secondary)]">
+                          <span className="text-[13px] font-medium text-[var(--color-secondary)]">
                             ¢
                           </span>
                         </div>
@@ -458,20 +490,35 @@ export function V1App() {
                         <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-tertiary)]">
                           NO
                         </div>
-                        <div className="num text-[28px] font-semibold leading-none tracking-tight text-[var(--color-label)]">
+                        <div className="num text-[26px] font-semibold leading-none tracking-tight text-[var(--color-label)] sm:text-[28px]">
                           {Math.round(noMid * 100)}
-                          <span className="text-[14px] font-medium text-[var(--color-secondary)]">
+                          <span className="text-[13px] font-medium text-[var(--color-secondary)]">
                             ¢
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="num mt-3 text-[11px] text-[var(--color-tertiary)]">
-                      Y {fmtPrice(m.yesBid)}/{fmtPrice(m.yesAsk)}
-                      {' · '}
-                      N {fmtPrice(m.noBid)}/{fmtPrice(m.noAsk)}
-                      {spot != null ? ` · ${fmtSpot(spot)}` : ''}
+                    <div className="num mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--color-tertiary)]">
+                      <span>
+                        Y {fmtPrice(m.yesBid)}/{fmtPrice(m.yesAsk)}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>
+                        N {fmtPrice(m.noBid)}/{fmtPrice(m.noAsk)}
+                      </span>
+                      {spot != null && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{fmtSpot(spot)}</span>
+                        </>
+                      )}
+                      {mmInv != null && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{fmtMmInvHint(mmInv)}</span>
+                        </>
+                      )}
                     </div>
                   </button>
                 )

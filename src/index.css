@@ -114,6 +114,18 @@
     background: rgba(10, 132, 255, 0.1);
     box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.2);
   }
+  /* U2.7 — soft left accent for MM-quoted books (selected still wins) */
+  .kmm-card--mm {
+    border-color: var(--color-separator);
+    box-shadow: inset 2px 0 0 0 var(--color-tint);
+  }
+  .kmm-card--on.kmm-card--mm {
+    border-color: rgba(10, 132, 255, 0.45);
+    background: rgba(10, 132, 255, 0.1);
+    box-shadow:
+      inset 2px 0 0 0 var(--color-tint),
+      0 0 0 1px rgba(10, 132, 255, 0.2);
+  }
 
   .kmm-hero {
     border: 1px solid var(--color-separator);
@@ -139,6 +151,11 @@
   .kmm-badge--better {
     background: rgba(48, 209, 88, 0.14);
     color: var(--color-profit);
+  }
+  /* U2.7 — quiet MM chip (tint wash, secondary label — not neon) */
+  .kmm-badge--mm {
+    background: rgba(10, 132, 255, 0.1);
+    color: var(--color-secondary);
   }
 
   .kmm-progress {

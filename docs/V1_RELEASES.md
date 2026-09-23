@@ -94,12 +94,19 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Hierarchy: larger tabular nums for **Cash** + **Realized**; secondary for the rest. Grouped elevated cells via `.kmm-mm-metrics` / `.kmm-mm-metric` (existing `--color-*` tokens only).
 - Drop lone `activeTicker` chip when Active books panel has rows (Books N/5 stays); ticker chip only when books empty.
 - Pure helper `formatSignedDollars` (+$ / −$ / $0.00). Status/help + fail-loud error lines unchanged. Books panel / market rail untouched.
-- **Next:** U2.7 market-rail highlight for active/quoted books.
+- Paper-only / read-only; never places live trades.
+
+## U2.7 — market rail MM highlight (phased UI complete)
+
+- **Open markets** card grid highlights books the multi-book paper MM is quoting: quiet **MM** badge (`.kmm-badge--mm`) + soft left accent (`.kmm-card--mm` via `--color-tint` / separator). Selected (`.kmm-card--on`) still wins; MM badge stays visible when selected.
+- While `status !== 'idle'` and `books.length > 0`, quoted tickers **float first** (stable within groups); idle keeps feed order. Section subtitle shows quiet `N quoting`.
+- Denser scan: slightly tighter card padding; cleaner YES/NO bid/ask tertiary row; optional tiny `Inv ±N` from matching `mm.books` row when quoting.
+- Pure helper `sortMarketsForRail` (+ `fmtMmInvHint`) in `src/v1/marketRail.ts`. MM strip metrics / Active books panel layout untouched (reads `mm.books` only).
+- **Phased UI (U2.5–U2.7) complete** for Apple-clean feed + paper MM shell: active books panel, strip metric polish, market-rail highlight.
 - Paper-only / read-only; never places live trades.
 
 ## Upcoming
 
-- **U2.7** — market-rail highlight for quoted books.
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
