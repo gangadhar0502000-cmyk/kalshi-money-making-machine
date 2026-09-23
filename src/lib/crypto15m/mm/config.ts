@@ -200,6 +200,13 @@ export interface PaperMmConfig {
    * Escalation latches until inventory flat/flip so scarce maker quotes can rest.
    */
   markBleedCents: number
+  /**
+   * U2.14: consecutive syncMarketUniverse passes with useLiveBook && !liveBook
+   * before flat-slot drop+refill (S5.1-style). Default 10 (~10–20s at typical
+   * feed/sync cadence). Non-flat inventory is held with fail-loud status —
+   * never invents flatten prices without L2.
+   */
+  l2OffDropTicks: number
 }
 
 /** Harsh defaults — live book fills preferred; soft random fills rare as fallback. */
@@ -256,6 +263,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   minChurnCaptureCents: 1.0,
   stuckUnwindTicks: 30,
   markBleedCents: 5,
+  l2OffDropTicks: 10,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -364,6 +372,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     ),
     stuckUnwindTicks: Math.round(clamp(c.stuckUnwindTicks ?? 30, 1, 600)),
     markBleedCents: clamp(c.markBleedCents ?? 5, 0, 50),
+    l2OffDropTicks: Math.round(clamp(c.l2OffDropTicks ?? 10, 1, 600)),
   }
 }
 

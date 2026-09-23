@@ -122,6 +122,13 @@ export class PaperMmPortfolio {
   private slotOfTicker = new Map<string, string>()
   /** U2.13: sticky YES/NO book per slot while |inventory| >= 1. */
   private quoteBookSticky = new Map<string, QuoteBook>()
+  /**
+   * U2.14: consecutive syncMarketUniverse ticks with useLiveBook && !liveBook
+   * per slot. Reset when L2 returns or slot is removed.
+   */
+  private l2OffTicksBySlot = new Map<string, number>()
+  /** U2.14: tickers dropped for L2-off+flat — excluded from refill until universe loses them. */
+  private l2OffBlockedTickers = new Set<string>()
   private listeners = new Set<() => void>()
   private spotsByAsset: Record<string, number> = {}
   private lastScan: RankedMarket[] = []
@@ -553,8 +560,16 @@ export class PaperMmPortfolio {
       )
     }
 
+    // U2.14: drop flat L2-off books past threshold (S5.1-style); hold open inv.
+    const l2Dropped = this.maybeEvictL2Off()
+
     // 2) Fill free slots / reshuffle only with a valid non-empty ranked set
     this.rebalanceSlots(markets)
+
+    // Keep fail-loud U2.14 drop visible after refill overwrites addBook message.
+    if (l2Dropped.length > 0) {
+      this.message = `U2.14: dropped ${l2Dropped.join(', ')} — L2 off`
+    }
 
     // 3) While RUNNING, always attempt to fill empty slots every refresh
     if (this.running && this.books.size < this.config.maxActiveMarkets && openRanked.length > 0) {
@@ -582,6 +597,62 @@ export class PaperMmPortfolio {
     this.emit()
   }
 
+
+  /**
+   * U2.14 — after l2OffDropTicks consecutive syncs with useLiveBook && !liveBook:
+   * flat inventory → drop slot (S5.1 SLOT_EVICT pattern) and let rebalanceSlots
+   * refill from ranked open set. Open inventory → hold with fail-loud row status
+   * (never invent flatten prices without L2).
+   * @returns tickers dropped this pass (for fail-loud strip after refill).
+   */
+  private maybeEvictL2Off(): string[] {
+    if (!this.config.useLiveBook) {
+      this.l2OffTicksBySlot.clear()
+      this.l2OffBlockedTickers.clear()
+      return []
+    }
+    const threshold = Math.max(1, this.config.l2OffDropTicks)
+    const toDrop: string[] = []
+    for (const [slotId, eng] of this.books) {
+      const snap = eng.getState().snapshot
+      if (snap.liveBook) {
+        this.l2OffTicksBySlot.set(slotId, 0)
+        continue
+      }
+      const n = (this.l2OffTicksBySlot.get(slotId) ?? 0) + 1
+      this.l2OffTicksBySlot.set(slotId, n)
+      if (n < threshold) continue
+      const inv = snap.inventory ?? 0
+      if (inv !== 0) {
+        eng.noteL2OffHoldingInv()
+        continue
+      }
+      toDrop.push(slotId)
+    }
+    const dropped: string[] = []
+    for (const slotId of toDrop) {
+      const eng = this.books.get(slotId)
+      const t = eng?.getState().snapshot.marketTicker ?? '?'
+      if (t && t !== '?') this.l2OffBlockedTickers.add(t)
+      dropped.push(t)
+      this.removeBook(slotId, `U2.14: dropped ${t} — L2 off`)
+    }
+    return dropped
+  }
+
+
+  /** Test helper — engine for a ticker or slotId (U2.14 / portfolio tests). */
+  getEngineForTests(tickerOrSlot: string): PaperMmEngine | null {
+    if (this.books.has(tickerOrSlot)) return this.books.get(tickerOrSlot) ?? null
+    const slot = this.slotOfTicker.get(tickerOrSlot)
+    return slot ? this.books.get(slot) ?? null : null
+  }
+
+  /** Test helper — consecutive L2-off sync ticks for a slot. */
+  getL2OffTicksForTests(slotId: string): number {
+    return this.l2OffTicksBySlot.get(slotId) ?? 0
+  }
+
   private rollBook(slotId: string, eng: PaperMmEngine, target: Crypto15mMarket): void {
     const prev = eng.getState().snapshot.marketTicker
     if (prev) this.slotOfTicker.delete(prev)
@@ -605,6 +676,7 @@ export class PaperMmPortfolio {
     const eng = this.books.get(slotId)
     if (!eng) return
     this.quoteBookSticky.delete(slotId)
+    this.l2OffTicksBySlot.delete(slotId)
     eng.settleNow()
     this.bankEngineIntoSession(eng)
     const t = eng.getState().snapshot.marketTicker
@@ -651,6 +723,12 @@ export class PaperMmPortfolio {
       const snap = eng.getState().snapshot
       if (snap.marketTicker) inventoryByTicker[snap.marketTicker] = snap.inventory
     }
+    // U2.14: drop blocked tickers that left the universe; keep others excluded from refill.
+    const universeTickers = new Set(markets.map((m) => m.ticker))
+    for (const t of [...this.l2OffBlockedTickers]) {
+      if (!universeTickers.has(t)) this.l2OffBlockedTickers.delete(t)
+    }
+
     const desired = pickActiveMarkets(this.lastScan, {
       maxActive: this.config.maxActiveMarkets,
       stickyTickers: sticky,
@@ -659,6 +737,7 @@ export class PaperMmPortfolio {
       fillMidFallback: this.config.fillMidFallback,
       inventoryByTicker,
       evictSanityFlat: true,
+      excludeTickers: [...this.l2OffBlockedTickers],
     })
 
     // Still nothing quoteable / pickable — hold sticky books, do not wipe
@@ -806,6 +885,7 @@ export class PaperMmPortfolio {
       this.books.delete(slotId)
     }
     this.quoteBookSticky.clear()
+    this.l2OffTicksBySlot.clear()
     this.books.clear()
     this.slotOfTicker.clear()
     this.sessionLedger = emptyLedger()

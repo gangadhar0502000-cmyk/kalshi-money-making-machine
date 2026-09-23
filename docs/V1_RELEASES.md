@@ -160,10 +160,22 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Aggregate session `quoteBook` stays null in multi; per-row is enough.
 - Paper-only · read-only · never places live orders.
 
+
+## U2.14 — drop & refill when L2 stays off
+
+- Track consecutive `syncMarketUniverse` ticks per active book where `useLiveBook && !liveBook`.
+- After **`l2OffDropTicks` (default 10)** ≈ 10–20s at typical feed/sync cadence:
+  - **Flat inventory** → evict slot (S5.1-style) with fail-loud `U2.14: dropped TICKER — L2 off` (needs mm-proxy :8787); `rebalanceSlots` refills from ranked open crypto 15m.
+  - **Open inventory** → do **not** invent flatten prices; hold with `U2.14: L2 off — holding inv until flat` on the row/strip.
+- Extends existing SLOT_EVICT / `syncMarketUniverse` path — no parallel eviction system.
+- Active books idle help mentions drop+refill when L2 stays off; quiet `L2 hold` chip when holding inv.
+- **U2 complete** with this slice. **U3 next** — feed + engine observability (richer health, divergence alarms). Fill observability strip deferred to U3.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.
-- **U3** — feed + engine observability (richer health, divergence alarms).
+- **U3** — feed + engine observability (richer health, divergence alarms). **U2 complete as of U2.14.**
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).
 

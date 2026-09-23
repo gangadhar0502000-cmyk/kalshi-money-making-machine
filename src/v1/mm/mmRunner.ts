@@ -66,6 +66,9 @@ const FEED_TICK_MS = 1000
  */
 export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
   const msg = snap.message ?? ''
+  if (/U2\.14:.*holding inv/i.test(msg)) {
+    return makeUpdateError('L2 off — holding inv until flat', 'mm-proxy :8787', 'U2.14')
+  }
   if (/L2 book poll failed|orderbook|L2 off/i.test(msg) && !snap.liveBook) {
     return makeUpdateError('L2 off — no soft fills', 'mm-proxy :8787', 'U2.13')
   }
@@ -91,6 +94,22 @@ export function derivePortfolioUpdateError(
   state: PortfolioState,
 ): MmUpdateError | null {
   const msg = state.message ?? ''
+  // U2.14 drop (quiet strip — once per eviction message, not every tick).
+  const drop = msg.match(/U2\.14: dropped ([\w.-]+) — L2 off/i)
+  if (drop) {
+    return makeUpdateError(
+      `dropped ${drop[1]} — L2 off`,
+      'mm-proxy :8787',
+      'U2.14',
+    )
+  }
+  if (/U2\.14:.*holding inv/i.test(msg)) {
+    return makeUpdateError('L2 off — holding inv until flat', 'mm-proxy :8787', 'U2.14')
+  }
+  // Per-book holding advisory (inventory stuck without L2).
+  if (state.running && state.books.some((b) => /U2\.14:.*holding inv/i.test(b.snapshot.message ?? ''))) {
+    return makeUpdateError('L2 off — holding inv until flat', 'mm-proxy :8787', 'U2.14')
+  }
   if (/under-filled/i.test(msg)) {
     return makeUpdateError(
       `multi-book under-filled (${state.aggregate.activeBooks}/${state.config.maxActiveMarkets})`,

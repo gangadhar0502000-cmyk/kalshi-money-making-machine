@@ -242,6 +242,47 @@ describe('derivePortfolioUpdateError', () => {
     expect(err?.code).toBe('U2.4')
     expect(err?.message).toContain('under-filled')
   })
+
+  it('maps U2.14 drop message to U2.14 + mm-proxy', () => {
+    const err = derivePortfolioUpdateError(
+      basePortfolio({
+        running: true,
+        message: 'U2.14: dropped BTC-L2OFF — L2 off',
+        aggregate: emptyAgg({ activeBooks: 1 }),
+      }),
+    )
+    expect(err).toEqual({
+      code: 'U2.14',
+      message: 'dropped BTC-L2OFF — L2 off',
+      dependency: 'mm-proxy :8787',
+    })
+  })
+
+  it('maps U2.14 holding-inv book message to U2.14', () => {
+    const err = derivePortfolioUpdateError(
+      basePortfolio({
+        running: true,
+        message: 'Multi-book paper MM running.',
+        books: [
+          {
+            slotId: 's1',
+            snapshot: baseSnap({
+              marketTicker: 'BTC-X',
+              liveBook: false,
+              inventory: 2,
+              message: 'U2.14: L2 off — holding inv until flat',
+            }),
+            fills: [],
+            cancels: [],
+          },
+        ],
+        aggregate: emptyAgg({ activeBooks: 1 }),
+      }),
+    )
+    expect(err?.code).toBe('U2.14')
+    expect(err?.message).toBe('L2 off — holding inv until flat')
+  })
+
 })
 
 describe('mmRunner multi-book loose start/stop/reset', () => {

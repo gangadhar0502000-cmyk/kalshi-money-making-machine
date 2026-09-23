@@ -1,5 +1,5 @@
 /**
- * U2.1–U2.6 / U2.13 — Paper MM session store.
+ * U2.1–U2.6 / U2.13 / U2.14 — Paper MM session store.
  * Start / Stop / Reset shell + paper P&L stats (portfolio attached via mmRunner).
  * U2.4: multi-book loose portfolio; activeBooks in strip.
  * U2.5: per-book rows for Active books panel (`books: MmBookRow[]`).
@@ -13,7 +13,7 @@ export type MmSessionStatus = 'idle' | 'running' | 'stopped'
 
 /** Fail-loud update error surfaced in the Apple-clean strip. */
 export type MmUpdateError = {
-  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13'
+  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' | 'U2.14'
   message: string
   dependency: string
 }
@@ -296,7 +296,7 @@ export function formatUpdateError(err: MmUpdateError): string {
 export function makeUpdateError(
   message: string,
   dependency: string,
-  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' = 'U2.2',
+  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' | 'U2.14' = 'U2.2',
 ): MmUpdateError {
   return { code, message, dependency }
 }

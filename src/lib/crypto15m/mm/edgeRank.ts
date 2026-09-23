@@ -234,6 +234,11 @@ export interface PickActiveOptions {
    * Set false only for legacy tests that expect sanity to occupy a slot.
    */
   evictSanityFlat?: boolean
+  /**
+   * U2.14: tickers blocked after L2-off flat eviction — not sticky and not
+   * newly selected so dead L2 books cannot immediately reoccupy the slot.
+   */
+  excludeTickers?: readonly string[]
 }
 
 /** True when S5.1 should drop this ranked row from the active set. */
@@ -271,6 +276,7 @@ export function pickActiveMarkets(
   const evictSanityFlat = opts.evictSanityFlat !== false
   const invMap = opts.inventoryByTicker
   const sticky = new Set(opts.stickyTickers ?? [])
+  const exclude = new Set(opts.excludeTickers ?? [])
   const byTicker = new Map(ranked.map((r) => [r.ticker, r]))
 
   const chosen: Crypto15mMarket[] = []
@@ -283,6 +289,7 @@ export function pickActiveMarkets(
   ): boolean => {
     if (chosen.length >= maxActive) return false
     if (usedTickers.has(r.ticker)) return false
+    if (exclude.has(r.ticker)) return false
     if (onePerAsset && usedAssets.has(r.asset)) return false
     // S5.1: never keep / select sanity+flat (slot eviction)
     if (evictSanityFlat && shouldEvictSanityFlat(r, invMap)) {

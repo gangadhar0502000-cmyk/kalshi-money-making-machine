@@ -269,7 +269,7 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start runs paper multi-book loose (up to 5) · L2 queue fills on better YES/NO book'
+                ? 'Idle · Start runs paper multi-book loose (up to 5) · L2 queue fills on better YES/NO book · drops & refills when L2 stays off'
                 : mm.status === 'running'
                   ? 'Session running · paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
@@ -338,7 +338,9 @@ export function V1App() {
                                 className="kmm-chip kmm-chip--warn text-[10px]"
                                 title={book.message || 'Live book off'}
                               >
-                                off
+                                {/U2\.14:.*holding inv/i.test(book.message)
+                                  ? 'L2 hold'
+                                  : 'off'}
                               </span>
                             )}
                           </div>

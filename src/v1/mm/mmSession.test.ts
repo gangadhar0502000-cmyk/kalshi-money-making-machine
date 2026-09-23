@@ -255,7 +255,7 @@ describe('U2.2 / U2.3 error object shape', () => {
   })
 })
 
-describe('U2.4 / U2.13 error format', () => {
+describe('U2.4 / U2.13 / U2.14 error format', () => {
   it('makeUpdateError with U2.4 code formats U2.4 line', () => {
     const err = makeUpdateError(
       'no markets in feed',
@@ -279,6 +279,19 @@ describe('U2.4 / U2.13 error format', () => {
       'U2.13: L2 off — no soft fills — needs mm-proxy :8787',
     )
   })
+
+  it('makeUpdateError with U2.14 code formats U2.14 line', () => {
+    const err = makeUpdateError(
+      'dropped BTC-X — L2 off',
+      'mm-proxy :8787',
+      'U2.14',
+    )
+    expect(err.code).toBe('U2.14')
+    expect(formatUpdateError(err)).toBe(
+      'U2.14: dropped BTC-X — L2 off — needs mm-proxy :8787',
+    )
+  })
+
 
   it('reset clears activeBooks', () => {
     const running: MmSessionState = {

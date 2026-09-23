@@ -16,6 +16,7 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 | **S4.2** | `MARK_BLEED` | Lossy stuck flatten | After the **same** `stuckUnwindTicks`, if capture ≤ `−markBleedCents` (default **5** → ≤ −5¢), allow reducing quote/fill at any capture (lossy OK). Reason **must** include `S4.2 MARK_BLEED`. Never opens. S4.1 still wins when stuck and capture ≥ 0. Risk-flat family for UI. |
 | **S5** | `NO_TRADE` | Both OFF | Everything else. Includes `CLOSE blocked: capture 0.3¢ < 1¢`. |
 | **S5.1** | `SLOT_EVICT` | Free active slot | Sanity-parked (`|FV−mid| > maxSaneEdgeCents` or reason has edge sanity) **and** flat inventory → **evict** from `maxActiveMarkets` set so next |FV−mid| candidate can enter. Do **not** evict if inventory ≠ 0 (needs unwind). |
+| **S5.2** | `L2_OFF_EVICT` (U2.14) | Free active slot | `useLiveBook && !liveBook` for `l2OffDropTicks` (default **10**) consecutive `syncMarketUniverse` passes **and** flat inventory → **evict** + refill from ranked open set. If inventory ≠ 0 → hold with fail-loud `U2.14: L2 off — holding inv until flat` (never invent flatten without L2). |
 
 ## Explicitly NOT profitable (must refuse)
 
@@ -39,6 +40,8 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 - `ask ON: S4.1 STUCK_UNWIND +0.0¢`
 - `ask ON: S4.2 MARK_BLEED -5.0¢`
 - `Slot released (BNB) — S5.1 SLOT_EVICT sanity+flat; …`
+- `U2.14: dropped TICKER — L2 off`
+- `U2.14: L2 off — holding inv until flat`
 
 ## Config defaults (strict paper)
 
@@ -52,6 +55,7 @@ Default stance: **S5 NO_TRADE** (both sides OFF). A side turns ON only under a n
 | `maxSaneEdgeCents` | 25 |
 | `stuckUnwindTicks` | 30 |
 | `markBleedCents` | 5 |
+| `l2OffDropTicks` | 10 |
 
 ## Measurement (do not confuse with knobs)
 

@@ -1498,6 +1498,27 @@ export class PaperMmEngine {
   /**
    * Test helper — seed net YES inventory + optional avg entry (paper only).
    */
+
+  /**
+   * U2.14: portfolio advisory when L2 stays off past l2OffDropTicks with open inv.
+   * Does not invent fills or flatten prices.
+   */
+  noteL2OffHoldingInv(): void {
+    this.message = 'U2.14: L2 off — holding inv until flat'
+    this.emit()
+  }
+
+  /** Test helper — force liveBook flag without network. */
+  __setLiveBookForTests(on: boolean): void {
+    this.liveBook = on
+    if (on) {
+      this.message = 'Live L2 (test)'
+    } else if (!/L2 off/i.test(this.message)) {
+      this.message = 'L2 off — no soft fills (U2.13)'
+    }
+    this.emit()
+  }
+
   seedInventory(inventory: number, avgEntry: number | null = 0.5): void {
     this.inventory = Math.trunc(inventory)
     this.avgEntry =

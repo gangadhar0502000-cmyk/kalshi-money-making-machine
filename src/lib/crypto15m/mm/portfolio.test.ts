@@ -475,4 +475,119 @@ describe('PaperMmPortfolio', () => {
     // starting + (95-100) + (100-100) = 95
     expect(st1.aggregate.cash).toBeCloseTo(95, 5)
   })
+
+
+  describe('U2.14 L2-off drop & refill', () => {
+    it('drops flat book after l2OffDropTicks and refills from ranked open set', () => {
+      const btc = mk({
+        ticker: 'BTC-L2OFF',
+        asset: 'BTC',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      const eth = mk({
+        ticker: 'ETH-REFILL',
+        asset: 'ETH',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      portfolio.seedSpot('BTC', 100.05)
+      portfolio.seedSpot('ETH', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        useLiveBook: true,
+        l2OffDropTicks: 3,
+        fillMidFallback: true,
+        fvQuoting: true,
+        minEdgeCents: 1,
+      })
+      portfolio.syncMarketUniverse([btc, eth])
+      portfolio.start()
+      const first = portfolio.getState().books[0]?.snapshot.marketTicker
+      expect(first).toBeTruthy()
+      expect(portfolio.getState().books[0]?.snapshot.liveBook).toBe(false)
+
+      for (let i = 0; i < 6; i++) {
+        const still = portfolio
+          .getState()
+          .books.some((b) => b.snapshot.marketTicker === first)
+        if (!still) break
+        portfolio.syncMarketUniverse([btc, eth])
+      }
+      const st = portfolio.getState()
+      expect(st.message).toMatch(/U2\.14: dropped .+ — L2 off/)
+      const tickers = st.books.map((b) => b.snapshot.marketTicker)
+      expect(tickers).not.toContain(first)
+      expect(tickers.length).toBe(1)
+      expect(tickers[0]).not.toBe(first)
+    })
+
+    it('holds open inventory with fail-loud U2.14 (no invent flatten)', () => {
+      const btc = mk({
+        ticker: 'BTC-HOLD-INV',
+        asset: 'BTC',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      portfolio.seedSpot('BTC', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        useLiveBook: true,
+        l2OffDropTicks: 2,
+        fillMidFallback: true,
+        minEdgeCents: 1,
+      })
+      portfolio.syncMarketUniverse([btc])
+      portfolio.start()
+      const eng = portfolio.getEngineForTests('BTC-HOLD-INV')
+      expect(eng).toBeTruthy()
+      eng!.seedInventory(2, 0.5)
+      expect(eng!.getState().snapshot.inventory).toBe(2)
+
+      for (let i = 0; i < 4; i++) {
+        portfolio.syncMarketUniverse([btc])
+      }
+
+      const st = portfolio.getState()
+      expect(st.books.map((b) => b.snapshot.marketTicker)).toContain('BTC-HOLD-INV')
+      expect(st.books[0]!.snapshot.inventory).toBe(2)
+      expect(st.books[0]!.snapshot.message).toMatch(/U2\.14:\ L2\ off\ —\ holding\ inv\ until\ flat/)
+    })
+
+    it('resets L2-off counter when liveBook returns', () => {
+      const btc = mk({
+        ticker: 'BTC-L2BACK',
+        asset: 'BTC',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 10,
+      })
+      portfolio.seedSpot('BTC', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        useLiveBook: true,
+        l2OffDropTicks: 5,
+        fillMidFallback: true,
+        minEdgeCents: 1,
+      })
+      portfolio.syncMarketUniverse([btc])
+      portfolio.start()
+      const eng = portfolio.getEngineForTests('BTC-L2BACK')!
+      const slotId = portfolio.getState().books[0]!.slotId
+      portfolio.syncMarketUniverse([btc])
+      portfolio.syncMarketUniverse([btc])
+      expect(portfolio.getL2OffTicksForTests(slotId)).toBeGreaterThanOrEqual(2)
+      eng.__setLiveBookForTests(true)
+      portfolio.syncMarketUniverse([btc])
+      expect(portfolio.getL2OffTicksForTests(slotId)).toBe(0)
+      expect(portfolio.getState().books[0]!.snapshot.marketTicker).toBe('BTC-L2BACK')
+    })
+  })
+
 })
