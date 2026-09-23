@@ -55,13 +55,23 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - `mmRunner` binds Start → engine start + feed ticks (mid via `onMarketTick`; L2/spot via engine polls); Stop → clean stop (numbers freeze); Reset → `resetSession` + zero session P&L/inventory/fills/errors (feed untouched).
 - Session stats in Apple-clean strip: cash, inv, realized, unrealized, fills (+ fees when non-zero).
 - Fail-loud `updateError: { code: 'U2.2', message, dependency }` — e.g. `U2.2: orderbook failed — needs mm-proxy :8787` when L2 proxy is down; app does not crash.
-- YES-book MM only this update. Complement YES/NO / `betterBookHint` routing deferred to **U2.3**. Multi-book portfolio port deferred.
+- YES-book MM only this update. Complement YES/NO / `betterBookHint` routing → **U2.3**. Multi-book portfolio port deferred.
+- Paper-only / read-only; never places live trades.
+
+
+## U2.3 — betterBookHint YES/NO quote routing
+
+- Single-book paper MM routes to the **better YES or NO book** via `betterBookHint` (tighter touch spread).
+- `quoteBook.ts`: `resolveQuoteBook` (sticky while `|inventory| ≥ 1`), `marketForQuoteBook` (feeds YES-oriented engine NO-touch mid/spread when quoting NO).
+- Session store tracks `quoteBook: 'YES' | 'NO' | null`; Apple-clean strip shows quiet `Book YES` / `Book NO` badge.
+- Fail-loud `U2.3: … — needs …` when the preferred book is one-sided and the other is not a usable two-sided fallback.
+- **Keep U2.2 behavior** when hint is YES / TIE defaults to YES.
+- **Deferred:** true NO-primary L2 queue join (L2 remains YES-combined this slice); multi-book (5-book) portfolio.
 - Paper-only / read-only; never places live trades.
 
 ## Upcoming
 
-- **U2.3** — optional betterBookHint YES/NO quote routing (if still needed after single-book YES MM).
-- **U2** — density / keyboard nav polish if needed; multi-book portfolio into the session shell.
+- **U2.4+** — density / keyboard nav polish if needed; true NO-primary L2; multi-book portfolio into the session shell.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).

@@ -1,6 +1,9 @@
 /**
- * U2.2 — Bind PaperMmEngine lifecycle to the U2.1 Start/Stop/Reset session shell.
- * Single active market (focused ticker). Paper-only · never places live orders.
+ * U2.2 / U2.3 — Bind PaperMmEngine lifecycle to the Start/Stop/Reset session shell.
+ * U2.3 routes the single focused ticker to the better YES or NO book via
+ * betterBookHint + marketForQuoteBook (sticky while inventory open).
+ * L2 remains YES-combined this slice (NO-primary L2 deferred).
+ * Paper-only · never places live orders.
  */
 
 import type { Crypto15mMarket } from '../../types/crypto15m'
@@ -16,6 +19,11 @@ import {
   type MmUpdateError,
   mmSessionStore,
 } from './mmSession'
+import {
+  marketForQuoteBook,
+  resolveQuoteBook,
+  type QuoteBook,
+} from './quoteBook'
 
 /** Minimal engine surface so tests can inject a stub. */
 export type MmEngineHandle = Pick<
@@ -118,6 +126,10 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
   let feedTimer: ReturnType<typeof setInterval> | null = null
   let unsubEngine: (() => void) | null = null
   let disposed = false
+  /** Sticky quote book while inventory is open; cleared on reset. */
+  let stickyBook: QuoteBook | null = null
+  /** Last U2.3 routing error; engine errors win when present. */
+  let lastRoutingError: MmUpdateError | null = null
 
   const clearFeedTimer = () => {
     if (feedTimer != null) {
@@ -132,7 +144,14 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
     // After reset the store already zeroed; ignore engine until next start.
     const status = store.getState().status
     if (status === 'idle') return
-    store.patchStats(statsFromEngine(engine.getState()))
+    const fromEngine = statsFromEngine(engine.getState())
+    // Engine errors win; else keep fresher U2.3 routing error.
+    const updateError = fromEngine.updateError ?? lastRoutingError
+    store.patchStats({
+      ...fromEngine,
+      updateError,
+      quoteBook: stickyBook,
+    })
   }
 
   const ensureEngineSub = () => {
@@ -140,6 +159,36 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
     unsubEngine = engine.subscribe(() => {
       syncStatsFromEngine()
     })
+  }
+
+  /** Resolve YES/NO book, patch quoteBook (+ U2.3 error), return engine market. */
+  const routeMarket = (market: Crypto15mMarket): Crypto15mMarket => {
+    const result = resolveQuoteBook(
+      market,
+      stickyBook,
+      store.getState().inventory,
+    )
+    stickyBook = result.book
+    lastRoutingError = result.error
+      ? makeUpdateError(
+          result.error.message,
+          result.error.dependency,
+          'U2.3',
+        )
+      : null
+    const engineErr = deriveUpdateError(engine.getState().snapshot)
+    const cur = store.getState().updateError
+    // Engine errors win; else U2.3 routing; clear stale U2.3 when routing ok.
+    let updateError: MmUpdateError | null | undefined
+    if (engineErr) updateError = engineErr
+    else if (lastRoutingError) updateError = lastRoutingError
+    else if (cur?.code === 'U2.3') updateError = null
+    else updateError = undefined
+    store.patchStats({
+      quoteBook: result.book,
+      ...(updateError !== undefined ? { updateError } : {}),
+    })
+    return marketForQuoteBook(market, result.book)
   }
 
   const pushFeedTick = (ticker: string | null) => {
@@ -156,7 +205,8 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
       return
     }
     try {
-      engine.onMarketTick(market)
+      const routed = routeMarket(market)
+      engine.onMarketTick(routed)
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e)
       store.patchStats({
@@ -204,13 +254,14 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
 
       ensureEngineSub()
       try {
-        // Single-book strict realism for U2.2 (multi-book deferred).
+        // Single-book strict realism (multi-book deferred).
         engine.setConfig({
           multiBook: false,
           strictRealism: true,
           useLiveBook: true,
         })
-        engine.setMarket(market)
+        const routed = routeMarket(market)
+        engine.setMarket(routed)
         engine.start()
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e)
@@ -227,7 +278,9 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
       store.patchStats({
         ...statsFromEngine(engine.getState()),
         activeTicker: market.ticker,
-        // Keep deriveUpdateError from engine (may already flag proxy).
+        quoteBook: stickyBook,
+        updateError:
+          statsFromEngine(engine.getState()).updateError ?? lastRoutingError,
       })
       armFeedTimer(market.ticker)
       // Immediate feed+tick
@@ -248,7 +301,7 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           ),
         })
       }
-      // Freeze numbers at last engine snapshot, then mark stopped.
+      // Freeze numbers + last quoteBook at last engine snapshot, then mark stopped.
       syncStatsFromEngine()
       store.stop()
     },
@@ -256,6 +309,8 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
     reset() {
       if (disposed) return
       clearFeedTimer()
+      stickyBook = null
+      lastRoutingError = null
       try {
         engine.resetSession()
       } catch (e) {

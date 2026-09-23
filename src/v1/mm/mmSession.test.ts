@@ -25,6 +25,7 @@ const idle: MmSessionState = {
   fillsCount: 0,
   lastFillAt: null,
   activeTicker: null,
+  quoteBook: null,
   updateError: null,
 }
 
@@ -53,6 +54,7 @@ describe('mmSession transitions', () => {
       cash: 95,
       inventory: 2,
       realizedPnl: 1.5,
+      quoteBook: 'NO',
     }
     const next = transitionStart(stopped, 300)
     expect(next.status).toBe('running')
@@ -61,6 +63,7 @@ describe('mmSession transitions', () => {
     expect(next.resetCount).toBe(1)
     expect(next.cash).toBe(95)
     expect(next.inventory).toBe(2)
+    expect(next.quoteBook).toBe('NO')
   })
 
   it('start: running is a no-op', () => {
@@ -81,6 +84,7 @@ describe('mmSession transitions', () => {
       inventory: -1,
       realizedPnl: 0.4,
       fillsCount: 3,
+      quoteBook: 'YES',
     }
     const next = transitionStop(running, 250)
     expect(next.status).toBe('stopped')
@@ -88,6 +92,7 @@ describe('mmSession transitions', () => {
     expect(next.stoppedAt).toBe(250)
     expect(next.cash).toBe(90)
     expect(next.fillsCount).toBe(3)
+    expect(next.quoteBook).toBe('YES')
   })
 
   it('stop: idle / stopped are no-ops', () => {
@@ -101,7 +106,7 @@ describe('mmSession transitions', () => {
     expect(transitionStop(stopped, 99)).toBe(stopped)
   })
 
-  it('reset: returns to idle, zeros P&L/inventory/fills/errors, bumps resetCount', () => {
+  it('reset: returns to idle, zeros P&L/inventory/fills/errors/quoteBook, bumps resetCount', () => {
     const running: MmSessionState = {
       ...idle,
       status: 'running',
@@ -115,6 +120,7 @@ describe('mmSession transitions', () => {
       fillsCount: 7,
       lastFillAt: 999,
       activeTicker: 'KXBTC-1',
+      quoteBook: 'NO',
       updateError: makeUpdateError('orderbook failed', 'mm-proxy :8787'),
     }
     const next = transitionReset(running)
@@ -131,6 +137,7 @@ describe('mmSession transitions', () => {
       fillsCount: 0,
       lastFillAt: null,
       activeTicker: null,
+      quoteBook: null,
       updateError: null,
     })
   })
@@ -155,6 +162,7 @@ describe('createMmSessionStore', () => {
     store.subscribe(() => seen.push(store.getState().status))
 
     expect(store.getState().status).toBe('idle')
+    expect(store.getState().quoteBook).toBeNull()
     store.start()
     expect(store.getState().status).toBe('running')
     expect(store.getState().startedAt).toBeTypeOf('number')
@@ -172,6 +180,7 @@ describe('createMmSessionStore', () => {
       inventory: 0,
       realizedPnl: 0,
       fillsCount: 0,
+      quoteBook: null,
       updateError: null,
     })
     expect(seen).toEqual(['running', 'stopped', 'idle'])
@@ -189,6 +198,7 @@ describe('createMmSessionStore', () => {
       fillsCount: 1,
       lastFillAt: 123,
       activeTicker: 'KXETH-1',
+      quoteBook: 'NO',
     })
     expect(store.getState()).toMatchObject({
       status: 'running',
@@ -197,6 +207,7 @@ describe('createMmSessionStore', () => {
       realizedPnl: 0.25,
       fillsCount: 1,
       activeTicker: 'KXETH-1',
+      quoteBook: 'NO',
     })
   })
 
@@ -213,8 +224,8 @@ describe('createMmSessionStore', () => {
   })
 })
 
-describe('U2.2 error object shape', () => {
-  it('makeUpdateError + formatUpdateError', () => {
+describe('U2.2 / U2.3 error object shape', () => {
+  it('makeUpdateError defaults to U2.2 + formatUpdateError', () => {
     const err = makeUpdateError('orderbook failed', 'mm-proxy :8787')
     expect(err).toEqual({
       code: 'U2.2',
@@ -223,6 +234,18 @@ describe('U2.2 error object shape', () => {
     })
     expect(formatUpdateError(err)).toBe(
       'U2.2: orderbook failed — needs mm-proxy :8787',
+    )
+  })
+
+  it('makeUpdateError with U2.3 code formats U2.3 line', () => {
+    const err = makeUpdateError(
+      'YES book one-sided',
+      'two-sided YES and NO touch on feed',
+      'U2.3',
+    )
+    expect(err.code).toBe('U2.3')
+    expect(formatUpdateError(err)).toBe(
+      'U2.3: YES book one-sided — needs two-sided YES and NO touch on feed',
     )
   })
 })

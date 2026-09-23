@@ -1,14 +1,17 @@
 /**
- * U2.1 / U2.2 — Paper MM session store.
+ * U2.1 / U2.2 / U2.3 — Paper MM session store.
  * Start / Stop / Reset shell + paper P&L stats (engine attached via mmRunner).
+ * U2.3 adds quoteBook (YES|NO) from betterBookHint routing.
  * Paper-only · read-only Kalshi · never places live orders.
  */
+
+import type { QuoteBook } from './quoteBook'
 
 export type MmSessionStatus = 'idle' | 'running' | 'stopped'
 
 /** Fail-loud update error surfaced in the Apple-clean strip. */
 export type MmUpdateError = {
-  code: 'U2.2'
+  code: 'U2.2' | 'U2.3'
   message: string
   dependency: string
 }
@@ -34,7 +37,9 @@ export type MmSessionState = {
   lastFillAt: number | null
   /** Ticker the runner is quoting (single-book). */
   activeTicker: string | null
-  /** Fail-loud U2.2 error (orderbook/spot/etc); null when healthy. */
+  /** Active quote book (YES|NO); null when idle/reset. */
+  quoteBook: QuoteBook | null
+  /** Fail-loud U2.2/U2.3 error (orderbook/spot/book routing); null when healthy. */
   updateError: MmUpdateError | null
 }
 
@@ -49,6 +54,7 @@ export type MmSessionStatsPatch = Partial<
     | 'fillsCount'
     | 'lastFillAt'
     | 'activeTicker'
+    | 'quoteBook'
     | 'updateError'
   >
 >
@@ -75,6 +81,7 @@ const ZERO_STATS = {
   fillsCount: 0,
   lastFillAt: null as number | null,
   activeTicker: null as string | null,
+  quoteBook: null as QuoteBook | null,
   updateError: null as MmUpdateError | null,
 }
 
@@ -100,6 +107,7 @@ function sameState(a: MmSessionState, b: MmSessionState): boolean {
     a.fillsCount === b.fillsCount &&
     a.lastFillAt === b.lastFillAt &&
     a.activeTicker === b.activeTicker &&
+    a.quoteBook === b.quoteBook &&
     sameError(a.updateError, b.updateError)
   )
 }
@@ -144,7 +152,7 @@ export function transitionStop(
 }
 
 /**
- * Reset clears session counters / P&L / errors → idle.
+ * Reset clears session counters / P&L / errors / quoteBook → idle.
  * Does not wipe the market feed (feed lives outside this store).
  */
 export function transitionReset(state: MmSessionState): MmSessionState {
@@ -216,14 +224,15 @@ export function statusPillLabel(
   return `Running · ${formatElapsed(nowMs - started)}`
 }
 
-/** Apple-clean error line: `U2.2: … — needs …` */
+/** Apple-clean error line: `U2.2: … — needs …` / `U2.3: … — needs …` */
 export function formatUpdateError(err: MmUpdateError): string {
-  return `U2.2: ${err.message} — needs ${err.dependency}`
+  return `${err.code}: ${err.message} — needs ${err.dependency}`
 }
 
 export function makeUpdateError(
   message: string,
   dependency: string,
+  code: 'U2.2' | 'U2.3' = 'U2.2',
 ): MmUpdateError {
-  return { code: 'U2.2', message, dependency }
+  return { code, message, dependency }
 }

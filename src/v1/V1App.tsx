@@ -24,9 +24,9 @@ import {
 
 /**
  * KMM v1 — Apple-clean feed UI.
- * Dark iOS-style surface. Continuous feed + YES/NO + Paper MM Start/Stop/Reset shell.
- * Paper / read-only. Quoting engine arrives in a later update (U2.2+).
- * YES and NO are complements (same $ outcome); tighter book → less queue ahead.
+ * Dark iOS-style surface. Continuous feed + YES/NO + Paper MM Start/Stop/Reset.
+ * U2.3 routes paper quotes to the better YES/NO book (sticky while inventory open).
+ * Paper / read-only. YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
   const snap = useContinuousFeed()
@@ -102,7 +102,7 @@ export function V1App() {
           </div>
         </header>
 
-        {/* Paper MM control strip — U2.2 paper run + P&L */}
+        {/* Paper MM control strip — U2.2 run+PnL · U2.3 better-book routing */}
         <section className="kmm-mm-strip mb-6 px-4 py-3.5 sm:px-5" aria-label="Paper market making">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
@@ -125,6 +125,11 @@ export function V1App() {
               </span>
               {mm.activeTicker && (
                 <span className="kmm-chip num text-[11px]">{mm.activeTicker}</span>
+              )}
+              {mm.quoteBook && (
+                <span className="text-[12px] font-medium text-[var(--color-secondary)]">
+                  Book {mm.quoteBook}
+                </span>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -218,7 +223,7 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start quotes the focused market (paper YES book)'
+                ? 'Idle · Start quotes the better YES/NO book (paper)'
                 : mm.status === 'running'
                   ? 'Session running · paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
