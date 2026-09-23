@@ -13,6 +13,9 @@ import {
   type FeedFreshnessTone,
 } from './universeCache'
 
+/** Per-poll AbortSignal timeout — hung /local-api/crypto15m must not freeze inFlight. */
+export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 8_000
+
 function isAbortReason(e: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true
   if (e instanceof Error) {
@@ -80,15 +83,34 @@ function normalizeProxyMarkets(raw: LocalCrypto15mResponse): Crypto15mMarket[] {
   return out
 }
 
-async function pollOnce(signal?: AbortSignal): Promise<void> {
+function timeoutErrorMessage(): string {
+  return `feed poll timeout (${CONTINUOUS_FEED_FETCH_TIMEOUT_MS / 1000}s) — needs mm-proxy :8787`
+}
+
+async function pollOnce(): Promise<void> {
   if (inFlight) return
   inFlight = true
   const attemptedAt = new Date().toISOString()
   snapshot = { ...snapshot, lastAttemptAt: attemptedAt }
   emit()
+
+  const ac = new AbortController()
+  const timeoutId = setTimeout(() => {
+    ac.abort()
+  }, CONTINUOUS_FEED_FETCH_TIMEOUT_MS)
+
   try {
-    const raw = await fetchLocalCrypto15m(signal)
-    if (signal?.aborted) return
+    const raw = await fetchLocalCrypto15m(ac.signal)
+    if (ac.signal.aborted) {
+      // Timed out; do not advance lastSuccessAt.
+      snapshot = {
+        ...snapshot,
+        lastAttemptAt: attemptedAt,
+        lastError: timeoutErrorMessage(),
+      }
+      emit()
+      return
+    }
     const markets = normalizeProxyMarkets(raw)
     const nowIso = new Date().toISOString()
     const errParts = [...(raw.errors ?? [])]
@@ -116,7 +138,15 @@ async function pollOnce(signal?: AbortSignal): Promise<void> {
     }
     emit()
   } catch (e) {
-    if (isAbortReason(e, signal)) return
+    if (isAbortReason(e, ac.signal)) {
+      snapshot = {
+        ...snapshot,
+        lastAttemptAt: attemptedAt,
+        lastError: timeoutErrorMessage(),
+      }
+      emit()
+      return
+    }
     snapshot = {
       ...snapshot,
       lastAttemptAt: attemptedAt,
@@ -124,6 +154,7 @@ async function pollOnce(signal?: AbortSignal): Promise<void> {
     }
     emit()
   } finally {
+    clearTimeout(timeoutId)
     inFlight = false
   }
 }
@@ -175,4 +206,9 @@ export function __resetContinuousFeedForTests(): void {
   subscriberCount = 0
   listeners.clear()
   snapshot = emptySnap()
+}
+
+/** Test helper — whether a poll is currently in flight. */
+export function __continuousFeedInFlightForTests(): boolean {
+  return inFlight
 }

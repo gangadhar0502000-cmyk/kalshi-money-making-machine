@@ -17,6 +17,8 @@ import crypto from 'node:crypto'
 import { URL } from 'node:url'
 
 const PORT = Number(process.env.MM_PROXY_PORT || 8787)
+/** Per-request timeout for upstream Kalshi GETs (fan-out must not hang forever). */
+const KALSHI_FETCH_TIMEOUT_MS = 10_000
 const BASES = [
   'https://api.elections.kalshi.com/trade-api/v2',
   'https://external-api.kalshi.com/trade-api/v2',
@@ -183,7 +185,10 @@ async function kalshiGet(apiPathWithQuery) {
       )
     }
     try {
-      const res = await fetch(url, { headers })
+      const res = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(KALSHI_FETCH_TIMEOUT_MS),
+      })
       const text = await res.text()
       let json
       try {
@@ -197,7 +202,14 @@ async function kalshiGet(apiPathWithQuery) {
       }
       return { ok: true, status: res.status, json, authenticated: Boolean(secrets.keyId) }
     } catch (e) {
-      lastErr = e instanceof Error ? e : new Error(String(e))
+      const name = e && typeof e === 'object' && 'name' in e ? String(e.name) : ''
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        lastErr = new Error(
+          `Kalshi fetch timeout (${KALSHI_FETCH_TIMEOUT_MS}ms) on ${bare}`,
+        )
+      } else {
+        lastErr = e instanceof Error ? e : new Error(String(e))
+      }
     }
   }
   throw lastErr || new Error('Kalshi GET failed')
@@ -246,6 +258,8 @@ const universeCache = {
   markets: null,
   fetchedAt: null,
   lastSuccessMs: null,
+  /** ms of last refresh attempt start (success or keep-last failure). */
+  lastAttemptMs: null,
   refreshing: false,
   /** @type {string[]} */
   errors: [],
@@ -337,6 +351,7 @@ function kickUniverseRefresh() {
     return universeCache.refreshPromise
   }
   universeCache.refreshing = true
+  universeCache.lastAttemptMs = Date.now()
   universeCache.refreshPromise = (async () => {
     try {
       const result = await fanOutCrypto15mUniverse()
@@ -398,6 +413,10 @@ async function handleLocal(req, res, url) {
       credentialsSource: secrets.source,
       cacheAgeMs: age,
       lastSuccessAt: universeCache.fetchedAt,
+      lastRefreshAttemptAt:
+        universeCache.lastAttemptMs != null
+          ? new Date(universeCache.lastAttemptMs).toISOString()
+          : null,
       refreshing: universeCache.refreshing,
       marketCount: Array.isArray(universeCache.markets) ? universeCache.markets.length : 0,
     })
@@ -511,8 +530,36 @@ const server = http.createServer((req, res) => {
   })
 })
 
+/** Background universe refresh — do not rely solely on client GETs under orderbook load. */
+let universeRefreshTimer = null
+
+function startUniverseRefreshTimer() {
+  if (universeRefreshTimer != null) return
+  universeRefreshTimer = setInterval(() => {
+    const age =
+      universeCache.lastSuccessMs != null
+        ? Date.now() - universeCache.lastSuccessMs
+        : null
+    if (age == null || age >= CRYPTO15M_CACHE_TTL_MS) {
+      kickUniverseRefresh()
+    }
+  }, CRYPTO15M_CACHE_TTL_MS)
+}
+
+function stopUniverseRefreshTimer() {
+  if (universeRefreshTimer != null) {
+    clearInterval(universeRefreshTimer)
+    universeRefreshTimer = null
+  }
+}
+
 server.listen(PORT, '127.0.0.1', () => {
+  startUniverseRefreshTimer()
   console.log(
-    `[mm-proxy] listening http://127.0.0.1:${PORT} · Read-only API · never places trades`,
+    `[mm-proxy] listening http://127.0.0.1:${PORT} · Read-only API · never places trades · Kalshi timeout ${KALSHI_FETCH_TIMEOUT_MS}ms`,
   )
+})
+
+server.on('close', () => {
+  stopUniverseRefreshTimer()
 })

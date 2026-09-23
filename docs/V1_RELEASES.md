@@ -112,6 +112,14 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Feed stale on MM strip:** when Running and `feedTone !== 'ok'`, quiet alert `U2.8: feed stale (age) — needs continuous feed / mm-proxy :8787` (amber/red); existing `updateError` still wins.
 - Paper-only / read-only; never places live trades. Loose multi-book rules / fills / metrics grid / books panel / rail untouched.
 
+## U2.9 — feed poll + proxy timeouts (stale freeze)
+
+- **Client continuous feed:** each poll uses `AbortController` + **8s** timeout (`CONTINUOUS_FEED_FETCH_TIMEOUT_MS`). Hung `/local-api/crypto15m` self-aborts so `inFlight` clears; `lastError` like `feed poll timeout (8s) — needs mm-proxy :8787`; **does not** advance `lastSuccessAt`.
+- **mm-proxy `kalshiGet`:** **10s** `AbortSignal.timeout` (`KALSHI_FETCH_TIMEOUT_MS`) so orderbook / series fan-out cannot hang forever.
+- **Background universe refresh:** timer every `CRYPTO15M_CACHE_TTL_MS` (2.5s) kicks refresh when cache age ≥ TTL or never succeeded — not solely driven by client GETs under L2 storm. Health exposes optional `lastRefreshAttemptAt` (keep-last failures still record attempt; never fake `lastSuccessMs`).
+- Stops false multi-minute **Degraded** while Paper MM is running 5/5. Amber threshold unchanged.
+- Paper-only / read-only; never places live trades.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.
