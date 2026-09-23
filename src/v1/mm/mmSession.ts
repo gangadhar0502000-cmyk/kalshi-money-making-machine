@@ -13,7 +13,7 @@ export type MmSessionStatus = 'idle' | 'running' | 'stopped'
 
 /** Fail-loud update error surfaced in the Apple-clean strip. */
 export type MmUpdateError = {
-  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' | 'U2.14' | 'U3.0' | 'U3.1'
+  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' | 'U2.14' | 'U3.0' | 'U3.1' | 'U3.1.1' | 'U3.1.2' | 'U3.2'
   message: string
   dependency: string
 }
@@ -32,7 +32,7 @@ export type MmBookRow = {
   message: string
   /** U2.13: primary L2 book for queue fills. */
   quoteBook: QuoteBook
-  /** U3.1: fair value P(YES) dollars, quiet strip. */
+  /** Fair value P(YES) dollars — UI/telemetry only (U3.2 does not center quotes on FV). */
   fairValue?: number | null
   /** U3.1: inventory skew cents on last quote. */
   skewCents?: number | null
@@ -302,7 +302,7 @@ export function formatUpdateError(err: MmUpdateError): string {
 export function makeUpdateError(
   message: string,
   dependency: string,
-  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' | 'U2.14' | 'U3.0' | 'U3.1' = 'U2.2',
+  code: 'U2.2' | 'U2.3' | 'U2.4' | 'U2.13' | 'U2.14' | 'U3.0' | 'U3.1' | 'U3.1.1' | 'U3.1.2' | 'U3.2' = 'U2.2',
 ): MmUpdateError {
   return { code, message, dependency }
 }

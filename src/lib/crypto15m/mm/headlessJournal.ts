@@ -10,19 +10,40 @@ export interface JournalEvent {
   /** Epoch ms */
   t: number
   iso: string
+  /** Plain house tags (house_mid / flatten / blackout / …) or legacy digest ids — never drives quotes. */
   scenarioId?: string
   ticker?: string
   asset?: string
   side?: string
   /** YES price dollars 0–1 */
   price?: number
+  /** Book mid (midYes) at fill — dollars 0–1. */
+  mid?: number | null
+  /** Digital FV at fill (telemetry only under U3.2). */
+  fairValue?: number | null
+  /** (FV − mid) ¢ at fill — telemetry only; does not center quotes. */
   edgeCents?: number | null
+  /** Resting / book yes bid at fill. */
+  yesBid?: number | null
+  /** Resting / book yes ask at fill. */
+  yesAsk?: number | null
+  /** Quote center mode at fill (`mid` under U3.2 house rules). */
+  centerMode?: 'fv' | 'mid' | null
+  /** Inventory before this fill applied. */
+  inventoryBefore?: number
+  /** Inventory after this fill applied. */
   inventory?: number
   minutesLeft?: number | null
   captureCents?: number | null
   reason?: string
   /** Realized $ delta on closes (fills that reduce inventory). */
   realizedDelta?: number
+  /** Cash after fill (dollars), when available. */
+  cashAfter?: number | null
+  /** Spot used for FV telemetry at fill. */
+  spot?: number | null
+  /** Strike / floorStrike at fill. */
+  strike?: number | null
   /**
    * stuckUnwind counter at blocked_close time (consecutive S3 profit-bar blocks).
    * Measurement: detect S3 flicker resetting stuck before S4.1/S4.2.
@@ -81,8 +102,8 @@ const EMPTY_ROW = (): ScenarioDigestRow => ({
   totalRealizedDelta: 0,
 })
 
-const CLOSE_SCENARIOS = new Set(['S3', 'S4', 'S4.1', 'S4.2'])
-const OPEN_SCENARIOS = new Set(['S1', 'S2'])
+const CLOSE_SCENARIOS = new Set(['S3', 'S4', 'S4.1', 'S4.2', 'flatten', 'blackout_flatten'])
+const OPEN_SCENARIOS = new Set(['S1', 'S2', 'house_mid', 'open'])
 
 /** Classify a fill as open vs close for digest split (measurement only). */
 export function classifyFillLeg(
@@ -236,7 +257,7 @@ export function parseBlockedCloseCaptureCents(reason: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-/** Build a JournalEvent for a paper fill. */
+/** Build a JournalEvent for a paper fill (full tape detail for U3.2+ rule coding). */
 export function buildFillEvent(input: {
   t?: number
   scenarioId?: string
@@ -244,12 +265,21 @@ export function buildFillEvent(input: {
   asset?: string | null
   side: string
   price: number
+  mid?: number | null
+  fairValue?: number | null
   edgeCents?: number | null
+  yesBid?: number | null
+  yesAsk?: number | null
+  centerMode?: 'fv' | 'mid' | null
+  inventoryBefore?: number
   inventory?: number
   minutesLeft?: number | null
   captureCents?: number | null
   reason?: string
   realizedDelta?: number
+  cashAfter?: number | null
+  spot?: number | null
+  strike?: number | null
   queueAhead?: number
   fillSize?: number
 }): JournalEvent {
@@ -263,12 +293,21 @@ export function buildFillEvent(input: {
     asset: input.asset ?? undefined,
     side: input.side,
     price: input.price,
+    mid: input.mid ?? null,
+    fairValue: input.fairValue ?? null,
     edgeCents: input.edgeCents ?? null,
+    yesBid: input.yesBid ?? null,
+    yesAsk: input.yesAsk ?? null,
+    centerMode: input.centerMode ?? null,
+    inventoryBefore: input.inventoryBefore,
     inventory: input.inventory,
     minutesLeft: input.minutesLeft ?? null,
     captureCents: input.captureCents ?? null,
     reason: input.reason,
     realizedDelta: input.realizedDelta,
+    cashAfter: input.cashAfter ?? null,
+    spot: input.spot ?? null,
+    strike: input.strike ?? null,
     queueAhead: input.queueAhead,
     fillSize: input.fillSize,
   }

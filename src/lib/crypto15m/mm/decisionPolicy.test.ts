@@ -1,5 +1,5 @@
 /**
- * Decision policy — U3.1 Family E (S1–S5 not used).
+ * Decision policy — U3.2 house mid (S1–S5 not used; FV does not center).
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
@@ -11,7 +11,8 @@ import {
   U31_BLACKOUT,
   U312_BLACKOUT_FLATTEN,
   U311_EXTREME_MID,
-  U31_NO_FV,
+  U32_HOUSE_MID,
+  U32_NO_MID,
   type DecisionPolicyConfig,
   type DecisionPolicyInput,
 } from './decisionPolicy'
@@ -73,7 +74,7 @@ function baseInput(partial: Partial<DecisionPolicyInput> = {}): DecisionPolicyIn
   }
 }
 
-describe('decisionPolicy U3.1 Family E', () => {
+describe('decisionPolicy U3.2 house mid', () => {
   it('quotingEnabled false → U3.0 pause', () => {
     const d = decideQuoteSides(
       baseInput({ config: baseConfig({ quotingEnabled: false }) }),
@@ -83,16 +84,56 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.bothOffReason).toBe(QUOTING_PAUSED_REASON)
   })
 
-  it('two-sided open around FV when flat and outside flatten', () => {
+  it('two-sided open around mid (not FV) when flat', () => {
     const d = decideQuoteSides(baseInput())
     expect(d.bidActive).toBe(true)
     expect(d.askActive).toBe(true)
     expect(d.active).toBe(true)
-    expect(d.centerMode).toBe('fv')
-    expect(d.activeScenario).toBe('open')
+    expect(d.centerMode).toBe('mid')
+    expect(d.activeScenario).toBe('house_mid')
+    expect(d.bidReason).toBe(U32_HOUSE_MID)
     expect(d.yesAsk).toBeGreaterThan(d.yesBid)
-    expect(d.yesBid).toBeGreaterThanOrEqual(0.01)
-    expect(d.yesAsk).toBeLessThanOrEqual(0.99)
+  })
+
+  it('mid 0.05 + FV 0.25 → quotes near mid, not near FV', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        mid: 0.05,
+        fairValue: 0.25,
+        edgeCents: 20,
+        bookBestBid: 0.04,
+        bookBestAsk: 0.06,
+        // mid == toxicMidLow (0.05) is extreme — use just above for open path
+        config: baseConfig({ toxicMidLow: 0.04, toxicMidHigh: 0.95 }),
+      }),
+    )
+    expect(d.centerMode).toBe('mid')
+    expect(d.bidActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    const center = (d.yesBid + d.yesAsk) / 2
+    expect(Math.abs(center - 0.05)).toBeLessThan(0.06)
+    expect(Math.abs(center - 0.25)).toBeGreaterThan(0.1)
+    expect(d.yesBid).toBeLessThan(0.15)
+  })
+
+  it('missing FV / fvBlockReason does NOT park (telemetry only)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        fairValue: null,
+        fvBlockReason: 'U3.1: no spot — needs Binance US/Coinbase',
+      }),
+    )
+    expect(d.bidActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    expect(d.centerMode).toBe('mid')
+    expect(d.activeScenario).toBe('house_mid')
+  })
+
+  it('invalid mid → U3.2 no mid park', () => {
+    const d = decideQuoteSides(baseInput({ mid: 0 }))
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toBe(U32_NO_MID)
   })
 
   it('blackout + flat → both OFF', () => {
@@ -168,21 +209,7 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(String(d.bidReason + d.askReason)).not.toMatch(/S[1-5]/)
   })
 
-  it('no quote without FV / spot block', () => {
-    const d = decideQuoteSides(
-      baseInput({ fairValue: null, fvBlockReason: 'U3.1: no spot — needs Binance US/Coinbase' }),
-    )
-    expect(d.bidActive).toBe(false)
-    expect(d.askActive).toBe(false)
-    expect(d.bothOffReason).toMatch(/U3\.1: no spot/)
-  })
-
-  it('no fair value parks with U31_NO_FV', () => {
-    const d = decideQuoteSides(baseInput({ fairValue: null }))
-    expect(d.bothOffReason).toBe(U31_NO_FV)
-  })
-
-  it('clamp bounds hold even with extreme FV', () => {
+  it('clamp bounds hold with extreme mid still maker-clamped', () => {
     const d = decideQuoteSides(
       baseInput({
         fairValue: 0.99,
@@ -194,6 +221,7 @@ describe('decisionPolicy U3.1 Family E', () => {
     )
     expect(d.yesBid).toBeGreaterThanOrEqual(0.02 - 1e-9)
     expect(d.yesAsk).toBeLessThanOrEqual(0.98 + 1e-9)
+    expect(d.centerMode).toBe('mid')
   })
 
   it('max inventory withdraws adding side', () => {
@@ -202,7 +230,7 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.askActive).toBe(true)
   })
 
-  it('not running parks without U3.1', () => {
+  it('not running parks without U3.2', () => {
     const d = decideQuoteSides(baseInput({ running: false }))
     expect(d.bothOffReason).toMatch(/not running/i)
   })
@@ -308,5 +336,4 @@ describe('decisionPolicy U3.1 Family E', () => {
     expect(d.askActive).toBe(true)
     expect(d.activeScenario).toBe('blackout_flatten')
   })
-
 })

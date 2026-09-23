@@ -49,36 +49,42 @@ function mk(
 describe('edgeRank', () => {
   const now = Date.parse('2026-09-21T19:50:00.000Z')
 
-  it('ranks higher |edge| markets first (sane edges only prefer high |edge|)', () => {
-    const btc = mk({
-      ticker: 'BTC-HI',
+  it('U3.2: does NOT prefer larger |FV−mid|; prefers L2 / mid quality', () => {
+    // Wide-mid book with huge |FV−mid| vs tight L2 mid-quality book with tiny edge
+    const hugeEdge = mk({
+      ticker: 'BTC-HUGE-EDGE',
       asset: 'BTC',
-      midYes: 0.55,
+      midYes: 0.2,
+      yesBid: 0.1,
+      yesAsk: 0.3, // 20¢ wide
       floorStrike: 100_000,
       minutesRemaining: 10,
       closeTime: '2026-09-21T20:00:00.000Z',
     })
-    const eth = mk({
-      ticker: 'ETH-LO',
+    const tightL2 = mk({
+      ticker: 'ETH-TIGHT',
       asset: 'ETH',
       midYes: 0.5,
+      yesBid: 0.49,
+      yesAsk: 0.51, // 2¢ tight
       floorStrike: 3_000,
       minutesRemaining: 15,
       closeTime: '2026-09-21T20:05:00.000Z',
     })
-    // BTC mild ITM → ~19¢ sane edge; ETH ATM → ~0
+    // BTC far OTM vs high strike → large |edge|; ETH ATM → ~0
     const ranked = rankMarketsByAbsEdge(
-      [eth, btc],
+      [hugeEdge, tightL2],
       { BTC: 100_200, ETH: 3_000 },
       0.7,
       2,
       now,
       25,
     )
-    expect(ranked[0]!.sanityPark).toBe(false)
-    expect(ranked[0]!.ticker).toBe('BTC-HI')
-    expect(ranked[0]!.absEdgeCents).toBeGreaterThan(ranked[1]!.absEdgeCents)
-    expect(ranked[0]!.quoteEligible).toBe(true)
+    expect(ranked[0]!.ticker).toBe('ETH-TIGHT')
+    expect(ranked[0]!.hasL2).toBe(true)
+    expect(ranked[0]!.midQuality).toBeGreaterThan(ranked[1]!.midQuality)
+    // Fail-loud: must not rank by absEdge descending
+    expect(ranked[0]!.absEdgeCents).toBeLessThanOrEqual(ranked[1]!.absEdgeCents + 1e-9)
   })
 
   it('enforces maxActiveMarkets cap', () => {
@@ -195,7 +201,7 @@ describe('edgeRank', () => {
     expect(picked.map((m) => m.ticker)).toEqual(['KXBTC15M-OK'])
   })
 
-  it('ZEC without ZEC spot → no FV from BTC spot; no_spot / not quoteEligible', () => {
+  it('ZEC without ZEC spot → no FV from BTC spot; U3.2 still quoteEligible on mid+L2', () => {
     const zec = mk({
       ticker: 'KXZEC15M-1',
       asset: 'ZEC',
@@ -209,7 +215,9 @@ describe('edgeRank', () => {
     expect(scored.asset).toBe('ZEC')
     expect(scored.fairValue).toBeNull()
     expect(scored.fvMissingReason).toBe('no_spot')
-    expect(scored.quoteEligible).toBe(false)
+    // U3.2: mid+L2 eligible regardless of FV
+    expect(scored.hasL2).toBe(true)
+    expect(scored.quoteEligible).toBe(true)
     expect(scored.absEdgeCents).toBe(0)
 
     const ranked = rankMarketsByAbsEdge(
@@ -275,10 +283,10 @@ describe('edgeRank', () => {
 
 })
 
-describe('S5.1 SLOT_EVICT', () => {
+describe('U3.2 SLOT_EVICT (FV sanity telemetry only)', () => {
   const now = Date.parse('2026-09-21T19:50:00.000Z')
 
-  it('evicts sanity+flat from sticky active set', () => {
+  it('does NOT evict sanity+flat — |FV−mid| no longer drives slots', () => {
     const insane = mk({
       ticker: 'BNB-INSANE',
       asset: 'BNB',
@@ -295,7 +303,6 @@ describe('S5.1 SLOT_EVICT', () => {
       minutesRemaining: 10,
       closeTime: '2026-09-21T20:01:00.000Z',
     })
-    // BNB far ITM → sanity park; BTC mild ITM → quote eligible
     const ranked = rankMarketsByAbsEdge(
       [insane, sane],
       { BNB: 150, BTC: 100.05 },
@@ -305,7 +312,7 @@ describe('S5.1 SLOT_EVICT', () => {
       25,
     )
     const bnb = ranked.find((r) => r.ticker === 'BNB-INSANE')!
-    expect(bnb.sanityPark).toBe(true)
+    expect(bnb.sanityPark).toBe(true) // telemetry flag may still set
 
     const picked = pickActiveMarkets(ranked, {
       maxActive: 2,
@@ -314,11 +321,11 @@ describe('S5.1 SLOT_EVICT', () => {
       requireEdge: true,
       evictSanityFlat: true,
     })
-    expect(picked.find((m) => m.ticker === 'BNB-INSANE')).toBeUndefined()
-    expect(picked.some((m) => m.ticker === 'BTC-SANE')).toBe(true)
+    // Sticky BNB kept — U3.2 does not evict on FV sanity
+    expect(picked.some((m) => m.ticker === 'BNB-INSANE')).toBe(true)
   })
 
-  it('does NOT evict sanity book when inventory ≠ 0', () => {
+  it('sticky inventory book still kept', () => {
     const insane = mk({
       ticker: 'BNB-HOLD',
       asset: 'BNB',

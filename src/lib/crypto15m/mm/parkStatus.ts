@@ -37,6 +37,8 @@ export function parkStatusLabel(opts: {
   if (both.includes('blackout') || both.includes('settlement blackout')) return 'blackout'
   if (both.includes('toxic')) return 'toxic'
   if (both.includes('expiry')) return 'expiry'
+  if (both.includes('house mid')) return 'house mid'
+  if (both.includes('no mid') && both.includes('u3.2')) return 'no mid'
   if (both.includes('no fv')) return 'no FV'
   // Mid fb only when FV genuinely unavailable — never for insane FV edge.
   if (opts.centerMode === 'mid' && fv == null) return 'mid fb'

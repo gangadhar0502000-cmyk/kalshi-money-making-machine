@@ -2,7 +2,7 @@
  * U2.4 / U2.5 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
  * Default Start → multi-book + strictRealism: false (LOOSE presets).
  * U2.5: map portfolio books → MmBookRow[] for Active books panel.
- * Reuses existing PaperMmPortfolio / engines — U3.1 Family E digital FV quotes — no S* playbook.
+ * Reuses existing PaperMmPortfolio / engines — U3.2 house mid quotes — no S* playbook / no FV mismatch opens.
  * U2.2/U2.3 helpers remain for residual single-engine / error mapping.
  * Paper-only · never places live orders.
  */
@@ -72,6 +72,12 @@ export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
       'user-defined quote logic (quotingEnabled)',
       'U3.0',
     )
+  }
+  if (/U3\.2:\s*house mid quotes/i.test(msg)) {
+    return null // informational strip — not an error
+  }
+  if (/U3\.2:\s*no mid/i.test(msg)) {
+    return makeUpdateError('no mid — needs two-sided book', 'two-sided yes bid/ask', 'U3.2')
   }
   if (/U3\.1\.2:\s*blackout flatten/i.test(msg)) {
     return makeUpdateError(
@@ -374,7 +380,7 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           useLiveBook: true,
           // U2.10: slightly slower L2 polls under multi so coalesce flush + feed share connections
           bookPollMs: 1000,
-          // U3.1 Family E — arm quoting on Start (migrates old paused sessions)
+          // U3.2 house mid — arm quoting on Start (migrates old paused sessions)
           quotingEnabled: true,
           fvQuoting: true,
           blackoutMinutes: 0.75,

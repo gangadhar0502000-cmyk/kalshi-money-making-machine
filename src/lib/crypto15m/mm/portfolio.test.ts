@@ -107,30 +107,35 @@ describe('PaperMmPortfolio', () => {
     expect(st.books.every((b) => b.snapshot.running)).toBe(true)
   })
 
-  it('ranks and activates higher |edge| before lower', () => {
-    const low = mk({
+  it('U3.2: prefers mid quality / L2 over larger |FV−mid|', () => {
+    const lowEdge = mk({
       ticker: 'ETH-FLAT',
       asset: 'ETH',
       midYes: 0.5,
+      yesBid: 0.49,
+      yesAsk: 0.51,
       floorStrike: 3_000,
       minutesRemaining: 10,
     })
-    const high = mk({
+    const highEdge = mk({
       ticker: 'BTC-EDGE',
       asset: 'BTC',
-      midYes: 0.48,
+      midYes: 0.2,
+      yesBid: 0.1,
+      yesAsk: 0.3,
       floorStrike: 100_000,
       minutesRemaining: 12,
     })
     portfolio.seedSpot('BTC', 100_100)
     portfolio.seedSpot('ETH', 3_000)
     portfolio.setConfig({ maxActiveMarkets: 1 })
-    portfolio.syncMarketUniverse([low, high])
+    portfolio.syncMarketUniverse([lowEdge, highEdge])
     portfolio.start()
     const st = portfolio.getState()
     expect(st.aggregate.activeBooks).toBe(1)
-    expect(st.books[0]!.snapshot.marketTicker).toBe('BTC-EDGE')
-    expect(st.scan[0]!.ticker).toBe('BTC-EDGE')
+    // Mid-quality ETH (0.5, tight) beats huge-|edge| BTC (0.2, wide)
+    expect(st.books[0]!.snapshot.marketTicker).toBe('ETH-FLAT')
+    expect(st.scan[0]!.ticker).toBe('ETH-FLAT')
   })
 
   it('different assets get different spots → different FV on books', () => {

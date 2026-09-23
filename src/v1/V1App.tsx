@@ -269,9 +269,9 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start runs paper multi-book Family E (digital FV + τ-flatten) · L2 fills when book live · paper-only'
+                ? 'Idle · Start runs paper multi-book house mid (mid ± half-spread + τ-flatten) · L2 fills when book live · paper-only'
                 : mm.status === 'running'
-                  ? 'Session running · Family E paper quotes · read-only'
+                  ? 'Session running · house mid paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
             </p>
           )}

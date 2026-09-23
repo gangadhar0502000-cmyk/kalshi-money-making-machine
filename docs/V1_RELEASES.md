@@ -214,6 +214,18 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Bug: blackout parked **both** sides even with inventory, blocking Family E flatten in the last ~45s.
 - Fix: `mins ≤ blackoutMinutes` + flat → park both; + inventory → force flatten-only (`blackout_flatten`, strip `U3.1.2: blackout flatten — exit only`). U3.1.1 open refuse still applies; reduce allowed at extreme mid. Paper-only.
 
+
+## U3.2 — House mid quotes (no FV mismatch opens)
+
+- **Product:** mid-centered maker — quote around **book mid** ± half-spread with inventory skew. **Not** Family E digital FV opens, not S1–S5, not complete-set, not FV–mid gap trading.
+- FV still computed for UI/telemetry; does **not** center quotes or rank by `|FV−mid|`.
+- Ranking: L2 / mid quality / tighter spread (`U3.2: rank by L2 / mid quality — not |FV−mid|`).
+- Retained gates: hardFlatMinutes flatten, blackout + U3.1.2 blackout flatten, U3.1.1 extreme-mid refuse, maxInventory withdraw add-side, L2 queue fills.
+- Tags: `house_mid` / `flatten` / `blackout` / `blackout_flatten` / `extreme_mid`. Strip: `U3.2: house mid quotes` when armed; invalid mid → `U3.2: no mid — needs two-sided book`.
+- `quotingEnabled` remains the pause switch (headless may stay false until re-enabled).
+- **Fill journal tape:** every fill JSONL row records iso/t/ticker/asset/side/price/fillSize/mid/fairValue/edgeCents/yesBid/yesAsk/centerMode/inventoryBefore/inventory/minutesLeft/queueAhead/reason/captureCents/realizedDelta/cashAfter/spot/strike/scenarioId (house tags).
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

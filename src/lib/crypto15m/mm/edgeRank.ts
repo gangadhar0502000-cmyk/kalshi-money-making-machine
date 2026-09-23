@@ -1,5 +1,7 @@
 /**
- * Rank open crypto 15m markets by |FV − mid| for multi-book paper MM.
+ * Rank open crypto 15m markets for multi-book paper MM.
+ * U3.2: prefer L2 / mid quality — NOT |FV−mid| (Family E mismatch ranking retired).
+ * FV / edgeCents remain on RankedMarket for UI/telemetry only.
  * Pure helpers — no live orders.
  */
 
@@ -8,6 +10,10 @@ import { asDollarPrice, isValidQuoteMid } from './prices'
 import { edgeVsMidCents, estimateYesFairValue, resolveStrike } from './fairValue'
 import { isMarketOpen } from './marketSelect'
 import { canonicalMmAsset, normalizeSpotAsset } from '../spot'
+import { midQualityScore, U32_RANK_LIQUIDITY } from './houseMidQuote'
+
+/** Fail-loud constant — ranking no longer prefers |FV−mid|. */
+export { U32_RANK_LIQUIDITY }
 
 /**
  * Multi-book universe: real KXBTC15M/KXETH15M/… up-down with a usable floorStrike.
@@ -35,7 +41,7 @@ export interface RankedMarket {
   ticker: string
   mid: number
   fairValue: number | null
-  /** (FV − mid) in cents; null if no FV. */
+  /** (FV − mid) in cents; null if no FV. Telemetry only under U3.2. */
   edgeCents: number | null
   absEdgeCents: number
   spot: number | null
@@ -44,22 +50,31 @@ export interface RankedMarket {
   strikeSource: 'floor_strike' | 'spot_reference' | 'none'
   /** Why FV is blank when inputs incomplete. */
   fvMissingReason: FvMissingReason
-  /** True when FV exists, |edge| ≥ minEdge, and |edge| ≤ maxSane (quoteable). */
+  /**
+   * U3.2: mid tradeable + coherent L2 — not |FV−mid| ≥ minEdge.
+   */
   quoteEligible: boolean
   /**
    * True when FV is genuinely unavailable and mid is non-toxic.
-   * Never true when FV exists — insane |FV−mid| must park as sanity, not mid fb.
+   * Legacy mid-fallback fill path; U3.2 prefers quoteEligible (L2+mid).
    */
   midFallbackEligible: boolean
-  /** True when FV exists and |edge| exceeds maxSaneEdgeCents. */
+  /**
+   * True when FV exists and |edge| exceeds maxSaneEdgeCents.
+   * Telemetry / UI only under U3.2 — does NOT drive ranking or slot eviction.
+   */
   sanityPark: boolean
   /** True when market has a coherent top-of-book bid/ask. */
   hasL2: boolean
+  /** Touch spread in cents when hasL2; else +Infinity. */
+  spreadCents: number
+  /** Room from toxic extremes — higher is better. */
+  midQuality: number
 }
 
 /**
- * Score one market given its asset spot. Missing spot/strike → null FV, absEdge 0.
- * When floorStrike missing but up/down rules + spot exist, derive K≈spot (documented).
+ * Score one market given its asset spot. Missing spot/strike → null FV (telemetry).
+ * U3.2 quoteEligible = mid tradeable + L2 (ignores |FV−mid|).
  */
 export function scoreMarketEdge(
   market: Crypto15mMarket,
@@ -70,6 +85,7 @@ export function scoreMarketEdge(
   toxicMidHigh = 0.95,
   maxSaneEdgeCents = 25,
 ): RankedMarket {
+  void minEdgeCents // retained for call-site compat; U3.2 does not gate on |edge|
   const midRaw = market.midYes
   const midOk = isValidQuoteMid(midRaw)
   const mid = midOk ? asDollarPrice(midRaw, 'rank.mid') : 0
@@ -113,15 +129,6 @@ export function scoreMarketEdge(
   const midTradeable = midOk && mid > toxicMidLow && mid < toxicMidHigh
   const sanityPark =
     fairValue != null && edgeCents != null && absEdgeCents > maxSaneEdgeCents
-  // Never treat insane |FV−mid| as quote-eligible — parks as sanity, not mid fb.
-  const quoteEligible =
-    midTradeable &&
-    edgeCents != null &&
-    absEdgeCents >= minEdgeCents &&
-    !sanityPark
-  // Mid fallback ONLY when FV genuinely unavailable (not when FV exists but insane).
-  const midFallbackEligible =
-    midOk && fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
 
   const yesBid = market.yesBid
   const yesAsk = market.yesAsk
@@ -133,6 +140,15 @@ export function scoreMarketEdge(
     yesAsk > yesBid &&
     yesBid > 0 &&
     yesAsk < 1
+
+  const spreadCents = hasL2 ? (yesAsk! - yesBid!) * 100 : Number.POSITIVE_INFINITY
+  const midQuality = midOk ? midQualityScore(mid, toxicMidLow, toxicMidHigh) : -1
+
+  // U3.2: eligible when mid is tradeable and L2 is coherent — NOT by |FV−mid|.
+  const quoteEligible = midTradeable && hasL2
+  // Mid fallback ONLY when FV genuinely unavailable (not when FV exists but insane).
+  const midFallbackEligible =
+    midOk && fairValue == null && mid > toxicMidLow && mid < toxicMidHigh
 
   return {
     market,
@@ -150,12 +166,15 @@ export function scoreMarketEdge(
     midFallbackEligible,
     sanityPark,
     hasL2,
+    spreadCents,
+    midQuality,
   }
 }
 
 /**
- * Rank open markets by |FV − mid| descending (null/zero edge last).
- * When spots differ by asset, FVs differ — ranking reflects that.
+ * Rank open markets for slotting.
+ * U3.2: L2 → mid quality → tighter spread → sooner close — NOT |FV−mid|.
+ * (Function name kept for call-site compat; behavior changed fail-loud via U32_RANK_LIQUIDITY.)
  */
 export function rankMarketsByAbsEdge(
   markets: Crypto15mMarket[],
@@ -187,17 +206,11 @@ export function rankMarketsByAbsEdge(
     )
   })
   scored.sort((a, b) => {
-    // Primary: |FV−mid| so scan still surfaces large edges (quoting parks insanity).
-    if (b.absEdgeCents !== a.absEdgeCents) return b.absEdgeCents - a.absEdgeCents
-    // Prefer quote-eligible (stable sane edge) over mid-fallback / empty-FV.
-    if (a.quoteEligible !== b.quoteEligible) return a.quoteEligible ? -1 : 1
-    if (a.sanityPark !== b.sanityPark) return a.sanityPark ? 1 : -1
-    if (a.midFallbackEligible !== b.midFallbackEligible) return a.midFallbackEligible ? 1 : -1
-    const aNoSpot = a.fvMissingReason === 'no_spot'
-    const bNoSpot = b.fvMissingReason === 'no_spot'
-    if (aNoSpot !== bNoSpot) return aNoSpot ? 1 : -1
-    // Prefer markets with usable L2 when other keys tie.
+    // U3.2: never prefer larger |FV−mid|.
     if (a.hasL2 !== b.hasL2) return a.hasL2 ? -1 : 1
+    if (a.quoteEligible !== b.quoteEligible) return a.quoteEligible ? -1 : 1
+    if (b.midQuality !== a.midQuality) return b.midQuality - a.midQuality
+    if (a.spreadCents !== b.spreadCents) return a.spreadCents - b.spreadCents
     const ac = Date.parse(a.market.closeTime)
     const bc = Date.parse(b.market.closeTime)
     if (Number.isFinite(ac) && Number.isFinite(bc) && ac !== bc) return ac - bc
@@ -214,24 +227,21 @@ export interface PickActiveOptions {
   /** At most one open market per asset (default true). */
   onePerAsset?: boolean
   /**
-   * Prefer quoteEligible (edge) markets for *new* slots (default true).
-   * When under-filled and fillMidFallback, remaining slots use midFallbackEligible.
+   * Prefer quoteEligible markets for *new* slots (default true).
+   * U3.2: quoteEligible = L2 + tradeable mid (not |edge|).
    */
   requireEdge?: boolean
   /**
    * Fill remaining slots with mid-fallback markets (default false).
-   * Prefer empty slots over books without FV; mid fb must never bypass sanity.
    */
   fillMidFallback?: boolean
   /**
-   * SLOT_EVICT: inventory by ticker. Sanity-parked + flat (inv==0 / missing)
-   * books are NOT sticky and NOT newly selected — frees the slot for the next
-   * |FV−mid| candidate. Non-zero inventory sanity books stay (need unwind).
+   * Inventory by ticker (sticky unwind). U3.2: FV sanity no longer evicts.
    */
   inventoryByTicker?: Readonly<Record<string, number>>
   /**
-   * When true (default), apply sanity+flat slot eviction of sanity+flat books.
-   * Set false only for legacy tests that expect sanity to occupy a slot.
+   * When true (default), apply sanity+flat slot eviction — **no-op under U3.2**
+   * (FV−mid sanity is telemetry only; mid-centered house rules).
    */
   evictSanityFlat?: boolean
   /**
@@ -241,24 +251,20 @@ export interface PickActiveOptions {
   excludeTickers?: readonly string[]
 }
 
-/** True when SLOT_EVICT should drop this ranked row from the active set. */
+/**
+ * U3.2: FV sanity+|edge| no longer evicts slots — |FV−mid| is telemetry only.
+ * Always false (inventory arg retained for call-site compat).
+ */
 export function shouldEvictSanityFlat(
-  r: RankedMarket,
-  inventoryByTicker?: Readonly<Record<string, number>>,
+  _r: RankedMarket,
+  _inventoryByTicker?: Readonly<Record<string, number>>,
 ): boolean {
-  if (!r.sanityPark) return false
-  const inv = inventoryByTicker?.[r.ticker]
-  // Missing inventory treated as flat (no open book / new candidate)
-  return inv == null || inv === 0
+  return false
 }
 
 /**
- * Pick up to maxActive markets: sticky first (if still present), then highest |edge|,
- * then mid-fallback fills so target is min(open, maxActive) whenever possible.
- * Cap is hard — never returns more than maxActive.
- *
- * SLOT_EVICT: sanity-parked books with flat inventory are evicted (not sticky,
- * not newly selected) so a quote-eligible candidate can take the slot.
+ * Pick up to maxActive markets: sticky first (if still present), then rank order
+ * (L2 / mid quality). Cap is hard — never returns more than maxActive.
  */
 export function pickActiveMarkets(
   rankedIn: RankedMarket[],
@@ -271,7 +277,7 @@ export function pickActiveMarkets(
 
   const onePerAsset = opts.onePerAsset !== false
   const requireEdge = opts.requireEdge !== false
-  // Default OFF — prefer empty slots over no-FV / mid-fallback books.
+  // Default OFF — prefer empty slots over no-L2 mid-fallback books.
   const fillMidFallback = opts.fillMidFallback === true
   const evictSanityFlat = opts.evictSanityFlat !== false
   const invMap = opts.inventoryByTicker
@@ -291,18 +297,15 @@ export function pickActiveMarkets(
     if (usedTickers.has(r.ticker)) return false
     if (exclude.has(r.ticker)) return false
     if (onePerAsset && usedAssets.has(r.asset)) return false
-    // SLOT_EVICT: never keep / select sanity+flat (slot eviction)
+    // U3.2: shouldEvictSanityFlat always false — keep branch for API clearness.
     if (evictSanityFlat && shouldEvictSanityFlat(r, invMap)) {
       return false
     }
     if (mode === 'edge' && requireEdge) {
-      // Quote-eligible only for *new* edge slots. Sanity+nonflat may still be
-      // sticky (handled above); sanity+flat already rejected by SLOT_EVICT.
       if (!r.quoteEligible) return false
     }
     if (mode === 'mid_fallback') {
-      // Mid fallback ONLY when FV genuinely unavailable — never for FV+insane edge.
-      if (!r.midFallbackEligible || r.sanityPark || r.fairValue != null) return false
+      if (!r.midFallbackEligible || r.fairValue != null) return false
     }
     chosen.push(r.market)
     usedTickers.add(r.ticker)
@@ -310,14 +313,13 @@ export function pickActiveMarkets(
     return true
   }
 
-  // Sticky: keep currently active tickers that are still in the open ranked set
-  // (SLOT_EVICT drops sanity+flat; sanity+inventory kept for unwind).
+  // Sticky: keep currently active tickers that are still in the open ranked set.
   for (const t of sticky) {
     const r = byTicker.get(t)
     if (r) tryAdd(r, 'sticky')
   }
 
-  // Fill remaining from rank order (edge-eligible only — not sanity parks)
+  // Fill remaining from rank order (L2 / mid-quality eligible)
   for (const r of ranked) {
     if (chosen.length >= maxActive) break
     tryAdd(r, 'edge')

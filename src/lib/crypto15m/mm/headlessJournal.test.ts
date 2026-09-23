@@ -19,17 +19,28 @@ describe('headlessJournal format', () => {
   it('formats and parses a fill line round-trip', () => {
     const ev = buildFillEvent({
       t: 1_700_000_000_000,
-      scenarioId: 'S1',
+      scenarioId: 'house_mid',
       ticker: 'KXBTC15M-99',
       asset: 'BTC',
       side: 'buy_yes',
       price: 0.42,
-      edgeCents: 5.5,
+      mid: 0.45,
+      fairValue: 0.55,
+      edgeCents: 10,
+      yesBid: 0.43,
+      yesAsk: 0.47,
+      centerMode: 'mid',
+      inventoryBefore: 0,
       inventory: 1,
       minutesLeft: 8.2,
       captureCents: 0,
       reason: 'book_depth',
       realizedDelta: 0,
+      cashAfter: 99.58,
+      spot: 100_100,
+      strike: 100_000,
+      fillSize: 1,
+      queueAhead: 3,
     })
     const line = formatJournalLine(ev)
     expect(line.startsWith('{')).toBe(true)
@@ -37,6 +48,38 @@ describe('headlessJournal format', () => {
     const parsed = parseJournalLine(line)
     expect(parsed).toEqual(ev)
     expect(parsed?.iso).toBe(new Date(1_700_000_000_000).toISOString())
+    // U3.2 tape: mid + price + iso + side required
+    expect(parsed?.mid).toBe(0.45)
+    expect(parsed?.price).toBe(0.42)
+    expect(parsed?.iso).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(parsed?.side).toBe('buy_yes')
+    expect(parsed?.centerMode).toBe('mid')
+    expect(parsed?.inventoryBefore).toBe(0)
+    expect(parsed?.cashAfter).toBe(99.58)
+    expect(parsed?.spot).toBe(100_100)
+    expect(parsed?.strike).toBe(100_000)
+  })
+
+  it('fill journal must include mid + price + iso + side', () => {
+    const ev = buildFillEvent({
+      t: 1_700_000_100_000,
+      side: 'sell_yes',
+      price: 0.51,
+      mid: 0.5,
+      scenarioId: 'flatten',
+      reason: 'book_depth',
+      fillSize: 2,
+    })
+    expect(ev.type).toBe('fill')
+    expect(ev.mid).toBe(0.5)
+    expect(ev.price).toBe(0.51)
+    expect(ev.iso).toBeTruthy()
+    expect(ev.side).toBe('sell_yes')
+    const parsed = parseJournalLine(formatJournalLine(ev))
+    expect(parsed?.mid).toBe(0.5)
+    expect(parsed?.price).toBe(0.51)
+    expect(parsed?.iso).toBe(ev.iso)
+    expect(parsed?.side).toBe('sell_yes')
   })
 
   it('parses capture ¢ from CLOSE blocked reason', () => {

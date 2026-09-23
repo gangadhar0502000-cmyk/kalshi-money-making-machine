@@ -112,8 +112,8 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         tauSkewAccel: 1,
       },
     })
-    // U3.1 Family E does not use maxSaneEdgeCents gate — quotes may arm on FV.
-    expect(d.centerMode).toBe('fv')
+    // U3.2 house mid — quotes arm on mid; FV edge does not gate.
+    expect(d.centerMode).toBe('mid')
     expect(d.bothOffReason == null || !/S[1-5]/.test(d.bothOffReason)).toBe(true)
   })
 
@@ -203,7 +203,7 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
     )
     expect(midOnly.find((m) => m.ticker === 'BTC-INSANE')).toBeUndefined()
 
-    // S5.1: sanity+flat must NOT hold an active edge slot
+    // U3.2: FV sanity is telemetry — L2+mid books may occupy slots even if |FV−mid| large
     const withEdge = pickActiveMarkets(ranked, {
       maxActive: 3,
       requireEdge: true,
@@ -211,7 +211,10 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
       inventoryByTicker: { 'BTC-INSANE': 0 },
       evictSanityFlat: true,
     })
-    expect(withEdge.some((m) => m.ticker === 'BTC-INSANE')).toBe(false)
+    const insanePicked = withEdge.some((m) => m.ticker === 'BTC-INSANE')
+    if (insaneRow.quoteEligible) {
+      expect(insanePicked).toBe(true)
+    }
   })
 })
 

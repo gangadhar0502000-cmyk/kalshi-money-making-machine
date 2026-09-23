@@ -1,5 +1,5 @@
 /**
- * U3.1 Family E — FV-centered quoting (no S1–S5 edge gates).
+ * U3.2 house mid — FV computed for telemetry; quotes mid-centered (no S1–S5).
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -68,7 +68,7 @@ function book(ticker: string, mid = 0.5): OrderBookSnapshot {
   }
 }
 
-describe('Family E FV quoting', () => {
+describe('U3.2 house mid + FV telemetry', () => {
   let engine: PaperMmEngine
 
   beforeEach(() => {
@@ -105,7 +105,7 @@ describe('Family E FV quoting', () => {
     vi.unstubAllGlobals()
   })
 
-  it('when FV available and flat, both sides may arm (Family E two-sided)', () => {
+  it('when FV available and flat, both sides may arm (house mid)', () => {
     const market = mkMarket({
       ticker: 'KXBTC15M-FVHI',
       midYes: 0.48,
@@ -126,8 +126,8 @@ describe('Family E FV quoting', () => {
     expect(s.inventory).toBe(0)
     expect(s.quote?.bidActive).toBe(true)
     expect(s.quote?.askActive).toBe(true)
-    expect(s.quote?.centerMode).toBe('fv')
-    expect(s.quote?.activeScenario).toBe('open')
+    expect(s.quote?.centerMode).toBe('mid')
+    expect(s.quote?.activeScenario).toBe('house_mid')
     expect(s.message).not.toMatch(/U3\.0.*paused/)
   })
 
@@ -228,6 +228,6 @@ describe('Family E FV quoting', () => {
     expect(after.snapshot.running).toBe(true)
     expect(after.snapshot.settled).toBe(false)
     // Roll may leave U3.1 no-spot until seed; or roll wording — either is fine
-    expect(after.snapshot.message.toLowerCase()).toMatch(/roll|u3\.1|family e|paper mm|live book/)
+    expect(after.snapshot.message.toLowerCase()).toMatch(/roll|u3\.1|u3\.2|house mid|paper mm|live book/)
   })
 })

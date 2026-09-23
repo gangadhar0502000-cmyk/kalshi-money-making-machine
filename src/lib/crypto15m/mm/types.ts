@@ -59,13 +59,37 @@ export interface MmFill {
    */
   captureDollars?: number
   /**
-   * Optional legacy scenario id at fill time (journal/digest only; U3.0 quotes paused).
+   * Plain house tag / legacy digest id at fill time (journal only — never drives quotes).
    */
   scenarioId?: string
   /** Remaining size-ahead queue after fill attribution (book_depth). */
   queueAhead?: number
   /** Explicit fill size for journal/telemetry (same as size). */
   fillSize?: number
+  /** U3.2 tape: inventory before this fill. */
+  inventoryBefore?: number
+  /** U3.2 tape: inventory after this fill. */
+  inventoryAfter?: number
+  /** U3.2 tape: FV at fill (telemetry). */
+  fairValue?: number | null
+  /** U3.2 tape: (FV−mid)¢ at fill (telemetry). */
+  edgeCents?: number | null
+  /** U3.2 tape: quote yesBid at fill. */
+  yesBid?: number | null
+  /** U3.2 tape: quote yesAsk at fill. */
+  yesAsk?: number | null
+  /** U3.2 tape: center mode (`mid` under house rules). */
+  centerMode?: 'fv' | 'mid' | null
+  /** U3.2 tape: cash after fill. */
+  cashAfter?: number | null
+  /** U3.2 tape: spot at fill. */
+  spot?: number | null
+  /** U3.2 tape: strike / floorStrike at fill. */
+  strike?: number | null
+  /** U3.2 tape: minutes remaining at fill. */
+  minutesLeft?: number | null
+  /** U3.2 tape: asset at fill. */
+  asset?: string | null
 }
 
 export interface MmCancelEvent {

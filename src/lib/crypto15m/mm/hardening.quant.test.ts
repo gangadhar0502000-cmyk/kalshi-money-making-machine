@@ -223,13 +223,8 @@ describe('multi-book · fill slots to min(open, maxActive)', () => {
     // S5.1: sanity-parked flats do not take/keep slots
     expect(st.aggregate.activeBooks).toBe(Math.min(5, quoteable))
     expect(st.aggregate.activeBooks).toBeLessThanOrEqual(5)
-    // Sanity rows may appear in scan but must not occupy active books when flat
-    for (const b of st.books) {
-      const row = st.scan.find((r) => r.ticker === b.snapshot.marketTicker)
-      if (row?.sanityPark) {
-        expect(b.snapshot.inventory).not.toBe(0)
-      }
-    }
+    // U3.2: sanityPark is FV telemetry only — flat sanity books may occupy slots
+    expect(st.aggregate.activeBooks).toBeGreaterThan(0)
   })
 
   it('never shows slot-gated semantics on an active ticker (book is assigned)', () => {
@@ -425,7 +420,7 @@ describe('FV missing ⇒ both sides OFF (no mid spam)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('parks both sides when FV inputs incomplete', () => {
+  it('still arms house mid when FV inputs incomplete (telemetry only)', () => {
     const market = mk({
       ticker: 'NO-FV',
       asset: 'BTC',
@@ -442,9 +437,8 @@ describe('FV missing ⇒ both sides OFF (no mid spam)', () => {
     const s = engine.getState().snapshot
     expect(s.fairValue).toBeNull()
     expect(s.quote).not.toBeNull()
-    expect(s.quote!.bidActive).toBe(false)
-    expect(s.quote!.askActive).toBe(false)
-    expect(s.quote!.bidReason + s.quote!.askReason).toMatch(/no FV|U3\.1|U3\.0.*paused|no fair value|no spot|no strike/i)
+    expect(s.quote!.centerMode).toBe('mid')
+    expect(s.quote!.bidActive || s.quote!.askActive).toBe(true)
   })
 
   it('toxic mid still blocks bid even without FV', () => {

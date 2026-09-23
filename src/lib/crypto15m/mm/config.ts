@@ -208,21 +208,21 @@ export interface PaperMmConfig {
    */
   l2OffDropTicks: number
   /**
-   * U3.1: when true (default), Family E digital FV quoting arms.
+   * U3.2: when true (default), house mid-centered maker quotes arm.
    * When false, U3.0 pause — both sides OFF.
    */
   quotingEnabled: boolean
   /**
-   * U3.1 Family E: both sides OFF when minutesRemaining ≤ this (settlement blackout).
-   * Default 0.75 min (~45s).
+   * U3.1.x retained: both sides OFF when minutesRemaining ≤ this (settlement blackout).
+   * Default 0.75 min (~45s). Inventory ≠ 0 → U3.1.2 flatten-only.
    */
   blackoutMinutes: number
   /**
-   * U3.1: clamp posted YES probs to (ε, 1−ε). Default 0.01.
+   * Clamp posted YES probs to (ε, 1−ε). Default 0.01.
    */
   quoteClampEpsilon: number
   /**
-   * U3.1: inventory skew acceleration × (hardFlatMinutes / τ). Default 1.
+   * Inventory skew acceleration × (hardFlatMinutes / τ). Default 1.
    */
   tauSkewAccel: number
 }
@@ -500,7 +500,7 @@ export function migratePersistedScarcityConfig(
   if (partial.markBleedCents == null || !Number.isFinite(partial.markBleedCents)) {
     out.markBleedCents = STRICT_PAPER_MM_CONFIG.markBleedCents
   }
-  // U3.1 Family E knobs on older saves.
+  // U3.1/U3.2 house-mid knobs on older saves.
   if (partial.blackoutMinutes == null || !Number.isFinite(partial.blackoutMinutes)) {
     out.blackoutMinutes = STRICT_PAPER_MM_CONFIG.blackoutMinutes
   }
@@ -511,7 +511,7 @@ export function migratePersistedScarcityConfig(
     out.tauSkewAccel = STRICT_PAPER_MM_CONFIG.tauSkewAccel
   }
   // Do not force-disable quoting: old U3.0 saves may still have quotingEnabled:false
-  // until Start (v1 / headless / panel) sets true + Family E.
+  // until Start (v1 / headless / panel) sets true + house mid.
   if (partial.quotingEnabled == null) {
     out.quotingEnabled = STRICT_PAPER_MM_CONFIG.quotingEnabled
   }

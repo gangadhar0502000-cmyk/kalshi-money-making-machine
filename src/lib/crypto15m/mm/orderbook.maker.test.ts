@@ -223,9 +223,11 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         tauSkewAccel: 1,
       },
     })
-    // No FV → Family E parks both
+    // U3.2: no FV still mid-centers; max inventory withdraws bid (adding side)
+    expect(d.centerMode).toBe('mid')
     expect(d.bidActive).toBe(false)
-    expect(d.askActive).toBe(false)
-    expect(d.bothOffReason).toMatch(/U3\.1/)
+    expect(d.askActive).toBe(true)
+    expect(d.yesAsk).toBeGreaterThanOrEqual(0.52 - 1e-9)
+    expect(d.yesAsk).toBeGreaterThan(d.yesBid)
   })
 })

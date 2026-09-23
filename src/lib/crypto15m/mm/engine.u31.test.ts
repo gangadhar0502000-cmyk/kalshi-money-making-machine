@@ -1,11 +1,11 @@
 /**
- * U3.1 — Family E quotes arm when enabled; blackout / no-spot fail-loud.
+ * U3.1/U3.2 — house mid quotes arm when enabled; blackout retained; no-spot no longer parks.
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import { PaperMmEngine } from './engine'
-import { QUOTING_PAUSED_REASON, U31_BLACKOUT, U31_NO_SPOT } from './decisionPolicy'
+import { QUOTING_PAUSED_REASON, U31_BLACKOUT } from './decisionPolicy'
 import { STRICT_PAPER_MM_CONFIG } from './config'
 import type { OrderBookSnapshot } from './orderbook'
 
@@ -59,7 +59,7 @@ function wideBook(ticker: string): OrderBookSnapshot {
   }
 }
 
-describe('U3.1 Family E engine', () => {
+describe('U3.2 house mid engine', () => {
   let engine: PaperMmEngine
 
   beforeEach(() => {
@@ -83,7 +83,7 @@ describe('U3.1 Family E engine', () => {
     vi.unstubAllGlobals()
   })
 
-  it('Start with spot → quotes can arm (Family E)', () => {
+  it('Start with spot → quotes can arm (house mid)', () => {
     const market = mkMarket()
     engine.setMarket(market)
     engine.seedSpot(100_100)
@@ -97,10 +97,12 @@ describe('U3.1 Family E engine', () => {
     expect(s.quote!.active).toBe(true)
     expect(s.quote!.bidActive || s.quote!.askActive).toBe(true)
     expect(s.message).not.toBe(QUOTING_PAUSED_REASON)
+    expect(s.quote!.centerMode).toBe('mid')
+    expect(s.quote!.activeScenario).toBe('house_mid')
     expect(STRICT_PAPER_MM_CONFIG.quotingEnabled).toBe(true)
   })
 
-  it('no spot → U3.1 fail-loud, both OFF', () => {
+  it('no spot → still arms house mid (FV telemetry only)', () => {
     const market = mkMarket()
     engine.setMarket(market)
     // do not seedSpot
@@ -108,9 +110,11 @@ describe('U3.1 Family E engine', () => {
     engine.onBook(wideBook(market.ticker))
 
     const s = engine.getState().snapshot
-    expect(s.quote!.bidActive).toBe(false)
-    expect(s.quote!.askActive).toBe(false)
-    expect(s.message).toBe(U31_NO_SPOT)
+    expect(s.quote!.active).toBe(true)
+    expect(s.quote!.bidActive || s.quote!.askActive).toBe(true)
+    expect(s.quote!.centerMode).toBe('mid')
+    expect(s.quote!.activeScenario).toBe('house_mid')
+    expect(s.fairValue).toBeNull()
   })
 
   it('near expiry blackout + flat → both OFF', () => {

@@ -1,9 +1,8 @@
 /**
  * Explicit, testable decision policy for paper MM quoting.
- * U3.1 / U3.1.1 / U3.1.2: Family E — Digital FV + inventory skew + hard τ-flatten
- * + symmetric extreme-mid open refuse + blackout flatten when inventory
- * (see docs/research/U3_QUOTE_LOGIC_RESEARCH.md §9 Family E).
- * S1–S5 scenario playbook is not used. Paper research only — never places live orders.
+ * U3.2 House rules v1 — mid-centered maker (not Family E FV opens / not S1–S5).
+ * Retains U3.1.1 extreme-mid refuse + U3.1.2 blackout flatten.
+ * Paper research only — never places live orders.
  */
 
 import { clampPx, isValidQuoteMid } from './prices'
@@ -11,10 +10,14 @@ import {
   U31_BLACKOUT,
   U312_BLACKOUT_FLATTEN,
   U31_NO_FV,
-  familyEQuotePrices,
   familyESideArms,
-  type FamilyETag,
 } from './digitalFvQuote'
+import {
+  U32_HOUSE_MID,
+  U32_NO_MID,
+  houseMidQuotePrices,
+  type HouseTag,
+} from './houseMidQuote'
 
 /** Fail-loud strip / reason when paper quotes stay OFF (U3.0 legacy pause). */
 export const QUOTING_PAUSED_REASON =
@@ -29,6 +32,8 @@ export {
   U31_NO_TAU,
 } from './digitalFvQuote'
 
+export { U32_HOUSE_MID, U32_NO_MID, U32_RANK_LIQUIDITY } from './houseMidQuote'
+
 /** U3.1.1: flat inventory + pinned extreme mid — no new opens. */
 export const U311_EXTREME_MID = 'U3.1.1: extreme mid — no new opens'
 
@@ -41,7 +46,7 @@ export interface DecisionPolicyConfig {
   toxicMidLow: number
   toxicMidHigh: number
   minEdgeCents: number
-  /** Legacy alias; blackoutMinutes is preferred for U3.1. */
+  /** Legacy alias; blackoutMinutes is preferred for U3.1.x gates. */
   expiryPullMinutes: number
   fvQuoting: boolean
   sizeDownEdgeMult: number
@@ -59,21 +64,21 @@ export interface DecisionPolicyConfig {
   stuckUnwindTicks: number
   markBleedCents: number
   /**
-   * When false, never arm bid/ask (U3.0 pause). Default true once Family E is wired.
+   * When false, never arm bid/ask (U3.0 pause). Default true for house mid.
    */
   quotingEnabled: boolean
   /**
-   * U3.1 / U3.1.2: when minutesRemaining ≤ this — flat inventory parks both
+   * U3.1.2: when minutesRemaining ≤ this — flat inventory parks both
    * (settlement blackout); inventory ≠ 0 forces flatten-only (exit).
    * Default ~0.75 min.
    */
   blackoutMinutes: number
   /**
-   * U3.1: clamp posted probs to (ε, 1−ε). Default 0.01.
+   * Clamp posted probs to (ε, 1−ε). Default 0.01.
    */
   quoteClampEpsilon: number
   /**
-   * U3.1: skew accel × (hardFlatMinutes / τ). Default 1.
+   * Skew accel × (hardFlatMinutes / τ). Default 1.
    */
   tauSkewAccel: number
 }
@@ -172,7 +177,10 @@ export interface DecisionPolicyInput {
   now: number
   config: DecisionPolicyConfig
   feedDownReason?: string | null
-  /** U3.1 fail-loud from engine when spot/strike/τ missing. */
+  /**
+   * Legacy Family E FV block — U3.2 ignores for quote arming (FV is telemetry only).
+   * Kept on the input so callers can still compute/pass it without effect.
+   */
   fvBlockReason?: string | null
   edgePersist?: EdgePersistState | null
   avgEntry?: number | null
@@ -195,7 +203,7 @@ export interface DecisionPolicyResult {
   unwindActive: boolean
   edgePersist: EdgePersistState
   stuckUnwind: StuckUnwindState
-  /** Plain Family E tags: open / flatten / blackout / blackout_flatten — not S1–S5. */
+  /** Plain tags: house_mid / open / flatten / blackout / blackout_flatten — not S1–S5. */
   bidScenario?: string
   askScenario?: string
   activeScenario?: string
@@ -210,7 +218,7 @@ function parkBoth(
     >,
   persist: EdgePersistState = emptyEdgePersistState(),
   stuck: StuckUnwindState = emptyStuckUnwindState(),
-  tag?: FamilyETag,
+  tag?: HouseTag,
 ): DecisionPolicyResult {
   return {
     bidActive: false,
@@ -252,7 +260,7 @@ export function canAcceptInventoryIncreasingFill(
 
 /**
  * Resting maker capture vs FV in cents. Null if FV unavailable.
- * Bid: FV − bid; ask: ask − FV.
+ * Bid: FV − bid; ask: ask − FV. Telemetry only under U3.2.
  */
 export function makerCaptureCents(
   side: 'bid' | 'ask',
@@ -267,7 +275,7 @@ export function makerCaptureCents(
 
 /**
  * Maker-only clamp: bid ≤ bestBid (join touch), ask ≥ bestAsk.
- * Never cross the live BBO — prevents taker_cross fee bleed when FV is far from mid.
+ * Never cross the live BBO.
  */
 export function clampQuotesMakerOnly(
   bid: number,
@@ -305,7 +313,7 @@ export function clampQuotesMakerOnly(
 
 /**
  * Decide which sides (if any) to quote.
- * U3.1 Family E when quotingEnabled; else U3.0 pause. No S1–S5.
+ * U3.2 house mid when quotingEnabled; else U3.0 pause. No S1–S5 / no FV center.
  */
 export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResult {
   const cfg = input.config
@@ -327,8 +335,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   const persist = emptyEdgePersistState()
   const stuck = emptyStuckUnwindState()
 
-  const hasFv =
-    cfg.fvQuoting && input.fairValue != null && Number.isFinite(input.fairValue)
+  const midOk = isValidQuoteMid(input.mid)
   const mins =
     input.minutesRemaining != null && Number.isFinite(input.minutesRemaining)
       ? input.minutesRemaining
@@ -337,11 +344,11 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   let yesBid = 0.01
   let yesAsk = 0.99
   let skewCents = 0
-  let centerMode: 'fv' | 'mid' = 'mid'
+  const centerMode: 'fv' | 'mid' = 'mid'
 
-  if (hasFv && mins != null) {
-    const priced = familyEQuotePrices({
-      fairValue: input.fairValue!,
+  if (midOk && mins != null) {
+    const priced = houseMidQuotePrices({
+      mid: input.mid,
       inventory: input.inventory,
       minutesRemaining: mins,
       halfSpreadCents: half,
@@ -358,9 +365,8 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     yesAsk = priced.yesAsk
     skewCents = priced.skewCents
     half = priced.halfSpreadCents
-    centerMode = 'fv'
-  } else if (isValidQuoteMid(input.mid)) {
-    // Display-only mid center when FV unavailable (still parked if quoting on).
+  } else if (midOk) {
+    // Display-only mid center when τ missing (still parked below).
     skewCents = input.inventory * cfg.inventorySkewCentsPerUnit
     const skew = skewCents / 100
     yesBid = clampPx(input.mid - half / 100 - skew)
@@ -374,7 +380,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     )
     yesBid = clamped.bid
     yesAsk = clamped.ask
-    centerMode = 'mid'
   }
 
   const blank = {
@@ -403,19 +408,15 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     return parkBoth(QUOTING_PAUSED_REASON, blank, persist, stuck, 'paused')
   }
 
-  // --- Family E path ---
-  if (input.fvBlockReason) {
-    return parkBoth(input.fvBlockReason, blank, persist, stuck)
-  }
-  if (!hasFv) {
-    return parkBoth(U31_NO_FV, blank, persist, stuck)
+  // --- U3.2 House mid path (FV / fvBlockReason do NOT center or gate opens) ---
+  if (!midOk) {
+    return parkBoth(U32_NO_MID, blank, persist, stuck)
   }
   if (mins == null) {
-    return parkBoth(U31_NO_TAU, blank, persist, stuck)
+    return parkBoth(U32_NO_MID, blank, persist, stuck)
   }
 
   // U3.1.2: blackout + flat → park both; blackout + inventory → flatten-only
-  // (do not park — that blocked exits in the last ~45s).
   const inBlackout = mins <= blackout
   if (inBlackout && input.inventory === 0) {
     return parkBoth(U31_BLACKOUT, blank, persist, stuck, 'blackout')
@@ -437,7 +438,8 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   let bidReason = arms.bidReason
   let askReason = arms.askReason
   const unwindActive = arms.unwindActive
-  let tag: FamilyETag = forceBlackoutFlatten ? 'blackout_flatten' : arms.tag
+  let tag: HouseTag = forceBlackoutFlatten ? 'blackout_flatten' : arms.tag
+  if (tag === 'open') tag = 'house_mid'
   if (forceBlackoutFlatten) {
     if (input.inventory > 0) {
       bidReason = `${U312_BLACKOUT_FLATTEN} — no new longs`
@@ -446,12 +448,15 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       bidReason = U312_BLACKOUT_FLATTEN
       askReason = `${U312_BLACKOUT_FLATTEN} — no new shorts`
     }
+  } else if (tag === 'house_mid') {
+    bidReason = U32_HOUSE_MID
+    askReason = U32_HOUSE_MID
   }
 
   // U3.1.1 symmetric extreme-mid: refuse opens; keep reduce/flatten side.
-  const mid = isValidQuoteMid(input.mid) ? input.mid : null
+  const mid = input.mid
   const inv = input.inventory
-  if (mid != null) {
+  {
     const atLow = mid <= cfg.toxicMidLow
     const atHigh = mid >= cfg.toxicMidHigh
     if ((atLow || atHigh) && inv === 0) {
@@ -506,7 +511,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     size,
     skewCents,
     halfSpreadCents: half,
-    centerMode: 'fv',
+    centerMode: 'mid',
     active,
     unwindActive,
     edgePersist: persist,

@@ -37,6 +37,7 @@ import {
   U31_NO_SPOT,
   U31_NO_STRIKE,
   U31_NO_TAU,
+  U32_HOUSE_MID,
   DEFAULT_DECISION_POLICY,
   emptyEdgePersistState,
   emptyStuckUnwindState,
@@ -527,8 +528,8 @@ export class PaperMmEngine {
     this.message = !this.config.quotingEnabled
       ? QUOTING_PAUSED_REASON
       : this.config.strictRealism
-        ? 'Paper MM running (strict realism · Family E). Read-only API · never places trades.'
-        : 'Paper MM running (LOOSE · Family E). Fills soft — not live edge.'
+        ? 'Paper MM running (strict realism · house mid). Read-only API · never places trades.'
+        : 'Paper MM running (LOOSE · house mid). Fills soft — not live edge.'
     this.rebuildQuote(true)
     this.armTimers()
     void this.pollSpot()
@@ -1125,7 +1126,7 @@ export class PaperMmEngine {
       activeScenario: decision.activeScenario,
     }
 
-    // U3.0 pause / U3.1 fail-loud / U3.1.2 blackout-flatten on strip
+    // U3.0 pause / U3.2 house mid / U3.1.x retained gates on strip
     // (do not erase U2.14 hold advisories).
     const holdL2 = /U2\.14:\s*L2 off — holding inv/i.test(this.message)
     if (this.running && !holdL2) {
@@ -1133,21 +1134,21 @@ export class PaperMmEngine {
         this.message = QUOTING_PAUSED_REASON
       } else if (
         decision.bothOffReason &&
-        /^U3\.1/.test(decision.bothOffReason)
+        /^U3\.(1|2)/.test(decision.bothOffReason)
       ) {
         this.message = decision.bothOffReason
       } else if (decision.active && decision.activeScenario === 'blackout_flatten') {
         this.message = U312_BLACKOUT_FLATTEN
       } else if (decision.active && decision.activeScenario === 'flatten') {
         this.message = 'U3.1: flatten — exit only'
+      } else if (decision.active && decision.activeScenario === 'house_mid') {
+        this.message = U32_HOUSE_MID
       } else if (
         decision.active &&
-        /^U3\.1/.test(this.message)
+        /^U3\.(1|2)/.test(this.message)
       ) {
-        // Clear prior U3.1 park once quotes arm again (open / two-sided).
-        this.message = this.config.strictRealism
-          ? 'Paper MM running (strict realism · Family E). Read-only API · never places trades.'
-          : 'Paper MM running (LOOSE · Family E). Fills soft — not live edge.'
+        // Clear prior U3 park once quotes arm again (house mid / two-sided).
+        this.message = U32_HOUSE_MID
       }
     }
 
@@ -1419,6 +1420,7 @@ export class PaperMmEngine {
         side === 'buy_yes' ? this.quote?.bidScenario : this.quote?.askScenario
     }
 
+    const inventoryBefore = this.inventory
     const signed = side === 'buy_yes' ? size : -size
 
     // Belt-and-suspenders: refuse taker fills under strict realism
@@ -1504,6 +1506,18 @@ export class PaperMmEngine {
       scenarioId: fillScenarioId,
       queueAhead: extras?.queueAhead,
       fillSize: extras?.fillSize ?? size,
+      inventoryBefore,
+      inventoryAfter: this.inventory,
+      fairValue: this.lastFairValue,
+      edgeCents: this.lastEdgeVsMidCents,
+      yesBid: this.quote?.yesBid ?? this.bookBestBid,
+      yesAsk: this.quote?.yesAsk ?? this.bookBestAsk,
+      centerMode: this.quote?.centerMode ?? 'mid',
+      cashAfter: this.cash,
+      spot: this.lastSpot?.price ?? null,
+      strike: this.market?.floorStrike ?? null,
+      minutesLeft: this.market?.minutesRemaining ?? null,
+      asset: this.market?.asset ?? null,
     })
     if (reason !== 'settlement') {
       this.fillCapStore.record(this.activeTicker(), fillAt)
