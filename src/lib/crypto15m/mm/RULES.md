@@ -68,3 +68,7 @@ Optional `scenarioId` on fills may be plain house tags or historical S* digests 
 - **Family E** digital-FV-centered opens (U3.1) — superseded by U3.2 house mid.
 - FV–mid mismatch / gap trading — explicitly rejected as product target.
 - Complete-set complementary bids — not in this slice.
+
+## U3.2.2 — UI disk journal (durable tape)
+
+Browser paper fills must also append to `data/paper-mm/ui-journal.jsonl` via mm-proxy `POST /local-api/paper-mm/journal` (plus `ui-run-meta.json` on Start). localStorage remains; disk journal is the recoverable tape. Fail-loud if journal POSTs fail repeatedly. Do not reintroduce S1–S5.

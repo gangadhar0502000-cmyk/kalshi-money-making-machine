@@ -234,6 +234,15 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Rate caps skipped for flatten exits; fill tags prefer `flatten` / `blackout_flatten` over S3/S4 labels. No S1–S5 / no FV-centering reopen.
 - Paper-only · read-only · never places live orders.
 
+
+## U3.2.2 — UI disk journal (never lose the Mac tape)
+
+- **Problem:** Browser paper fills lived only in `localStorage` (`kalshi-paper-mm-session-v1`). Safari/Chrome TCC can lock agents out; Reset / profile wipe zeros the tape with no on-disk copy under the repo.
+- **Fix:** mm-proxy accepts local-only `POST /local-api/paper-mm/journal` (append JSONL → `data/paper-mm/ui-journal.jsonl`) and `POST /local-api/paper-mm/run-meta` (`ui-run-meta.json` with startedAt/sha). Browser UI fire-and-forget POSTs each new fill (same rich tape fields as headless) and stamps run-meta on Start. **localStorage persist unchanged.**
+- Fail-loud strip `U3.2.2: disk journal POST failed ×N` after repeated proxy failures. Quiet strip metric **Tape: N** = fills on disk.
+- Headless `journal.jsonl` path untouched. Kalshi upstream remains GET-only — journal POSTs never leave the box.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

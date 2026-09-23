@@ -1,21 +1,36 @@
 /**
- * Read-only Kalshi local proxy for paper MM.
+ * Read-only Kalshi local proxy for paper MM (+ local UI journal writes).
  * Holds API secrets server-side. NEVER places, amends, or cancels real orders.
  *
- * Safe local routes only:
- *   GET /local-api/health
- *   GET /local-api/status
- *   GET /local-api/exchange-status
- *   GET /local-api/orderbook?ticker=
- *   GET /local-api/orderbooks?tickers=T1,T2,...&depth=25
- *   GET /local-api/market?ticker=
- *   GET /local-api/crypto15m
- *   GET /local-api/markets?series_ticker=
+ * Safe local routes:
+ *   GET  /local-api/health
+ *   GET  /local-api/status
+ *   GET  /local-api/exchange-status
+ *   GET  /local-api/orderbook?ticker=
+ *   GET  /local-api/orderbooks?tickers=T1,T2,...&depth=25
+ *   GET  /local-api/market?ticker=
+ *   GET  /local-api/crypto15m
+ *   GET  /local-api/markets?series_ticker=
+ *   POST /local-api/paper-mm/journal   (U3.2.2 UI disk tape — local JSONL only)
+ *   POST /local-api/paper-mm/run-meta  (U3.2.2 session meta — local file only)
+ *   GET  /local-api/paper-mm/journal?n=50
+ *   GET  /local-api/paper-mm/journal-status
  */
 import http from 'node:http'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import { URL } from 'node:url'
+import {
+  appendUiJournalEvents,
+  assertSafeLocalApi,
+  countUiJournalFills,
+  isPaperMmLocalWritePath,
+  readRequestBody,
+  readUiJournalTail,
+  UI_JOURNAL_PATH,
+  UI_RUN_META_PATH,
+  writeUiRunMeta,
+} from './mm-proxy-ui-journal.mjs'
 
 const PORT = Number(process.env.MM_PROXY_PORT || 8787)
 /** Per-request timeout for upstream Kalshi GETs (fan-out must not hang forever). */
@@ -42,7 +57,12 @@ const CRYPTO_15M_SERIES = [
   'KXCRYPTOLEAD15M',
 ]
 
-/** Hard read-only gate — throws if method/path could create or mutate orders. */
+/**
+ * Hard read-only gate for Kalshi upstream — throws if method/path could
+ * create or mutate orders. Local UI journal POSTs use assertSafeLocalApi.
+ */
+export { assertSafeLocalApi, isPaperMmLocalWritePath }
+
 export function assertReadOnly(method, path) {
   const m = String(method || '').toUpperCase()
   if (m !== 'GET') {
@@ -400,6 +420,7 @@ async function getCrypto15mCachedResponse() {
 
 async function handleLocal(req, res, url) {
   const route = url.pathname
+  const method = String(req.method || 'GET').toUpperCase()
 
   if (route === '/local-api/health') {
     const age =
@@ -540,6 +561,100 @@ async function handleLocal(req, res, url) {
     return sendJson(res, 200, body)
   }
 
+  // U3.2.2 — browser UI durable tape (local disk only; never hits Kalshi).
+  if (route === '/local-api/paper-mm/journal-status') {
+    return sendJson(res, 200, {
+      paperOnly: true,
+      fillsOnDisk: countUiJournalFills(),
+      journalPath: UI_JOURNAL_PATH,
+      runMetaPath: UI_RUN_META_PATH,
+    })
+  }
+
+  if (route === '/local-api/paper-mm/journal' && method === 'GET') {
+    const n = Number(url.searchParams.get('n') || '50')
+    const events = readUiJournalTail(n)
+    return sendJson(res, 200, {
+      paperOnly: true,
+      n: events.length,
+      fillsOnDisk: countUiJournalFills(),
+      events,
+    })
+  }
+
+  if (route === '/local-api/paper-mm/journal' && method === 'POST') {
+    const raw = await readRequestBody(req)
+    let parsed
+    try {
+      parsed = JSON.parse(raw || '{}')
+    } catch {
+      return sendJson(res, 400, { error: 'U3.2.2: invalid JSON body' })
+    }
+    const events = Array.isArray(parsed?.events)
+      ? parsed.events
+      : parsed?.event
+        ? [parsed.event]
+        : Array.isArray(parsed)
+          ? parsed
+          : parsed && typeof parsed === 'object' && parsed.type
+            ? [parsed]
+            : null
+    if (!events) {
+      return sendJson(res, 400, {
+        error: 'U3.2.2: body must be { events: [...] } or a single event',
+      })
+    }
+    try {
+      const result = appendUiJournalEvents(events)
+      return sendJson(res, 200, {
+        ok: true,
+        paperOnly: true,
+        appended: result.appended,
+        fillsOnDisk: result.fillsOnDisk,
+      })
+    } catch (e) {
+      return sendJson(res, 400, {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
+  if (route === '/local-api/paper-mm/run-meta' && method === 'POST') {
+    const raw = await readRequestBody(req)
+    let parsed = {}
+    try {
+      parsed = JSON.parse(raw || '{}')
+    } catch {
+      return sendJson(res, 400, { error: 'U3.2.2: invalid JSON body' })
+    }
+    try {
+      const result = writeUiRunMeta(parsed)
+      // Also stamp a session_snapshot line so the tape itself records the start.
+      appendUiJournalEvents([
+        {
+          type: 'info',
+          t: result.meta.startedAt,
+          iso: result.meta.startedAtIso,
+          source: 'ui',
+          reason: 'ui_run_meta',
+          scenarioId: 'ui_session_start',
+          sha: result.meta.sha,
+        },
+      ])
+      return sendJson(res, 200, {
+        ok: true,
+        paperOnly: true,
+        path: result.path,
+        meta: result.meta,
+        fillsOnDisk: countUiJournalFills(),
+      })
+    } catch (e) {
+      return sendJson(res, 500, {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
   return sendJson(res, 404, {
     error: 'Not found — read-only allowlist only',
     banner: 'Read-only API · never places trades',
@@ -550,14 +665,14 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Accept, Content-Type',
     })
     return res.end()
   }
 
   try {
-    assertReadOnly(req.method, req.url || '/')
+    assertSafeLocalApi(req.method, req.url || '/')
   } catch (e) {
     return sendJson(res, 403, {
       error: e instanceof Error ? e.message : String(e),
@@ -568,6 +683,17 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', `http://127.0.0.1:${PORT}`)
   if (!url.pathname.startsWith('/local-api/')) {
     return sendJson(res, 404, { error: 'Only /local-api/* is exposed' })
+  }
+
+  // Extra belt: paper-mm POSTs stay local; never call kalshiGet from those routes.
+  if (
+    String(req.method || '').toUpperCase() === 'POST' &&
+    !isPaperMmLocalWritePath(url.pathname)
+  ) {
+    return sendJson(res, 403, {
+      error: 'Local API: POST only allowed for /local-api/paper-mm/*',
+      banner: 'Read-only API · never places trades',
+    })
   }
 
   handleLocal(req, res, url).catch((e) => {

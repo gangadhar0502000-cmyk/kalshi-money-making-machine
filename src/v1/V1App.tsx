@@ -12,6 +12,10 @@ import {
 } from './mm/mmSession'
 import { useMmSession } from './mm/useMmSession'
 import {
+  getUiDiskJournalStatus,
+  subscribeUiDiskJournal,
+} from '../lib/crypto15m/mm/uiDiskJournal'
+import {
   assetShortName,
   betterBookHint,
   deriveV1FeedStatus,
@@ -43,6 +47,8 @@ export function V1App() {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [selected, setSelected] = useState<string | null>(null)
   const { state: mm, start, stop, reset } = useMmSession()
+  const [diskTape, setDiskTape] = useState(() => getUiDiskJournalStatus())
+  useEffect(() => subscribeUiDiskJournal(() => setDiskTape(getUiDiskJournalStatus())), [])
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 200)
@@ -227,6 +233,17 @@ export function V1App() {
             <div className="kmm-mm-metric">
               <span className="kmm-mm-metric__label">Fills</span>
               <span className="kmm-mm-metric__value num">{mm.fillsCount}</span>
+            </div>
+            <div className="kmm-mm-metric">
+              <span className="kmm-mm-metric__label">Tape</span>
+              <span
+                className={`kmm-mm-metric__value num ${
+                  diskTape.failLoud ? 'kmm-mm-metric__value--danger' : 'kmm-mm-metric__value--muted'
+                }`}
+                title="U3.2.2 durable UI journal on disk via mm-proxy"
+              >
+                {diskTape.fillsOnDisk}
+              </span>
             </div>
             {mm.fees > 0 && (
               <div className="kmm-mm-metric">

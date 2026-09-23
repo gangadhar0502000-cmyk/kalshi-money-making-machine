@@ -26,6 +26,10 @@ import {
   type MmUpdateError,
   mmSessionStore,
 } from './mmSession'
+import {
+  attachUiDiskJournal,
+  uiDiskJournalFailLoudMessage,
+} from '../../lib/crypto15m/mm/uiDiskJournal'
 
 /** Minimal portfolio surface so tests can inject a stub. */
 export type MmPortfolioHandle = Pick<
@@ -292,8 +296,21 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
     if (disposed) return
     const status = store.getState().status
     if (status === 'idle') return
-    store.patchStats(statsFromPortfolio(portfolio.getState(), focusHint))
+    const patch = statsFromPortfolio(portfolio.getState(), focusHint)
+    // U3.2.2: fail-loud if UI disk journal POSTs keep failing (localStorage alone is not enough).
+    const journalMsg = uiDiskJournalFailLoudMessage()
+    if (journalMsg && !patch.updateError) {
+      patch.updateError = makeUpdateError(
+        journalMsg,
+        'mm-proxy :8787 POST /local-api/paper-mm/journal',
+        'U3.2.2',
+      )
+    }
+    store.patchStats(patch)
   }
+
+  // U3.2.2: browser UI fills → durable JSONL via mm-proxy (no-op in Node).
+  attachUiDiskJournal(portfolio)
 
   const ensurePortfolioSub = () => {
     if (unsubPortfolio) return

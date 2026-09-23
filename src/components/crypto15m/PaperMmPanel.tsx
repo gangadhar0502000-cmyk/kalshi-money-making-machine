@@ -19,6 +19,12 @@ import {
   isHarshFillRateSoftWarn,
   isHarshFillsPerHourReady,
 } from '../../lib/crypto15m/mm/fillCaps'
+import {
+  attachUiDiskJournal,
+  getUiDiskJournalStatus,
+  subscribeUiDiskJournal,
+  uiDiskJournalFailLoudMessage,
+} from '../../lib/crypto15m/mm/uiDiskJournal'
 
 interface Props {
   markets: Crypto15mMarket[]
@@ -78,6 +84,10 @@ function isUnrealisticFillRate(
 export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
   const singleState = useEngineState()
   const portfolioState = usePortfolioState()
+  const [diskTape, setDiskTape] = useState(() => getUiDiskJournalStatus())
+  useEffect(() => attachUiDiskJournal(paperMmPortfolio), [])
+  useEffect(() => subscribeUiDiskJournal(() => setDiskTape(getUiDiskJournalStatus())), [])
+
   const [draft, setDraft] = useState<PaperMmConfig>(() => ({
     ...paperMmPortfolio.getConfig(),
   }))
@@ -689,7 +699,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
             <Stat
               label="SESSION Σ Fills"
               value={String(portfolioState.aggregate.fillCount)}
-              sub={`${portfolioState.aggregate.cancelCount} cancels · session ledger`}
+              sub={`${portfolioState.aggregate.cancelCount} cancels · Tape: ${diskTape.fillsOnDisk} fills on disk`}
+              tone={diskTape.failLoud ? 'bad' : 'neutral'}
             />
             <Stat
               label="Harsh fills / last 15m"
@@ -720,6 +731,13 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
               }
             />
           </div>
+
+          {diskTape.failLoud && (
+            <div className="rounded-xl border border-red-600/60 bg-red-950/40 px-4 py-3 text-sm text-red-100" role="alert">
+              <strong>U3.2.2:</strong> {uiDiskJournalFailLoudMessage()} — needs mm-proxy :8787
+              POST /local-api/paper-mm/journal. localStorage alone can lose the tape.
+            </div>
+          )}
 
           {feesDominatePnl && (
             <div className="rounded-xl border border-amber-600/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">

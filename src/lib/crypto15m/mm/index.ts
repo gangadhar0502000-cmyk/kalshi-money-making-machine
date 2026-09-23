@@ -149,3 +149,16 @@ export {
   type ScenarioThresholds,
   type CloseDecision,
 } from './profitableScenarios'
+
+export {
+  attachUiDiskJournal,
+  getUiDiskJournalStatus,
+  subscribeUiDiskJournal,
+  postUiJournalEvents,
+  postUiRunMeta,
+  mmFillToJournalEvent,
+  uiDiskJournalFailLoudMessage,
+  UI_JOURNAL_FAIL_LOUD_AFTER,
+  type UiDiskJournalStatus,
+} from './uiDiskJournal'
+

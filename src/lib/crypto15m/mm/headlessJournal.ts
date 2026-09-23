@@ -10,6 +10,8 @@ export interface JournalEvent {
   /** Epoch ms */
   t: number
   iso: string
+  /** U3.2.2: 'ui' for browser disk journal; omit/headless for node runner. */
+  source?: 'ui' | 'headless' | string
   /** Plain house tags (house_mid / flatten / blackout / …) or legacy digest ids — never drives quotes. */
   scenarioId?: string
   ticker?: string
