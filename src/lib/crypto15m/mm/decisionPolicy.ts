@@ -15,13 +15,24 @@ import {
 import {
   U32_HOUSE_MID,
   U32_NO_MID,
+  U323_NO_LATE_OPENS,
+  U323_LONG_OPEN_CURB,
+  DEFAULT_LONG_OPEN_MIN_MID,
   aggressiveFlattenPrices,
   isFlattenHouseTag,
   houseMidQuotePrices,
   type HouseTag,
 } from './houseMidQuote'
 
-export { U321_STUCK_NO_BID, U321_STUCK_NO_ASK, isFlattenHouseTag } from './houseMidQuote'
+export {
+  U321_STUCK_NO_BID,
+  U321_STUCK_NO_ASK,
+  isFlattenHouseTag,
+  U323_NO_LATE_OPENS,
+  U323_LONG_OPEN_CURB,
+  DEFAULT_LONG_OPEN_MIN_MID,
+  toHouseFillTag,
+} from './houseMidQuote'
 
 /** Fail-loud strip / reason when paper quotes stay OFF (U3.0 legacy pause). */
 export const QUOTING_PAUSED_REASON =
@@ -85,6 +96,12 @@ export interface DecisionPolicyConfig {
    * Skew accel × (hardFlatMinutes / τ). Default 1.
    */
   tauSkewAccel: number
+  /**
+   * U3.2.3: refuse NEW long YES opens when mid ≤ this (dollars 0–1).
+   * Dig evidence: low-mid longs repeatedly died via flatten@1¢. Default 0.40.
+   * Short opens / flatten reduces still allowed.
+   */
+  longOpenMinMid: number
 }
 
 export const DEFAULT_DECISION_POLICY: Pick<
@@ -108,6 +125,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   | 'blackoutMinutes'
   | 'quoteClampEpsilon'
   | 'tauSkewAccel'
+  | 'longOpenMinMid'
 > = {
   expiryPullMinutes: 0.5,
   sizeDownEdgeMult: 1.5,
@@ -128,6 +146,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   blackoutMinutes: 0.75,
   quoteClampEpsilon: 0.01,
   tauSkewAccel: 1,
+  longOpenMinMid: DEFAULT_LONG_OPEN_MIN_MID,
 }
 
 /** Mutable edge-persistence counters carried across quote rebuilds. */
@@ -427,6 +446,15 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   }
   const forceBlackoutFlatten = inBlackout && input.inventory !== 0
 
+  // U3.2.3: hardFlat + flat → no new opens (inv≠0 still flattens via arms below)
+  const hardFlat =
+    Number.isFinite(cfg.hardFlatMinutes) && cfg.hardFlatMinutes >= 0
+      ? cfg.hardFlatMinutes
+      : 2
+  if (!forceBlackoutFlatten && mins <= hardFlat && input.inventory === 0) {
+    return parkBoth(U323_NO_LATE_OPENS, blank, persist, stuck)
+  }
+
   const arms = familyESideArms({
     inventory: input.inventory,
     maxInventory: cfg.maxInventory,
@@ -500,6 +528,18 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
       askReason = atLow
         ? `U3.1.1: no new shorts @ mid ≤ ${(cfg.toxicMidLow * 100).toFixed(0)}¢`
         : `U3.1.1: no new shorts @ mid ≥ ${(cfg.toxicMidHigh * 100).toFixed(0)}¢`
+    }
+  }
+
+  // U3.2.3: curb NEW long opens when mid in bleed band (shorts / covers OK)
+  {
+    const minLong =
+      Number.isFinite(cfg.longOpenMinMid) && cfg.longOpenMinMid > 0
+        ? cfg.longOpenMinMid
+        : DEFAULT_LONG_OPEN_MIN_MID
+    if (mid <= minLong && bidActive && inv >= 0 && !unwindActive) {
+      bidActive = false
+      bidReason = U323_LONG_OPEN_CURB
     }
   }
 

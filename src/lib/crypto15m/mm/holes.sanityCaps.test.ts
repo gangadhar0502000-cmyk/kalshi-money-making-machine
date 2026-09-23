@@ -110,6 +110,7 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         blackoutMinutes: 0.75,
         quoteClampEpsilon: 0.01,
         tauSkewAccel: 1,
+        longOpenMinMid: DEFAULT_DECISION_POLICY.longOpenMinMid,
       },
     })
     // U3.2 house mid — quotes arm on mid; FV edge does not gate.

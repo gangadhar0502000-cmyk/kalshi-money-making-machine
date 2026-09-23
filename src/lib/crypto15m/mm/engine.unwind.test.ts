@@ -191,7 +191,7 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
     return (engine as unknown as { applyFill: ApplyFill }).applyFill.bind(engine)
   }
 
-  it('stamps S3 scenarioId on profitable close at fill time (not post-flat quote)', () => {
+  it('stamps house_cover scenarioId on profitable close at fill time (not post-flat quote)', () => {
     const market = mkMarket({
       ticker: 'KXHYPE15M-STAMP-S3',
       midYes: 0.5,
@@ -204,18 +204,18 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
 
     const fill = applyFill()
     const before = engine.getState().fills.length
-    // sell @ 0.45 → +5¢ capture ≥ 1¢ → S3
+    // sell @ 0.45 → +5¢ capture ≥ 1¢ → house_cover (was S3)
     fill('sell_yes', 0.45, 1, 0.5, false, 'book_depth', false)
     const fills = engine.getState().fills
     expect(fills.length).toBe(before + 1)
     const last = fills[fills.length - 1]!
-    expect(last.scenarioId).toBe('S3')
+    expect(last.scenarioId).toBe('house_cover')
     expect(last.captureDollars).toBeCloseTo(0.05, 5)
-    // Flat after close — quote may be S5; fill stamp must remain S3
+    // Flat after close — fill stamp must remain house_cover
     expect(engine.getState().snapshot.inventory).toBe(0)
   })
 
-  it('stamps S4.2 on lossy stuck flatten and exposes stuckTicks on snapshot', () => {
+  it('stamps house_close on lossy stuck flatten and exposes stuckTicks on snapshot', () => {
     const market = mkMarket({
       ticker: 'KXHYPE15M-STAMP-S42',
       midYes: 0.5,
@@ -236,12 +236,12 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
 
     const fill = applyFill()
     const before = engine.getState().fills.length
-    // sell @ 0.44 → −6¢ ≤ −5¢ markBleed with stuck → S4.2
+    // sell @ 0.44 → −6¢ ≤ −5¢ markBleed with stuck → house_close (was S4.2)
     fill('sell_yes', 0.44, 1, 0.5, false, 'book_depth', false)
     const fills = engine.getState().fills
     expect(fills.length).toBe(before + 1)
     const last = fills[fills.length - 1]!
-    expect(last.scenarioId).toBe('S4.2')
+    expect(last.scenarioId).toBe('house_close')
     expect(last.captureDollars).toBeCloseTo(-0.06, 5)
   })
 
@@ -264,7 +264,7 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
       ...q!,
       bidActive: true,
       active: true,
-      bidScenario: 'S1',
+      bidScenario: 'house_mid',
       bidReason: 'bid ON: test fixture',
     }
 
@@ -273,6 +273,6 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
     fill('buy_yes', 0.48, 1, 0.5, false, 'book_depth', false)
     const fills = engine.getState().fills
     expect(fills.length).toBe(before + 1)
-    expect(fills[fills.length - 1]!.scenarioId).toBe('S1')
+    expect(fills[fills.length - 1]!.scenarioId).toBe('house_mid')
   })
 })

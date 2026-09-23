@@ -104,7 +104,16 @@ const EMPTY_ROW = (): ScenarioDigestRow => ({
   totalRealizedDelta: 0,
 })
 
-const CLOSE_SCENARIOS = new Set(['S3', 'S4', 'S4.1', 'S4.2', 'flatten', 'blackout_flatten'])
+const CLOSE_SCENARIOS = new Set([
+  'S3',
+  'S4',
+  'S4.1',
+  'S4.2',
+  'flatten',
+  'blackout_flatten',
+  'house_cover',
+  'house_close',
+])
 const OPEN_SCENARIOS = new Set(['S1', 'S2', 'house_mid', 'open'])
 
 /** Classify a fill as open vs close for digest split (measurement only). */

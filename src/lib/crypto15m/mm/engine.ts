@@ -47,6 +47,10 @@ import {
   isFlattenHouseTag,
   U321_STUCK_NO_BID,
   U321_STUCK_NO_ASK,
+  U323_LONG_OPEN_CURB,
+  U323_NO_LATE_OPENS,
+  DEFAULT_LONG_OPEN_MIN_MID,
+  toHouseFillTag,
 } from './decisionPolicy'
 import { evaluateClose } from './profitableScenarios'
 import type {
@@ -1086,6 +1090,8 @@ export class PaperMmEngine {
       blackoutMinutes: this.config.blackoutMinutes ?? DEFAULT_DECISION_POLICY.blackoutMinutes,
       quoteClampEpsilon: this.config.quoteClampEpsilon ?? DEFAULT_DECISION_POLICY.quoteClampEpsilon,
       tauSkewAccel: this.config.tauSkewAccel ?? DEFAULT_DECISION_POLICY.tauSkewAccel,
+      longOpenMinMid:
+        this.config.longOpenMinMid ?? DEFAULT_DECISION_POLICY.longOpenMinMid,
     }
 
     const decision = decideQuoteSides({
@@ -1346,6 +1352,43 @@ export class PaperMmEngine {
       return
     }
 
+    // U3.2.3: refuse NEW long opens in low-mid bleed band (covers/shorts OK)
+    if (reason !== 'settlement' && side === 'buy_yes' && this.inventory >= 0) {
+      const minLong =
+        Number.isFinite(this.config.longOpenMinMid) && this.config.longOpenMinMid > 0
+          ? this.config.longOpenMinMid
+          : DEFAULT_LONG_OPEN_MIN_MID
+      if (Number.isFinite(mid) && mid <= minLong) {
+        this.midCrossRejectCount += 1
+        this.message =
+          `${U323_LONG_OPEN_CURB} (mid $${mid.toFixed(4)} ≤ ${minLong}). ` +
+          `Read-only · never places trades.`
+        this.rebuildQuote(true)
+        return
+      }
+    }
+
+    // U3.2.3: no inventory-increasing opens when τ ≤ hardFlatMinutes
+    if (reason !== 'settlement') {
+      const minsLeft = this.market?.minutesRemaining
+      const hardFlat = this.config.hardFlatMinutes ?? 2
+      const increasingOpen =
+        (side === 'buy_yes' && this.inventory >= 0) ||
+        (side === 'sell_yes' && this.inventory <= 0)
+      if (
+        increasingOpen &&
+        minsLeft != null &&
+        Number.isFinite(minsLeft) &&
+        minsLeft <= hardFlat
+      ) {
+        this.midCrossRejectCount += 1
+        this.message =
+          `${U323_NO_LATE_OPENS} (τ=${minsLeft.toFixed(2)}m). Read-only · never places trades.`
+        this.rebuildQuote(true)
+        return
+      }
+    }
+
     // Fill discipline: never add inventory when already at/over unwindThreshold
     // (or past maxInventory). Unwind / reducing fills remain allowed.
     if (reason !== 'settlement') {
@@ -1426,32 +1469,41 @@ export class PaperMmEngine {
             `Read-only · never places trades.`
           return
         }
-        fillScenarioId = flattenExitFill
+        // U3.2.3: never emit S1–S5 on new fills — map to house_cover / house_close / flatten.
+        const rawClose = flattenExitFill
           ? (this.quote?.activeScenario ?? closeDec.scenario)
           : closeDec.scenario
-        if (closeDec.scenario === 'S4') {
+        fillScenarioId = toHouseFillTag(rawClose) ?? rawClose
+        const houseCloseTag = toHouseFillTag(closeDec.scenario) ?? closeDec.scenario
+        if (houseCloseTag === 'house_close' && closeDec.scenario === 'S4') {
           this.message =
-            `S4 CLOSE_RISK risk flat ${side} @ $${price.toFixed(4)} ` +
+            `house_close risk flat ${side} @ $${price.toFixed(4)} ` +
             `(capture ${
               closeDec.captureCents == null ? 'n/a' : `${closeDec.captureCents.toFixed(1)}¢`
             }). Read-only · never places trades.`
         }
-        if (closeDec.scenario === 'S4.1') {
+        if (houseCloseTag === 'house_close' && closeDec.scenario === 'S4.1') {
           this.message =
-            `S4.1 STUCK_UNWIND ${side} @ $${price.toFixed(4)} ` +
+            `house_close stuck unwind ${side} @ $${price.toFixed(4)} ` +
             `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
         }
-        if (closeDec.scenario === 'S4.2') {
+        if (houseCloseTag === 'house_close' && closeDec.scenario === 'S4.2') {
           this.message =
-            `S4.2 MARK_BLEED ${side} @ $${price.toFixed(4)} ` +
+            `house_close mark bleed ${side} @ $${price.toFixed(4)} ` +
+            `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
+        }
+        if (houseCloseTag === 'house_cover' && closeDec.scenario === 'S3') {
+          this.message =
+            `house_cover ${side} @ $${price.toFixed(4)} ` +
             `(capture ${closeDec.captureCents.toFixed(1)}¢). Read-only · never places trades.`
         }
       }
     }
     if (fillScenarioId == null && reason !== 'settlement') {
       // Open / add — stamp from the quote decision that authorized the resting side.
-      fillScenarioId =
+      const rawOpen =
         side === 'buy_yes' ? this.quote?.bidScenario : this.quote?.askScenario
+      fillScenarioId = toHouseFillTag(rawOpen) ?? rawOpen
     }
 
     const inventoryBefore = this.inventory

@@ -23,7 +23,32 @@ export const U32_RANK_LIQUIDITY =
   'U3.2: rank by L2 / mid quality — not |FV−mid|'
 
 /** Plain tags — not S1–S5. `house_mid` = mid-centered open. */
-export type HouseTag = FamilyETag | 'house_mid'
+export type HouseTag =
+  | FamilyETag
+  | 'house_mid'
+  | 'house_cover'
+  | 'house_close'
+
+/** U3.2.3: flat inventory + τ ≤ hardFlatMinutes — no new opens. */
+export const U323_NO_LATE_OPENS = 'U3.2.3: no new opens — hardFlat τ'
+/** U3.2.3: refuse NEW long opens when mid is in the bleed band. */
+export const U323_LONG_OPEN_CURB = 'U3.2.3: long open curb — mid too low'
+/** Default floor mid for NEW long YES opens (dig losers ~0.13–0.36). */
+export const DEFAULT_LONG_OPEN_MIN_MID = 0.4
+
+/**
+ * Map legacy evaluateClose / leftover S* ids → house tags for NEW fill stamps.
+ * Historical journals may still contain S1–S5; digests keep reading them.
+ */
+export function toHouseFillTag(scenario: string | null | undefined): string | undefined {
+  if (scenario == null || scenario === '') return undefined
+  if (scenario === 'S3') return 'house_cover'
+  if (scenario === 'S4' || scenario === 'S4.1' || scenario === 'S4.2') return 'house_close'
+  if (scenario === 'S1' || scenario === 'S2') return 'house_mid'
+  if (scenario === 'S5' || scenario === 'S5.1') return 'house_close'
+  if (/^S[1-5]/.test(scenario)) return 'house_close'
+  return scenario
+}
 
 export type HouseSkewConfig = FamilyESkewConfig
 

@@ -167,6 +167,7 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         blackoutMinutes: 0.75,
         quoteClampEpsilon: 0.01,
         tauSkewAccel: 1,
+        longOpenMinMid: DEFAULT_DECISION_POLICY.longOpenMinMid,
       },
     })
     // Must not cross BBO even when FV is far from mid
@@ -221,6 +222,7 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
         blackoutMinutes: 0.75,
         quoteClampEpsilon: 0.01,
         tauSkewAccel: 1,
+        longOpenMinMid: DEFAULT_DECISION_POLICY.longOpenMinMid,
       },
     })
     // U3.2: no FV still mid-centers; max inventory withdraws bid (adding side)

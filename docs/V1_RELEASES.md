@@ -243,6 +243,17 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Headless `journal.jsonl` path untouched. Kalshi upstream remains GET-only — journal POSTs never leave the box.
 - Paper-only · read-only · never places live orders.
 
+
+
+## U3.2.3 — no late opens + curb low-mid longs + house_cover + rules archive
+
+- **Evidence (Mac dig):** shorts→near-expiry cover won; all flatten@1¢ losses were low-mid `house_mid` longs; late open with ~1.6m left then flatten.
+- **No late opens:** flat + `τ ≤ hardFlatMinutes` (default 2) → park both (`U3.2.3: no new opens — hardFlat τ`); inventory still flattens (U3.2.1).
+- **Long-open curb:** no NEW long YES when `mid ≤ longOpenMinMid` (default **0.40**); shorts/covers OK (`U3.2.3: long open curb — mid too low`).
+- **Tags:** new fills use `house_cover` / `house_close` instead of leftover S3/S4*; digests still read historical S*.
+- **Archive forever:** `docs/rules-history/` (RULES snapshots) + `data/paper-mm/archive/` (dig tapes + INDEX). Journals never auto-purged.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

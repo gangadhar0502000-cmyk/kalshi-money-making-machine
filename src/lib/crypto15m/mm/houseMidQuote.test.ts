@@ -14,6 +14,9 @@ import {
   U321_STUCK_NO_BID,
   U321_STUCK_NO_ASK,
   isFlattenHouseTag,
+  toHouseFillTag,
+  U323_NO_LATE_OPENS,
+  U323_LONG_OPEN_CURB,
 } from './houseMidQuote'
 
 describe('houseMidQuotePrices', () => {
@@ -110,5 +113,15 @@ describe('U3.2.1 aggressiveFlattenPrices', () => {
     expect(isFlattenHouseTag('flatten')).toBe(true)
     expect(isFlattenHouseTag('blackout_flatten')).toBe(true)
     expect(isFlattenHouseTag('house_mid')).toBe(false)
+  })
+})
+
+
+describe('U3.2.3 house fill tags', () => {
+  it('maps leftover S* to house tags', () => {
+    expect(toHouseFillTag('S3')).toBe('house_cover')
+    expect(toHouseFillTag('S4')).toBe('house_close')
+    expect(U323_NO_LATE_OPENS).toMatch(/hardFlat/)
+    expect(U323_LONG_OPEN_CURB).toMatch(/long open curb/)
   })
 })

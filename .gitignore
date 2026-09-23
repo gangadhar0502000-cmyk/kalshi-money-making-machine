@@ -38,4 +38,7 @@ coverage
 *.key
 
 # Headless paper MM runtime state (journal/digests/logs/session)
-data/paper-mm/
+# Ignore contents but keep archive/ force-trackable (git cannot re-include under an ignored dir)
+data/paper-mm/*
+!data/paper-mm/archive/
+!data/paper-mm/archive/**

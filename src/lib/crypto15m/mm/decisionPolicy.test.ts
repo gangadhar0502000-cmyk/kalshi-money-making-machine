@@ -13,6 +13,9 @@ import {
   U311_EXTREME_MID,
   U32_HOUSE_MID,
   U32_NO_MID,
+  U323_NO_LATE_OPENS,
+  U323_LONG_OPEN_CURB,
+  toHouseFillTag,
   type DecisionPolicyConfig,
   type DecisionPolicyInput,
 } from './decisionPolicy'
@@ -48,6 +51,7 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     blackoutMinutes: DEFAULT_DECISION_POLICY.blackoutMinutes,
     quoteClampEpsilon: DEFAULT_DECISION_POLICY.quoteClampEpsilon,
     tauSkewAccel: DEFAULT_DECISION_POLICY.tauSkewAccel,
+    longOpenMinMid: DEFAULT_DECISION_POLICY.longOpenMinMid,
     ...partial,
   }
 }
@@ -105,7 +109,8 @@ describe('decisionPolicy U3.2 house mid', () => {
         bookBestBid: 0.04,
         bookBestAsk: 0.06,
         // mid == toxicMidLow (0.05) is extreme — use just above for open path
-        config: baseConfig({ toxicMidLow: 0.04, toxicMidHigh: 0.95 }),
+        // longOpenMinMid low so U3.2.3 curb does not hide mid-centering check
+        config: baseConfig({ toxicMidLow: 0.04, toxicMidHigh: 0.95, longOpenMinMid: 0.02 }),
       }),
     )
     expect(d.centerMode).toBe('mid')
@@ -404,3 +409,78 @@ describe('U3.2.1 last-τ flatten exits', () => {
     expect(d.yesAsk).toBeCloseTo(0.39, 5)
   })
 })
+
+
+describe('U3.2.3 no late opens + long-open curb', () => {
+  it('flat + τ≤hardFlat → no opens (park)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 1.5,
+        mid: 0.5,
+        config: baseConfig({ hardFlatMinutes: 2, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toBe(U323_NO_LATE_OPENS)
+  })
+
+  it('inv≠0 + τ≤hardFlat → flatten still works', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        minutesRemaining: 1.5,
+        mid: 0.5,
+        bookBestBid: 0.48,
+        bookBestAsk: 0.52,
+        config: baseConfig({ hardFlatMinutes: 2, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.unwindActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    expect(d.bidActive).toBe(false)
+    expect(d.activeScenario).toBe('flatten')
+  })
+
+  it('mid 0.30 flat → long bid OFF, short ask may stay', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 8,
+        mid: 0.3,
+        bookBestBid: 0.28,
+        bookBestAsk: 0.32,
+        config: baseConfig({ longOpenMinMid: 0.4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.bidReason).toBe(U323_LONG_OPEN_CURB)
+    expect(d.activeScenario).toBe('house_mid')
+  })
+
+  it('mid 0.30 short → cover bid stays (not a new long)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: -2,
+        minutesRemaining: 8,
+        mid: 0.3,
+        bookBestBid: 0.28,
+        bookBestAsk: 0.32,
+        config: baseConfig({ longOpenMinMid: 0.4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(true)
+    expect(d.bidReason).not.toBe(U323_LONG_OPEN_CURB)
+  })
+
+  it('toHouseFillTag maps S3→house_cover and never leaves S*', () => {
+    expect(toHouseFillTag('S3')).toBe('house_cover')
+    expect(toHouseFillTag('S4.2')).toBe('house_close')
+    expect(toHouseFillTag('S1')).toBe('house_mid')
+    expect(toHouseFillTag('flatten')).toBe('flatten')
+    expect(toHouseFillTag('house_mid')).toBe('house_mid')
+  })
+})
+
