@@ -294,6 +294,12 @@
   .kmm-btn--primary:hover:not(:disabled) {
     background: #1890ff;
   }
+  /* U2.8: Start while Running must read grey/disabled, not faded primary blue */
+  .kmm-btn--primary:disabled {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-tertiary);
+    opacity: 1;
+  }
 
   .live-pulse {
     animation: kmm-pulse 2.4s ease-in-out infinite;

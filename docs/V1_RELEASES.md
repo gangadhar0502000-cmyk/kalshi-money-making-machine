@@ -105,6 +105,13 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Phased UI (U2.5–U2.7) complete** for Apple-clean feed + paper MM shell: active books panel, strip metric polish, market-rail highlight.
 - Paper-only / read-only; never places live trades.
 
+## U2.8 — shared cash + Start/feed strip fixes
+
+- **Shared cash** in portfolio aggregate: one `startingCash` bankroll view — `starting + Σ(book.cash − starting)` while books live (not sum of per-book `$100` starts). Idle / no books: `startingCash + sessionLedger.realizedSpreadPnl − feesPaid` (ledger banks P&L on release, not cash). Fail-loud: non-finite → fall back to starting.
+- **Start disabled look:** `.kmm-btn--primary:disabled` Apple-clean grey (not faded primary blue) while `mm.status === 'running'`.
+- **Feed stale on MM strip:** when Running and `feedTone !== 'ok'`, quiet alert `U2.8: feed stale (age) — needs continuous feed / mm-proxy :8787` (amber/red); existing `updateError` still wins.
+- Paper-only / read-only; never places live trades. Loose multi-book rules / fills / metrics grid / books panel / rail untouched.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.

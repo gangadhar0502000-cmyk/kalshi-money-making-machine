@@ -35,6 +35,7 @@ import { fmtMmInvHint, sortMarketsForRail } from './marketRail'
  * U2.5 Active books panel under the MM strip (per-book P&L; click focuses hero).
  * U2.6 Apple-clean MM strip metric polish (scannable cash / P&L grid).
  * U2.7 Market rail: MM badge + quoted books float first while running.
+ * U2.8 Shared cash aggregate + Start disabled look + feed-stale strip line.
  * Paper / read-only. YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
@@ -251,6 +252,17 @@ export function V1App() {
               role="alert"
             >
               {formatUpdateError(mm.updateError)}
+            </p>
+          ) : mm.status === 'running' && status.feedTone !== 'ok' ? (
+            <p
+              className={`mt-2 text-[12px] font-medium ${
+                status.feedTone === 'red'
+                  ? 'text-[var(--color-danger)]'
+                  : 'text-[var(--color-warn)]'
+              }`}
+              role="alert"
+            >
+              {`U2.8: feed stale (${status.feedAgeShort}) — needs continuous feed / mm-proxy :8787`}
             </p>
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">

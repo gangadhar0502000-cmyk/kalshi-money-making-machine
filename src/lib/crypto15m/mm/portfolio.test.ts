@@ -443,4 +443,36 @@ describe('PaperMmPortfolio', () => {
     expect(st.sessionFills.length).toBeGreaterThanOrEqual(1)
     expect(st.aggregate.feesPaid).toBeCloseTo(0.03, 5)
   })
+
+  it('U2.8 shared cash: two books at startingCash aggregate ≈ one bankroll, not sum', () => {
+    const btc = mk({
+      ticker: 'BTC-CASH',
+      asset: 'BTC',
+      midYes: 0.48,
+      floorStrike: 100,
+      minutesRemaining: 10,
+    })
+    const eth = mk({
+      ticker: 'ETH-CASH',
+      asset: 'ETH',
+      midYes: 0.48,
+      floorStrike: 100,
+      minutesRemaining: 10,
+    })
+    portfolio.seedSpot('BTC', 100.05)
+    portfolio.seedSpot('ETH', 100.05)
+    portfolio.setConfig({ maxActiveMarkets: 2, startingCash: 100 })
+    portfolio.syncMarketUniverse([btc, eth])
+    portfolio.start()
+    const st0 = portfolio.getState()
+    expect(st0.books.length).toBe(2)
+    // Each engine starts at ~100; naive sum would be ~200 — shared view is ~100
+    expect(st0.aggregate.cash).toBeCloseTo(100, 5)
+
+    portfolio.seedBookStats('BTC-CASH', { cash: 95 })
+    portfolio.seedBookStats('ETH-CASH', { cash: 100 })
+    const st1 = portfolio.getState()
+    // starting + (95-100) + (100-100) = 95
+    expect(st1.aggregate.cash).toBeCloseTo(95, 5)
+  })
 })

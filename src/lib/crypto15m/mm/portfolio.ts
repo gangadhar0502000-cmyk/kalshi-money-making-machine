@@ -329,7 +329,11 @@ export class PaperMmPortfolio {
         (a.snapshot.marketTicker ?? '').localeCompare(b.snapshot.marketTicker ?? ''),
     )
 
-    let cash = 0
+    // U2.8 shared bankroll: one startingCash, not sum of per-book startingCash.
+    // Live books: starting + Σ(book.cash − starting). Idle/no books: starting +
+    // sessionLedger realized − fees (ledger banks P&L on release, not cash).
+    const starting = this.config.startingCash
+    let cashSum = 0
     let realized = this.sessionLedger.realizedSpreadPnl
     let unrealized = 0
     let fees = this.sessionLedger.feesPaid
@@ -338,7 +342,7 @@ export class PaperMmPortfolio {
     let inv = 0
     let moneyPrinter = false
     for (const b of books) {
-      cash += b.snapshot.cash
+      cashSum += b.snapshot.cash
       realized += b.snapshot.realizedSpreadPnl
       unrealized += b.snapshot.unrealizedInventoryPnl
       fees += b.snapshot.feesPaid
@@ -346,6 +350,15 @@ export class PaperMmPortfolio {
       cancels += b.snapshot.cancelCount
       inv += b.snapshot.inventory
       if (b.snapshot.moneyPrinterBug) moneyPrinter = true
+    }
+    const n = books.length
+    let cash =
+      n === 0
+        ? starting + this.sessionLedger.realizedSpreadPnl - this.sessionLedger.feesPaid
+        : starting + (cashSum - n * starting)
+    // Fail-loud: absurd / NaN → fall back to starting (do not crash strip).
+    if (!Number.isFinite(cash)) {
+      cash = starting
     }
     const now = Date.now()
     this.refreshPortfolioFillCap()
