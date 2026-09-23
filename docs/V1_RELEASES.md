@@ -80,9 +80,20 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Deferred:** optional strict toggle; true NO-primary L2; single-engine YES/NO U2.3 routing remains available for residual paths but Start defaults to multi loose.
 - Paper-only / read-only; never places live trades.
 
+## U2.5 — Active books panel
+
+- Apple-clean **Active books** list directly under the Paper MM strip (not inside the market rail).
+- Session store gains `books: MmBookRow[]` (slotId, ticker, asset, inventory, realized/unrealized, fills, liveBook, midYes, message). Runner maps `portfolio.getState().books` → rows (skips null tickers); Reset clears to `[]`.
+- Each row: asset + truncated ticker, mid ¢, signed inv, realized/unrealized (profit green / danger), fills, quiet live-off chip when `!liveBook`. Click row → `setSelected(ticker)` focuses hero (same selection state as market cards).
+- Shown when `status !== 'idle'` or books remain; empty running state shows quiet “Waiting for books…”.
+- **Next:** U2.6 strip metric polish · U2.7 market-rail highlight for active books.
+- Paper-only / read-only; never places live trades.
+
 ## Upcoming
 
-- **U2.5+** — density / keyboard nav polish if needed; optional strict toggle; true NO-primary L2.
+- **U2.6** — strip metric density polish (aggregate strip only).
+- **U2.7** — market-rail highlight for quoted books.
+- **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).

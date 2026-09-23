@@ -1,6 +1,7 @@
 /**
- * U2.4 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
+ * U2.4 / U2.5 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
  * Default Start → multi-book + strictRealism: false (LOOSE presets).
+ * U2.5: map portfolio books → MmBookRow[] for Active books panel.
  * Reuses existing PaperMmPortfolio / engines as-is — no new S* rules.
  * U2.2/U2.3 helpers remain for residual single-engine / error mapping.
  * Paper-only · never places live orders.
@@ -20,6 +21,7 @@ import type { MmSnapshot } from '../../lib/crypto15m/mm/types'
 import {
   makeUpdateError,
   MM_MAX_ACTIVE_BOOKS,
+  type MmBookRow,
   type MmSessionStore,
   type MmUpdateError,
   mmSessionStore,
@@ -132,6 +134,27 @@ function lastFillAtFromPortfolio(state: PortfolioState): number | null {
   return best
 }
 
+function booksFromPortfolio(state: PortfolioState): MmBookRow[] {
+  const rows: MmBookRow[] = []
+  for (const b of state.books) {
+    const ticker = b.snapshot.marketTicker
+    if (!ticker) continue
+    rows.push({
+      slotId: b.slotId,
+      ticker,
+      asset: b.snapshot.asset ?? '',
+      inventory: b.snapshot.inventory ?? 0,
+      realizedPnl: b.snapshot.realizedSpreadPnl ?? 0,
+      unrealizedPnl: b.snapshot.unrealizedInventoryPnl ?? 0,
+      fillsCount: b.snapshot.fillCount ?? 0,
+      liveBook: Boolean(b.snapshot.liveBook),
+      midYes: b.snapshot.midYes ?? 0,
+      message: b.snapshot.message ?? '',
+    })
+  }
+  return rows
+}
+
 function statsFromPortfolio(
   state: PortfolioState,
   focusHint: string | null,
@@ -145,16 +168,15 @@ function statsFromPortfolio(
   lastFillAt: number | null
   activeTicker: string | null
   activeBooks: number
+  books: MmBookRow[]
   quoteBook: null
   updateError: MmUpdateError | null
 } {
   const agg = state.aggregate
+  const books = booksFromPortfolio(state)
   const firstTicker =
-    state.books[0]?.snapshot.marketTicker ??
-    (focusHint &&
-    state.books.some((b) => b.snapshot.marketTicker === focusHint)
-      ? focusHint
-      : null) ??
+    books[0]?.ticker ??
+    (focusHint && books.some((b) => b.ticker === focusHint) ? focusHint : null) ??
     focusHint
   return {
     cash: agg.cash,
@@ -166,6 +188,7 @@ function statsFromPortfolio(
     lastFillAt: lastFillAtFromPortfolio(state),
     activeTicker: firstTicker,
     activeBooks: agg.activeBooks,
+    books,
     quoteBook: null,
     updateError: derivePortfolioUpdateError(state),
   }
@@ -264,6 +287,7 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           ),
           activeTicker: ticker ?? null,
           activeBooks: 0,
+          books: [],
           quoteBook: null,
         })
         // Fail-loud stay idle — no portfolio start without a universe.

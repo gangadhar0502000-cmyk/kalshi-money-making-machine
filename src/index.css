@@ -162,6 +162,32 @@
     border-radius: 16px;
   }
 
+  .kmm-books-panel {
+    border: 1px solid var(--color-separator);
+    background: var(--color-grouped);
+    border-radius: 16px;
+  }
+
+  .kmm-book-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    background: var(--color-elevated);
+    border-radius: 12px;
+    padding: 0.75rem 0.9rem;
+    cursor: pointer;
+    transition: background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  }
+  .kmm-book-row:hover {
+    background: #323234;
+  }
+  .kmm-book-row--on {
+    border-color: rgba(10, 132, 255, 0.45);
+    background: rgba(10, 132, 255, 0.1);
+    box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.2);
+  }
+
   .kmm-btn {
     display: inline-flex;
     align-items: center;

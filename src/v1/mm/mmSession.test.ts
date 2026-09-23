@@ -27,6 +27,7 @@ const idle: MmSessionState = {
   activeTicker: null,
   quoteBook: null,
   activeBooks: 0,
+  books: [],
   updateError: null,
 }
 
@@ -140,6 +141,7 @@ describe('mmSession transitions', () => {
       activeTicker: null,
       quoteBook: null,
       activeBooks: 0,
+      books: [],
       updateError: null,
     })
   })
@@ -273,6 +275,69 @@ describe('U2.4 error format', () => {
       activeBooks: 3,
     }
     expect(transitionReset(running).activeBooks).toBe(0)
+  })
+})
+
+describe('U2.5 books panel state', () => {
+  it('reset clears books', () => {
+    const running: MmSessionState = {
+      ...idle,
+      status: 'running',
+      startedAt: 100,
+      activeBooks: 2,
+      books: [
+        {
+          slotId: 'slot-1',
+          ticker: 'KX-A',
+          asset: 'BTC',
+          inventory: 1,
+          realizedPnl: 0.1,
+          unrealizedPnl: -0.05,
+          fillsCount: 2,
+          liveBook: true,
+          midYes: 0.5,
+          message: 'ok',
+        },
+      ],
+    }
+    const next = transitionReset(running)
+    expect(next.books).toEqual([])
+    expect(next.activeBooks).toBe(0)
+  })
+
+  it('patchStats sets books', () => {
+    const store = createMmSessionStore()
+    store.start()
+    const rows = [
+      {
+        slotId: 'slot-1',
+        ticker: 'KX-A',
+        asset: 'BTC',
+        inventory: 2,
+        realizedPnl: 0.25,
+        unrealizedPnl: 0.1,
+        fillsCount: 3,
+        liveBook: true,
+        midYes: 0.51,
+        message: 'quoting',
+      },
+      {
+        slotId: 'slot-2',
+        ticker: 'KX-B',
+        asset: 'ETH',
+        inventory: -1,
+        realizedPnl: -0.05,
+        unrealizedPnl: 0,
+        fillsCount: 1,
+        liveBook: false,
+        midYes: 0.48,
+        message: 'L2 book poll failed',
+      },
+    ]
+    store.patchStats({ books: rows, activeBooks: 2 })
+    expect(store.getState().books).toEqual(rows)
+    expect(store.getState().activeBooks).toBe(2)
+    expect(store.getState().status).toBe('running')
   })
 })
 

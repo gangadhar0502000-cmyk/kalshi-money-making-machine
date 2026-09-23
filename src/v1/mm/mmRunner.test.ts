@@ -299,6 +299,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
     expect(portfolio.start).toHaveBeenCalled()
     expect(store.getState().status).toBe('running')
     expect(store.getState().activeBooks).toBe(2)
+    expect(store.getState().books).toHaveLength(2)
     expect(store.getState().quoteBook).toBeNull()
     expect(store.getState().cash).toBe(MM_SESSION_STARTING_CASH)
 
@@ -362,6 +363,7 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
       activeTicker: null,
       quoteBook: null,
       activeBooks: 0,
+      books: [],
       updateError: null,
     })
   })
@@ -416,5 +418,89 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
     portfolio._emit()
     expect(store.getState().updateError?.code).toBe('U2.4')
     expect(store.getState().updateError?.message).toContain('under-filled')
+  })
+
+  it('U2.5: portfolio with 2 book stubs → store.books mapped; reset → []', () => {
+    const { store, portfolio, runner, markets } = pair()
+    runner.start(markets[0]!.ticker)
+    expect(store.getState().books).toHaveLength(2)
+
+    portfolio._state = {
+      ...portfolio._state,
+      books: [
+        {
+          slotId: 'slot-1',
+          snapshot: baseSnap({
+            marketTicker: 'KX-BTC-1',
+            asset: 'BTC',
+            inventory: 3,
+            realizedSpreadPnl: 0.4,
+            unrealizedInventoryPnl: 0.15,
+            fillCount: 4,
+            liveBook: true,
+            midYes: 0.52,
+            message: 'ok',
+            running: true,
+          }),
+          fills: [],
+          cancels: [],
+        },
+        {
+          slotId: 'slot-2',
+          snapshot: baseSnap({
+            marketTicker: 'KX-ETH-1',
+            asset: 'ETH',
+            inventory: -2,
+            realizedSpreadPnl: -0.1,
+            unrealizedInventoryPnl: 0.05,
+            fillCount: 1,
+            liveBook: false,
+            midYes: 0.47,
+            message: 'soft sim',
+            running: true,
+          }),
+          fills: [],
+          cancels: [],
+        },
+        {
+          slotId: 'slot-empty',
+          snapshot: baseSnap({ marketTicker: null, asset: null }),
+          fills: [],
+          cancels: [],
+        },
+      ],
+      aggregate: emptyAgg({ activeBooks: 2 }),
+      message: 'ok',
+    }
+    portfolio._emit()
+
+    expect(store.getState().books).toHaveLength(2)
+    expect(store.getState().books[0]).toMatchObject({
+      slotId: 'slot-1',
+      ticker: 'KX-BTC-1',
+      asset: 'BTC',
+      inventory: 3,
+      realizedPnl: 0.4,
+      unrealizedPnl: 0.15,
+      fillsCount: 4,
+      liveBook: true,
+      midYes: 0.52,
+      message: 'ok',
+    })
+    expect(store.getState().books[1]).toMatchObject({
+      slotId: 'slot-2',
+      ticker: 'KX-ETH-1',
+      asset: 'ETH',
+      inventory: -2,
+      realizedPnl: -0.1,
+      unrealizedPnl: 0.05,
+      fillsCount: 1,
+      liveBook: false,
+      midYes: 0.47,
+      message: 'soft sim',
+    })
+
+    runner.reset()
+    expect(store.getState().books).toEqual([])
   })
 })

@@ -26,6 +26,7 @@ import {
  * KMM v1 — Apple-clean feed UI.
  * Dark iOS-style surface. Continuous feed + YES/NO + Paper MM Start/Stop/Reset.
  * U2.4 Start runs loose multi-book paper portfolio (up to 5 books).
+ * U2.5 Active books panel under the MM strip (per-book P&L; click focuses hero).
  * Paper / read-only. YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
@@ -235,6 +236,128 @@ export function V1App() {
             </p>
           )}
         </section>
+
+        {/* U2.5 — Active books panel (under strip; not market rail) */}
+        {(mm.status !== 'idle' || mm.books.length > 0) && (
+          <section
+            className="kmm-books-panel mb-6 px-4 py-3.5 sm:px-5"
+            aria-label="Active paper books"
+          >
+            <div className="mb-2.5 flex items-center justify-between gap-2">
+              <p className="text-[13px] font-semibold tracking-tight text-[var(--color-label)]">
+                Active books
+              </p>
+              <span className="num text-[11px] text-[var(--color-tertiary)]">
+                {mm.books.length}/{MM_MAX_ACTIVE_BOOKS}
+              </span>
+            </div>
+            {mm.books.length === 0 ? (
+              <p className="text-[12px] text-[var(--color-tertiary)]">
+                Waiting for books…
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {mm.books.map((book) => {
+                  const on = book.ticker === selected
+                  const midCents =
+                    typeof book.midYes === 'number' && Number.isFinite(book.midYes)
+                      ? Math.round(book.midYes * 100)
+                      : null
+                  const tickerShort =
+                    book.ticker.length > 22
+                      ? `${book.ticker.slice(0, 10)}…${book.ticker.slice(-8)}`
+                      : book.ticker
+                  return (
+                    <li key={book.slotId}>
+                      <button
+                        type="button"
+                        className={`kmm-book-row ${on ? 'kmm-book-row--on' : ''}`}
+                        onClick={() => setSelected(book.ticker)}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="kmm-badge">
+                              {(book.asset || '—').toUpperCase()}
+                            </span>
+                            <span className="truncate text-[13px] font-medium text-[var(--color-label)]">
+                              {book.asset ? assetShortName(book.asset) : '—'}
+                            </span>
+                            <span
+                              className="num truncate text-[11px] text-[var(--color-tertiary)]"
+                              title={book.ticker}
+                            >
+                              {tickerShort}
+                            </span>
+                            {!book.liveBook && (
+                              <span
+                                className="kmm-chip kmm-chip--warn text-[10px]"
+                                title={book.message || 'Live book off'}
+                              >
+                                off
+                              </span>
+                            )}
+                          </div>
+                          <span className="num text-[12px] text-[var(--color-secondary)]">
+                            Mid{' '}
+                            <span className="font-semibold text-[var(--color-label)]">
+                              {midCents != null ? `${midCents}¢` : '—'}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[var(--color-secondary)]">
+                          <span>
+                            Inv{' '}
+                            <span className="num font-semibold text-[var(--color-label)]">
+                              {book.inventory > 0 ? '+' : ''}
+                              {book.inventory}
+                            </span>
+                          </span>
+                          <span>
+                            Realized{' '}
+                            <span
+                              className={`num font-semibold ${
+                                book.realizedPnl >= 0
+                                  ? 'text-[var(--color-profit)]'
+                                  : 'text-[var(--color-danger)]'
+                              }`}
+                            >
+                              {book.realizedPnl >= 0 ? '+' : ''}
+                              ${book.realizedPnl.toFixed(2)}
+                            </span>
+                          </span>
+                          <span>
+                            Unrealized{' '}
+                            <span
+                              className={`num font-semibold ${
+                                book.unrealizedPnl >= 0
+                                  ? 'text-[var(--color-profit)]'
+                                  : 'text-[var(--color-danger)]'
+                              }`}
+                            >
+                              {book.unrealizedPnl >= 0 ? '+' : ''}
+                              ${book.unrealizedPnl.toFixed(2)}
+                            </span>
+                          </span>
+                          <span>
+                            Fills{' '}
+                            <span className="num font-semibold text-[var(--color-label)]">
+                              {book.fillsCount}
+                            </span>
+                          </span>
+                        </div>
+                        {book.message && !book.liveBook && (
+                          <p className="mt-1.5 truncate text-[11px] text-[var(--color-tertiary)]">
+                            {book.message}
+                          </p>
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        )}
 
         {/* Hero */}
         <section className="kmm-hero mb-6 p-5 sm:p-7">

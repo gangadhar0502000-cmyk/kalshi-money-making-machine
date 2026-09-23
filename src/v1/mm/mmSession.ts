@@ -1,7 +1,8 @@
 /**
- * U2.1 / U2.2 / U2.3 / U2.4 — Paper MM session store.
+ * U2.1 / U2.2 / U2.3 / U2.4 / U2.5 — Paper MM session store.
  * Start / Stop / Reset shell + paper P&L stats (portfolio attached via mmRunner).
  * U2.4: multi-book loose portfolio; activeBooks in strip.
+ * U2.5: per-book rows for Active books panel (`books: MmBookRow[]`).
  * Paper-only · read-only Kalshi · never places live orders.
  */
 
@@ -14,6 +15,20 @@ export type MmUpdateError = {
   code: 'U2.2' | 'U2.3' | 'U2.4'
   message: string
   dependency: string
+}
+
+/** U2.5 — minimal per-book row for the Active books panel. */
+export type MmBookRow = {
+  slotId: string
+  ticker: string
+  asset: string
+  inventory: number
+  realizedPnl: number
+  unrealizedPnl: number
+  fillsCount: number
+  liveBook: boolean
+  midYes: number
+  message: string
 }
 
 export type MmSessionState = {
@@ -41,6 +56,8 @@ export type MmSessionState = {
   quoteBook: QuoteBook | null
   /** How many portfolio books are currently active (0 when idle/reset). */
   activeBooks: number
+  /** U2.5: up-to-5 active portfolio book rows (empty when idle/reset). */
+  books: MmBookRow[]
   /** Fail-loud U2.2/U2.3/U2.4 error; null when healthy. */
   updateError: MmUpdateError | null
 }
@@ -58,6 +75,7 @@ export type MmSessionStatsPatch = Partial<
     | 'activeTicker'
     | 'quoteBook'
     | 'activeBooks'
+    | 'books'
     | 'updateError'
   >
 >
@@ -89,6 +107,7 @@ const ZERO_STATS = {
   activeTicker: null as string | null,
   quoteBook: null as QuoteBook | null,
   activeBooks: 0,
+  books: [] as MmBookRow[],
   updateError: null as MmUpdateError | null,
 }
 
@@ -116,8 +135,33 @@ function sameState(a: MmSessionState, b: MmSessionState): boolean {
     a.activeTicker === b.activeTicker &&
     a.quoteBook === b.quoteBook &&
     a.activeBooks === b.activeBooks &&
+    sameBooks(a.books, b.books) &&
     sameError(a.updateError, b.updateError)
   )
+}
+
+function sameBooks(a: MmBookRow[], b: MmBookRow[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!
+    const y = b[i]!
+    if (
+      x.slotId !== y.slotId ||
+      x.ticker !== y.ticker ||
+      x.asset !== y.asset ||
+      x.inventory !== y.inventory ||
+      x.realizedPnl !== y.realizedPnl ||
+      x.unrealizedPnl !== y.unrealizedPnl ||
+      x.fillsCount !== y.fillsCount ||
+      x.liveBook !== y.liveBook ||
+      x.midYes !== y.midYes ||
+      x.message !== y.message
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 function sameError(
@@ -160,7 +204,7 @@ export function transitionStop(
 }
 
 /**
- * Reset clears session counters / P&L / errors / quoteBook / activeBooks → idle.
+ * Reset clears session counters / P&L / errors / quoteBook / activeBooks / books → idle.
  * Does not wipe the market feed (feed lives outside this store).
  */
 export function transitionReset(state: MmSessionState): MmSessionState {
