@@ -26,6 +26,7 @@ const idle: MmSessionState = {
   lastFillAt: null,
   activeTicker: null,
   quoteBook: null,
+  activeBooks: 0,
   updateError: null,
 }
 
@@ -138,6 +139,7 @@ describe('mmSession transitions', () => {
       lastFillAt: null,
       activeTicker: null,
       quoteBook: null,
+      activeBooks: 0,
       updateError: null,
     })
   })
@@ -247,6 +249,30 @@ describe('U2.2 / U2.3 error object shape', () => {
     expect(formatUpdateError(err)).toBe(
       'U2.3: YES book one-sided — needs two-sided YES and NO touch on feed',
     )
+  })
+})
+
+describe('U2.4 error format', () => {
+  it('makeUpdateError with U2.4 code formats U2.4 line', () => {
+    const err = makeUpdateError(
+      'no markets in feed',
+      'continuous feed / mm-proxy :8787',
+      'U2.4',
+    )
+    expect(err.code).toBe('U2.4')
+    expect(formatUpdateError(err)).toBe(
+      'U2.4: no markets in feed — needs continuous feed / mm-proxy :8787',
+    )
+  })
+
+  it('reset clears activeBooks', () => {
+    const running: MmSessionState = {
+      ...idle,
+      status: 'running',
+      startedAt: 100,
+      activeBooks: 3,
+    }
+    expect(transitionReset(running).activeBooks).toBe(0)
   })
 })
 

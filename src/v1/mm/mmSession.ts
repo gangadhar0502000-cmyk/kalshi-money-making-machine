@@ -1,7 +1,7 @@
 /**
- * U2.1 / U2.2 / U2.3 — Paper MM session store.
- * Start / Stop / Reset shell + paper P&L stats (engine attached via mmRunner).
- * U2.3 adds quoteBook (YES|NO) from betterBookHint routing.
+ * U2.1 / U2.2 / U2.3 / U2.4 — Paper MM session store.
+ * Start / Stop / Reset shell + paper P&L stats (portfolio attached via mmRunner).
+ * U2.4: multi-book loose portfolio; activeBooks in strip.
  * Paper-only · read-only Kalshi · never places live orders.
  */
 
@@ -11,7 +11,7 @@ export type MmSessionStatus = 'idle' | 'running' | 'stopped'
 
 /** Fail-loud update error surfaced in the Apple-clean strip. */
 export type MmUpdateError = {
-  code: 'U2.2' | 'U2.3'
+  code: 'U2.2' | 'U2.3' | 'U2.4'
   message: string
   dependency: string
 }
@@ -21,9 +21,9 @@ export type MmSessionState = {
   startedAt: number | null
   stoppedAt: number | null
   resetCount: number
-  /** Paper cash ($) — mirrors engine startingCash / cash. */
+  /** Paper cash ($) — mirrors portfolio / engine startingCash / cash. */
   cash: number
-  /** Net YES inventory (contracts). */
+  /** Aggregate net YES inventory (contracts). */
   inventory: number
   /** Realized spread P&L after fees ($). */
   realizedPnl: number
@@ -35,11 +35,13 @@ export type MmSessionState = {
   fillsCount: number
   /** Epoch ms of last fill, or null. */
   lastFillAt: number | null
-  /** Ticker the runner is quoting (single-book). */
+  /** Primary / focus hint ticker (first active book in multi). */
   activeTicker: string | null
-  /** Active quote book (YES|NO); null when idle/reset. */
+  /** Active quote book (YES|NO); null in multi-book mode / idle. */
   quoteBook: QuoteBook | null
-  /** Fail-loud U2.2/U2.3 error (orderbook/spot/book routing); null when healthy. */
+  /** How many portfolio books are currently active (0 when idle/reset). */
+  activeBooks: number
+  /** Fail-loud U2.2/U2.3/U2.4 error; null when healthy. */
   updateError: MmUpdateError | null
 }
 
@@ -55,6 +57,7 @@ export type MmSessionStatsPatch = Partial<
     | 'lastFillAt'
     | 'activeTicker'
     | 'quoteBook'
+    | 'activeBooks'
     | 'updateError'
   >
 >
@@ -69,8 +72,11 @@ export type MmSessionStore = {
   patchStats: (patch: MmSessionStatsPatch) => void
 }
 
-/** Default paper starting cash — matches STRICT_PAPER_MM_CONFIG.startingCash. */
+/** Default paper starting cash — matches STRICT/LOOSE startingCash. */
 export const MM_SESSION_STARTING_CASH = 100
+
+/** U2.4: portfolio max active books (matches PaperMmConfig.maxActiveMarkets). */
+export const MM_MAX_ACTIVE_BOOKS = 5
 
 const ZERO_STATS = {
   cash: MM_SESSION_STARTING_CASH,
@@ -82,6 +88,7 @@ const ZERO_STATS = {
   lastFillAt: null as number | null,
   activeTicker: null as string | null,
   quoteBook: null as QuoteBook | null,
+  activeBooks: 0,
   updateError: null as MmUpdateError | null,
 }
 
@@ -108,6 +115,7 @@ function sameState(a: MmSessionState, b: MmSessionState): boolean {
     a.lastFillAt === b.lastFillAt &&
     a.activeTicker === b.activeTicker &&
     a.quoteBook === b.quoteBook &&
+    a.activeBooks === b.activeBooks &&
     sameError(a.updateError, b.updateError)
   )
 }
@@ -152,7 +160,7 @@ export function transitionStop(
 }
 
 /**
- * Reset clears session counters / P&L / errors / quoteBook → idle.
+ * Reset clears session counters / P&L / errors / quoteBook / activeBooks → idle.
  * Does not wipe the market feed (feed lives outside this store).
  */
 export function transitionReset(state: MmSessionState): MmSessionState {
@@ -224,7 +232,7 @@ export function statusPillLabel(
   return `Running · ${formatElapsed(nowMs - started)}`
 }
 
-/** Apple-clean error line: `U2.2: … — needs …` / `U2.3: … — needs …` */
+/** Apple-clean error line: `U2.2: … — needs …` / `U2.3:` / `U2.4:` */
 export function formatUpdateError(err: MmUpdateError): string {
   return `${err.code}: ${err.message} — needs ${err.dependency}`
 }
@@ -232,7 +240,7 @@ export function formatUpdateError(err: MmUpdateError): string {
 export function makeUpdateError(
   message: string,
   dependency: string,
-  code: 'U2.2' | 'U2.3' = 'U2.2',
+  code: 'U2.2' | 'U2.3' | 'U2.4' = 'U2.2',
 ): MmUpdateError {
   return { code, message, dependency }
 }

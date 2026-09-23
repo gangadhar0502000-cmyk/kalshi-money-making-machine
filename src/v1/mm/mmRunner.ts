@@ -1,64 +1,65 @@
 /**
- * U2.2 / U2.3 — Bind PaperMmEngine lifecycle to the Start/Stop/Reset session shell.
- * U2.3 routes the single focused ticker to the better YES or NO book via
- * betterBookHint + marketForQuoteBook (sticky while inventory open).
- * L2 remains YES-combined this slice (NO-primary L2 deferred).
+ * U2.4 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
+ * Default Start → multi-book + strictRealism: false (LOOSE presets).
+ * Reuses existing PaperMmPortfolio / engines as-is — no new S* rules.
+ * U2.2/U2.3 helpers remain for residual single-engine / error mapping.
  * Paper-only · never places live orders.
  */
 
-import type { Crypto15mMarket } from '../../types/crypto15m'
 import {
   getContinuousFeedSnapshot,
   type ContinuousFeedSnapshot,
 } from '../../lib/crypto15m/mm/continuousFeed'
-import { paperMmEngine, type PaperMmEngine } from '../../lib/crypto15m/mm/engine'
-import type { MmEngineState, MmSnapshot } from '../../lib/crypto15m/mm/types'
+import { presetsForMode } from '../../lib/crypto15m/mm/config'
+import {
+  paperMmPortfolio,
+  type PaperMmPortfolio,
+  type PortfolioState,
+} from '../../lib/crypto15m/mm/portfolio'
+import type { MmSnapshot } from '../../lib/crypto15m/mm/types'
 import {
   makeUpdateError,
+  MM_MAX_ACTIVE_BOOKS,
   type MmSessionStore,
   type MmUpdateError,
   mmSessionStore,
 } from './mmSession'
-import {
-  marketForQuoteBook,
-  resolveQuoteBook,
-  type QuoteBook,
-} from './quoteBook'
 
-/** Minimal engine surface so tests can inject a stub. */
-export type MmEngineHandle = Pick<
-  PaperMmEngine,
+/** Minimal portfolio surface so tests can inject a stub. */
+export type MmPortfolioHandle = Pick<
+  PaperMmPortfolio,
   | 'setConfig'
-  | 'setMarket'
+  | 'setStrictRealism'
+  | 'syncMarketUniverse'
   | 'start'
   | 'stop'
   | 'resetSession'
-  | 'onMarketTick'
-  | 'subscribe'
   | 'getState'
+  | 'subscribe'
 >
 
 export type MmRunnerDeps = {
   store?: MmSessionStore
-  engine?: MmEngineHandle
+  portfolio?: MmPortfolioHandle
   /** Latest continuous-feed snapshot (defaults to shared getContinuousFeedSnapshot). */
   getFeed?: () => ContinuousFeedSnapshot
-  /** How often to push feed mid → engine while running (ms). */
+  /** How often to re-sync full market universe while running (ms). */
   tickMs?: number
 }
 
 export type MmRunner = {
-  start: (ticker: string | null | undefined) => void
+  /** Optional ticker is a focus hint only — Start does not require it in multi. */
+  start: (ticker?: string | null) => void
   stop: () => void
   reset: () => void
-  /** Tear down timers / engine subscription (tests / unmount). */
+  /** Tear down timers / portfolio subscription (tests / unmount). */
   dispose: () => void
 }
 
 const FEED_TICK_MS = 1000
 
 /**
- * Map engine messages / liveBook flag → fail-loud U2.2 error (or null if healthy).
+ * Map engine snapshot messages / liveBook flag → fail-loud U2.2 (residual).
  * Does not throw — app must keep running.
  */
 export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
@@ -81,15 +82,60 @@ export function deriveUpdateError(snap: MmSnapshot): MmUpdateError | null {
   return null
 }
 
-function lastFillAtFromEngine(state: MmEngineState): number | null {
-  const fills = state.fills
-  if (!fills.length) return null
-  // getState returns newest-first
-  const t = fills[0]?.t
-  return typeof t === 'number' && t > 0 ? t : null
+/**
+ * Map portfolio-level messages → fail-loud U2.4 when useful (not every tick).
+ */
+export function derivePortfolioUpdateError(
+  state: PortfolioState,
+): MmUpdateError | null {
+  const msg = state.message ?? ''
+  if (/under-filled/i.test(msg)) {
+    return makeUpdateError(
+      `multi-book under-filled (${state.aggregate.activeBooks}/${state.config.maxActiveMarkets})`,
+      'open ranked crypto 15m markets',
+      'U2.4',
+    )
+  }
+  if (/Feed empty\/stale/i.test(msg) && state.aggregate.activeBooks === 0) {
+    return makeUpdateError(
+      'no markets in feed',
+      'continuous feed / mm-proxy :8787',
+      'U2.4',
+    )
+  }
+  // Surface book-level orderbook failure if all active books lack liveBook.
+  if (state.running && state.books.length > 0) {
+    const anyLive = state.books.some((b) => b.snapshot.liveBook)
+    const anyObFail = state.books.some((b) =>
+      /L2 book poll failed|orderbook/i.test(b.snapshot.message ?? ''),
+    )
+    if (!anyLive && anyObFail) {
+      return makeUpdateError('orderbook failed', 'mm-proxy :8787', 'U2.4')
+    }
+  }
+  return null
 }
 
-function statsFromEngine(state: MmEngineState): {
+function lastFillAtFromPortfolio(state: PortfolioState): number | null {
+  const session = state.sessionFills
+  if (session.length) {
+    const t = session[0]?.t
+    if (typeof t === 'number' && t > 0) return t
+  }
+  let best: number | null = null
+  for (const b of state.books) {
+    const t = b.fills[0]?.t
+    if (typeof t === 'number' && t > 0 && (best == null || t > best)) {
+      best = t
+    }
+  }
+  return best
+}
+
+function statsFromPortfolio(
+  state: PortfolioState,
+  focusHint: string | null,
+): {
   cash: number
   inventory: number
   realizedPnl: number
@@ -98,38 +144,47 @@ function statsFromEngine(state: MmEngineState): {
   fillsCount: number
   lastFillAt: number | null
   activeTicker: string | null
+  activeBooks: number
+  quoteBook: null
   updateError: MmUpdateError | null
 } {
-  const s = state.snapshot
+  const agg = state.aggregate
+  const firstTicker =
+    state.books[0]?.snapshot.marketTicker ??
+    (focusHint &&
+    state.books.some((b) => b.snapshot.marketTicker === focusHint)
+      ? focusHint
+      : null) ??
+    focusHint
   return {
-    cash: s.cash,
-    inventory: s.inventory,
-    realizedPnl: s.realizedSpreadPnl,
-    unrealizedPnl: s.unrealizedInventoryPnl,
-    fees: s.feesPaid,
-    fillsCount: s.fillCount,
-    lastFillAt: lastFillAtFromEngine(state),
-    activeTicker: s.marketTicker,
-    updateError: deriveUpdateError(s),
+    cash: agg.cash,
+    inventory: agg.inventoryNet,
+    realizedPnl: agg.realizedSpreadPnl,
+    unrealizedPnl: agg.unrealizedInventoryPnl,
+    fees: agg.feesPaid,
+    fillsCount: agg.fillCount,
+    lastFillAt: lastFillAtFromPortfolio(state),
+    activeTicker: firstTicker,
+    activeBooks: agg.activeBooks,
+    quoteBook: null,
+    updateError: derivePortfolioUpdateError(state),
   }
 }
 
 /**
- * Create a runner that owns engine start/stop/reset + feed ticks → session stats.
+ * Create a runner that owns portfolio start/stop/reset + feed re-sync → session stats.
  */
 export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
   const store = deps.store ?? mmSessionStore
-  const engine = deps.engine ?? paperMmEngine
+  const portfolio = deps.portfolio ?? paperMmPortfolio
   const getFeed = deps.getFeed ?? getContinuousFeedSnapshot
   const tickMs = deps.tickMs ?? FEED_TICK_MS
 
   let feedTimer: ReturnType<typeof setInterval> | null = null
-  let unsubEngine: (() => void) | null = null
+  let unsubPortfolio: (() => void) | null = null
   let disposed = false
-  /** Sticky quote book while inventory is open; cleared on reset. */
-  let stickyBook: QuoteBook | null = null
-  /** Last U2.3 routing error; engine errors win when present. */
-  let lastRoutingError: MmUpdateError | null = null
+  /** Optional focus hint from Start(ticker); not required for multi. */
+  let focusHint: string | null = null
 
   const clearFeedTimer = () => {
     if (feedTimer != null) {
@@ -138,100 +193,59 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
     }
   }
 
-  const syncStatsFromEngine = () => {
+  const syncStatsFromPortfolio = () => {
     if (disposed) return
-    // Only push stats while session is running or stopped (freeze after stop).
-    // After reset the store already zeroed; ignore engine until next start.
     const status = store.getState().status
     if (status === 'idle') return
-    const fromEngine = statsFromEngine(engine.getState())
-    // Engine errors win; else keep fresher U2.3 routing error.
-    const updateError = fromEngine.updateError ?? lastRoutingError
-    store.patchStats({
-      ...fromEngine,
-      updateError,
-      quoteBook: stickyBook,
+    store.patchStats(statsFromPortfolio(portfolio.getState(), focusHint))
+  }
+
+  const ensurePortfolioSub = () => {
+    if (unsubPortfolio) return
+    unsubPortfolio = portfolio.subscribe(() => {
+      syncStatsFromPortfolio()
     })
   }
 
-  const ensureEngineSub = () => {
-    if (unsubEngine) return
-    unsubEngine = engine.subscribe(() => {
-      syncStatsFromEngine()
-    })
-  }
-
-  /** Resolve YES/NO book, patch quoteBook (+ U2.3 error), return engine market. */
-  const routeMarket = (market: Crypto15mMarket): Crypto15mMarket => {
-    const result = resolveQuoteBook(
-      market,
-      stickyBook,
-      store.getState().inventory,
-    )
-    stickyBook = result.book
-    lastRoutingError = result.error
-      ? makeUpdateError(
-          result.error.message,
-          result.error.dependency,
-          'U2.3',
-        )
-      : null
-    const engineErr = deriveUpdateError(engine.getState().snapshot)
-    const cur = store.getState().updateError
-    // Engine errors win; else U2.3 routing; clear stale U2.3 when routing ok.
-    let updateError: MmUpdateError | null | undefined
-    if (engineErr) updateError = engineErr
-    else if (lastRoutingError) updateError = lastRoutingError
-    else if (cur?.code === 'U2.3') updateError = null
-    else updateError = undefined
-    store.patchStats({
-      quoteBook: result.book,
-      ...(updateError !== undefined ? { updateError } : {}),
-    })
-    return marketForQuoteBook(market, result.book)
-  }
-
-  const pushFeedTick = (ticker: string | null) => {
-    if (!ticker) return
+  const pushUniverseSync = () => {
     const feed = getFeed()
-    const market = feed.markets.find((m) => m.ticker === ticker) ?? null
-    if (!market) {
+    const markets = feed.markets
+    if (markets.length === 0) {
       store.patchStats({
         updateError: makeUpdateError(
-          'market missing from feed',
-          'continuous feed snapshot',
+          'no markets in feed',
+          'continuous feed / mm-proxy :8787',
+          'U2.4',
         ),
       })
+      // Still call sync so portfolio can hold/settle existing books.
+      try {
+        portfolio.syncMarketUniverse([])
+      } catch {
+        /* ignore */
+      }
       return
     }
     try {
-      const routed = routeMarket(market)
-      engine.onMarketTick(routed)
+      portfolio.syncMarketUniverse(markets)
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e)
       store.patchStats({
         updateError: makeUpdateError(
-          `market tick failed: ${reason}`,
-          'PaperMmEngine.onMarketTick',
+          `universe sync failed: ${reason}`,
+          'PaperMmPortfolio.syncMarketUniverse',
+          'U2.4',
         ),
       })
     }
   }
 
-  const armFeedTimer = (ticker: string) => {
+  const armFeedTimer = () => {
     clearFeedTimer()
     feedTimer = setInterval(() => {
       if (store.getState().status !== 'running') return
-      pushFeedTick(ticker)
+      pushUniverseSync()
     }, tickMs)
-  }
-
-  const resolveMarket = (
-    ticker: string | null | undefined,
-  ): Crypto15mMarket | null => {
-    if (!ticker) return null
-    const feed = getFeed()
-    return feed.markets.find((m) => m.ticker === ticker) ?? null
   }
 
   return {
@@ -239,88 +253,94 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
       if (disposed) return
       if (store.getState().status === 'running') return
 
-      const market = resolveMarket(ticker)
-      if (!market) {
+      const feed = getFeed()
+      const markets = feed.markets
+      if (markets.length === 0) {
         store.patchStats({
           updateError: makeUpdateError(
-            'no market selected',
-            'focused ticker from feed',
+            'no markets in feed',
+            'continuous feed / mm-proxy :8787',
+            'U2.4',
           ),
           activeTicker: ticker ?? null,
+          activeBooks: 0,
+          quoteBook: null,
         })
-        // Still flip to running? Spec: Start → engine runs. Without market, fail-loud stay idle.
+        // Fail-loud stay idle — no portfolio start without a universe.
         return
       }
 
-      ensureEngineSub()
+      focusHint = ticker ?? null
+      ensurePortfolioSub()
+
       try {
-        // Single-book strict realism (multi-book deferred).
-        engine.setConfig({
-          multiBook: false,
-          strictRealism: true,
+        // Loose multi-book (not strict/tight). Match PaperMmPanel: setStrict then setConfig.
+        portfolio.setStrictRealism(false)
+        portfolio.setConfig({
+          multiBook: true,
+          maxActiveMarkets: MM_MAX_ACTIVE_BOOKS,
+          ...presetsForMode(false),
+          strictRealism: false,
           useLiveBook: true,
         })
-        const routed = routeMarket(market)
-        engine.setMarket(routed)
-        engine.start()
+        portfolio.syncMarketUniverse(markets)
+        portfolio.start()
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e)
         store.patchStats({
           updateError: makeUpdateError(
-            `engine start failed: ${reason}`,
-            'PaperMmEngine',
+            `portfolio start failed: ${reason}`,
+            'PaperMmPortfolio',
+            'U2.4',
           ),
+          quoteBook: null,
         })
         return
       }
 
       store.start()
       store.patchStats({
-        ...statsFromEngine(engine.getState()),
-        activeTicker: market.ticker,
-        quoteBook: stickyBook,
-        updateError:
-          statsFromEngine(engine.getState()).updateError ?? lastRoutingError,
+        ...statsFromPortfolio(portfolio.getState(), focusHint),
       })
-      armFeedTimer(market.ticker)
-      // Immediate feed+tick
-      pushFeedTick(market.ticker)
+      armFeedTimer()
+      // Immediate re-sync so books get mid updates
+      pushUniverseSync()
     },
 
     stop() {
       if (disposed) return
       clearFeedTimer()
       try {
-        engine.stop()
+        portfolio.stop()
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e)
         store.patchStats({
           updateError: makeUpdateError(
-            `engine stop failed: ${reason}`,
-            'PaperMmEngine',
+            `portfolio stop failed: ${reason}`,
+            'PaperMmPortfolio',
+            'U2.4',
           ),
         })
       }
-      // Freeze numbers + last quoteBook at last engine snapshot, then mark stopped.
-      syncStatsFromEngine()
+      // Freeze aggregate numbers, then mark stopped.
+      syncStatsFromPortfolio()
       store.stop()
     },
 
     reset() {
       if (disposed) return
       clearFeedTimer()
-      stickyBook = null
-      lastRoutingError = null
+      focusHint = null
       try {
-        engine.resetSession()
+        portfolio.resetSession()
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e)
-        // Still clear session UI; surface the failure.
         store.reset()
         store.patchStats({
           updateError: makeUpdateError(
-            `engine reset failed: ${reason}`,
-            'PaperMmEngine',
+            `portfolio reset failed: ${reason}`,
+            'PaperMmPortfolio',
+            'U2.4',
           ),
         })
         return
@@ -331,13 +351,13 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
     dispose() {
       disposed = true
       clearFeedTimer()
-      if (unsubEngine) {
-        unsubEngine()
-        unsubEngine = null
+      if (unsubPortfolio) {
+        unsubPortfolio()
+        unsubPortfolio = null
       }
     },
   }
 }
 
-/** Shared V1 runner bound to mmSessionStore + paperMmEngine. */
+/** Shared V1 runner bound to mmSessionStore + paperMmPortfolio. */
 export const mmRunner = createMmRunner()

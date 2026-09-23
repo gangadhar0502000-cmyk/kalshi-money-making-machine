@@ -69,9 +69,20 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Deferred:** true NO-primary L2 queue join (L2 remains YES-combined this slice); multi-book (5-book) portfolio.
 - Paper-only / read-only; never places live trades.
 
+
+## U2.4 — multi-book loose portfolio into Start/Stop/Reset
+
+- Start runs **loose multi-book** paper MM via existing `PaperMmPortfolio` (up to 5 books from the continuous feed). Uses `strictRealism: false` / `presetsForMode(false)` / LOOSE knobs — **not** strict/tight.
+- Reuses existing portfolio + engines as-is — **no new S1–S5 rules**, scenario titles, or decision-policy logic.
+- Session strip shows aggregate cash / inv / realized / unrealized / fills + **`activeBooks`** (e.g. Books 3/5). `quoteBook` stays null in multi (YES/NO badge hidden).
+- Fail-loud `U2.4: … — needs …` when feed is empty or portfolio under-fills / sync fails (e.g. needs continuous feed / mm-proxy :8787). App stays idle on empty feed.
+- Stop freezes aggregate stats; Reset zeros session (including activeBooks) via `portfolio.resetSession`.
+- **Deferred:** optional strict toggle; true NO-primary L2; single-engine YES/NO U2.3 routing remains available for residual paths but Start defaults to multi loose.
+- Paper-only / read-only; never places live trades.
+
 ## Upcoming
 
-- **U2.4+** — density / keyboard nav polish if needed; true NO-primary L2; multi-book portfolio into the session shell.
+- **U2.5+** — density / keyboard nav polish if needed; optional strict toggle; true NO-primary L2.
 - **U3** — feed + engine observability (richer health, divergence alarms).
 - **U4** — Lab/MM shared book path hardening (legacy path).
 - **U5** — production readiness checklist (docs, ops, residual risk burn-down).

@@ -7,7 +7,7 @@ import {
 import { mmRunner, type MmRunner } from './mmRunner'
 
 /**
- * React hook over the Paper MM session store + U2.2 runner.
+ * React hook over the Paper MM session store + U2.4 multi-book loose portfolio runner.
  * Pass an alternate store/runner for tests; default is the V1 singleton.
  */
 export function useMmSession(

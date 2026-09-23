@@ -4,7 +4,7 @@ import { getMidHistory } from '../lib/crypto15m/midHistory'
 import { normalizeSpotAsset } from '../lib/crypto15m/spot'
 import { useContinuousFeed } from './useContinuousFeed'
 import { useSpotMap } from './useSpotMap'
-import { formatUpdateError, statusPillLabel } from './mm/mmSession'
+import { formatUpdateError, MM_MAX_ACTIVE_BOOKS, statusPillLabel } from './mm/mmSession'
 import { useMmSession } from './mm/useMmSession'
 import {
   assetShortName,
@@ -25,7 +25,7 @@ import {
 /**
  * KMM v1 — Apple-clean feed UI.
  * Dark iOS-style surface. Continuous feed + YES/NO + Paper MM Start/Stop/Reset.
- * U2.3 routes paper quotes to the better YES/NO book (sticky while inventory open).
+ * U2.4 Start runs loose multi-book paper portfolio (up to 5 books).
  * Paper / read-only. YES and NO are complements (same $ outcome); tighter book → less queue ahead.
  */
 export function V1App() {
@@ -102,7 +102,7 @@ export function V1App() {
           </div>
         </header>
 
-        {/* Paper MM control strip — U2.2 run+PnL · U2.3 better-book routing */}
+        {/* Paper MM control strip — U2.4 multi-book loose portfolio */}
         <section className="kmm-mm-strip mb-6 px-4 py-3.5 sm:px-5" aria-label="Paper market making">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
@@ -131,12 +131,17 @@ export function V1App() {
                   Book {mm.quoteBook}
                 </span>
               )}
+              {mm.status !== 'idle' && (
+                <span className="kmm-chip num text-[11px]">
+                  Books {mm.activeBooks}/{MM_MAX_ACTIVE_BOOKS}
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className="kmm-btn kmm-btn--primary"
-                disabled={mm.status === 'running' || !selected}
+                disabled={mm.status === 'running'}
                 onClick={() => start(selected)}
               >
                 Start
@@ -223,7 +228,7 @@ export function V1App() {
           ) : (
             <p className="mt-2 text-[12px] text-[var(--color-tertiary)]">
               {mm.status === 'idle'
-                ? 'Idle · Start quotes the better YES/NO book (paper)'
+                ? 'Idle · Start runs paper multi-book loose (up to 5)'
                 : mm.status === 'running'
                   ? 'Session running · paper quotes · read-only'
                   : 'Stopped · numbers frozen · Reset clears P&L'}
