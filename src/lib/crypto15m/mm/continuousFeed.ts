@@ -1,6 +1,9 @@
 /**
  * Shared continuous crypto15m universe feed — proxy-only, ~500ms poll.
  * Paper MM and Lab subscribe so they cannot diverge on universe freshness.
+ *
+ * U2.11: abort-previous (not skip-if-inFlight) so a hung browser fetch cannot
+ * freeze lastSuccessAt while the UI clock ages to 8–10s+.
  */
 import type { Crypto15mMarket } from '../../../types/crypto15m'
 import { normalizeCrypto15m } from '../normalize'
@@ -13,8 +16,8 @@ import {
   type FeedFreshnessTone,
 } from './universeCache'
 
-/** Per-poll AbortSignal timeout — hung /local-api/crypto15m must not freeze inFlight. */
-export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 4_000
+/** Per-poll AbortSignal timeout — hung /local-api/crypto15m must not freeze age. */
+export const CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 2_500
 
 function isAbortReason(e: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true
@@ -57,9 +60,17 @@ const emptySnap = (): ContinuousFeedSnapshot => ({
 
 let snapshot: ContinuousFeedSnapshot = emptySnap()
 const listeners = new Set<Listener>()
-let pollTimer: ReturnType<typeof setInterval> | null = null
+/** Chained setTimeout handle (not setInterval). */
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+/** True while the current generation's fetch is outstanding. */
 let inFlight = false
 let subscriberCount = 0
+/** Active fetch controller — aborted when a newer poll supersedes it. */
+let activeAbort: AbortController | null = null
+/** Monotonic generation; late responses from older gens must not mutate snapshot. */
+let pollGeneration = 0
+/** True once the chained poll loop has been started for current subscribers. */
+let loopStarted = false
 
 function emit() {
   for (const l of listeners) {
@@ -87,22 +98,48 @@ function timeoutErrorMessage(): string {
   return `feed poll timeout (${CONTINUOUS_FEED_FETCH_TIMEOUT_MS / 1000}s) — needs mm-proxy :8787`
 }
 
+function clearPollTimer() {
+  if (pollTimer != null) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+}
+
+/**
+ * One poll tick. Always starts — aborts any previous in-flight fetch
+ * (reason superseded) so inFlight cannot stick across generations.
+ */
 async function pollOnce(): Promise<void> {
-  if (inFlight) return
+  if (activeAbort) {
+    try {
+      activeAbort.abort('superseded')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const gen = ++pollGeneration
+  const ac = new AbortController()
+  activeAbort = ac
   inFlight = true
+
   const attemptedAt = new Date().toISOString()
   snapshot = { ...snapshot, lastAttemptAt: attemptedAt }
   emit()
 
-  const ac = new AbortController()
   const timeoutId = setTimeout(() => {
-    ac.abort()
+    try {
+      ac.abort('timeout')
+    } catch {
+      /* ignore */
+    }
   }, CONTINUOUS_FEED_FETCH_TIMEOUT_MS)
 
   try {
     const raw = await fetchLocalCrypto15m(ac.signal)
+    if (gen !== pollGeneration) return
+
     if (ac.signal.aborted) {
-      // Timed out; do not advance lastSuccessAt.
       snapshot = {
         ...snapshot,
         lastAttemptAt: attemptedAt,
@@ -111,6 +148,7 @@ async function pollOnce(): Promise<void> {
       emit()
       return
     }
+
     const markets = normalizeProxyMarkets(raw)
     const nowIso = new Date().toISOString()
     const errParts = [...(raw.errors ?? [])]
@@ -138,6 +176,7 @@ async function pollOnce(): Promise<void> {
     }
     emit()
   } catch (e) {
+    if (gen !== pollGeneration) return
     if (isAbortReason(e, ac.signal)) {
       snapshot = {
         ...snapshot,
@@ -155,24 +194,48 @@ async function pollOnce(): Promise<void> {
     emit()
   } finally {
     clearTimeout(timeoutId)
-    inFlight = false
+    if (gen === pollGeneration) {
+      inFlight = false
+      if (activeAbort === ac) activeAbort = null
+    }
   }
 }
 
-function ensurePolling() {
-  if (pollTimer != null) return
-  void pollOnce()
-  pollTimer = setInterval(() => {
-    void pollOnce()
+function scheduleNextPoll() {
+  clearPollTimer()
+  if (subscriberCount <= 0) {
+    loopStarted = false
+    return
+  }
+  pollTimer = setTimeout(() => {
+    pollTimer = null
+    void pollOnce().finally(() => {
+      scheduleNextPoll()
+    })
   }, CONTINUOUS_FEED_POLL_MS)
+}
+
+function ensurePolling() {
+  if (loopStarted) return
+  loopStarted = true
+  void pollOnce().finally(() => {
+    scheduleNextPoll()
+  })
 }
 
 function maybeStopPolling() {
   if (subscriberCount > 0) return
-  if (pollTimer != null) {
-    clearInterval(pollTimer)
-    pollTimer = null
+  clearPollTimer()
+  loopStarted = false
+  if (activeAbort) {
+    try {
+      activeAbort.abort('stopped')
+    } catch {
+      /* ignore */
+    }
+    activeAbort = null
   }
+  inFlight = false
 }
 
 /** Current snapshot (sync). */
@@ -181,8 +244,17 @@ export function getContinuousFeedSnapshot(): ContinuousFeedSnapshot {
 }
 
 /**
- * Subscribe to continuous proxy feed. Starts the 500ms poller on first subscriber;
- * stops when the last unsubscribes.
+ * Immediate poll (abort-previous). Used when the tab becomes visible/focused
+ * so a hung background fetch cannot leave age frozen.
+ */
+export function kickContinuousFeedPoll(): void {
+  if (subscriberCount <= 0) return
+  void pollOnce()
+}
+
+/**
+ * Subscribe to continuous proxy feed. Starts the ~500ms chained poller on
+ * first subscriber; stops when the last unsubscribes.
  */
 export function subscribeContinuousFeed(listener: Listener): () => void {
   listeners.add(listener)
@@ -198,17 +270,29 @@ export function subscribeContinuousFeed(listener: Listener): () => void {
 
 /** Test helper — reset singleton state. */
 export function __resetContinuousFeedForTests(): void {
-  if (pollTimer != null) {
-    clearInterval(pollTimer)
-    pollTimer = null
+  clearPollTimer()
+  loopStarted = false
+  if (activeAbort) {
+    try {
+      activeAbort.abort('reset')
+    } catch {
+      /* ignore */
+    }
+    activeAbort = null
   }
   inFlight = false
+  pollGeneration++
   subscriberCount = 0
   listeners.clear()
   snapshot = emptySnap()
 }
 
-/** Test helper — whether a poll is currently in flight. */
+/** Test helper — whether the current generation's poll is in flight. */
 export function __continuousFeedInFlightForTests(): boolean {
   return inFlight
+}
+
+/** Test helper — current poll generation id. */
+export function __continuousFeedGenerationForTests(): number {
+  return pollGeneration
 }

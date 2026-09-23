@@ -129,6 +129,16 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Fixes feed age showing **6–10s ago** with MM Running 5/5 (browser ~6 conn/host queueing crypto15m behind five L2 polls). Success: header age usually **0–2s ago**.
 - Paper-only / read-only; never places live trades.
 
+## U2.11 — abort-previous feed poll (age freeze)
+
+- **Root cause after U2.10:** Mac curl to proxy/Vite `/local-api/crypto15m` is 2–5ms, but the browser continuousFeed poller could still show **Degraded · 10s ago**. Skip-if-`inFlight` + unreliable abort left a hung `fetch` holding `inFlight` so `lastSuccessAt` froze while the UI clock aged.
+- **Abort-previous:** each poll aborts the prior `AbortController` (reason `superseded`), starts a new one with **2.5s** timeout (`CONTINUOUS_FEED_FETCH_TIMEOUT_MS = 2500`). Late responses from older generations never write the snapshot. Chained `setTimeout` (~`CONTINUOUS_FEED_POLL_MS` 500) replaces `setInterval`.
+- **`fetchLocalCrypto15m`:** `cache: 'no-store'`.
+- **Visibility kick:** `useContinuousFeed` calls `kickContinuousFeedPoll()` on `visibilitychange` (visible) / `focus`.
+- **Strip:** when Running + feedTone ≠ ok, prefer `U2.8: feed stale (age) — {lastError}` when present (timeout vs network).
+- Success: MM 5/5 Running keeps feed age **0–2s** in the active tab; failures surface `lastError` within ~2.5s instead of freezing at 10s+.
+- Paper-only / read-only; never places live trades. Batch L2 (U2.10) unchanged.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; true NO-primary L2; keyboard nav if needed.

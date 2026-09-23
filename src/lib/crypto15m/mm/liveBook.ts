@@ -267,6 +267,7 @@ export async function fetchLocalCrypto15m(
   try {
     const res = await fetch('/local-api/crypto15m', {
       signal,
+      cache: 'no-store',
       headers: { Accept: 'application/json' },
     })
     if (!res.ok) {

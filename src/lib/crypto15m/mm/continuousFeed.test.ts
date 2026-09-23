@@ -2,8 +2,10 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   __resetContinuousFeedForTests,
   __continuousFeedInFlightForTests,
+  __continuousFeedGenerationForTests,
   getContinuousFeedSnapshot,
   subscribeContinuousFeed,
+  kickContinuousFeedPoll,
   CONTINUOUS_FEED_POLL_MS,
   CONTINUOUS_FEED_FETCH_TIMEOUT_MS,
 } from './continuousFeed'
@@ -25,6 +27,16 @@ const sampleMarket = {
   close_time: new Date(Date.now() + 600_000).toISOString(),
   open_time: new Date(Date.now() - 300_000).toISOString(),
 } as never
+
+const okPayload = {
+  readOnly: true,
+  authenticated: true,
+  markets: [sampleMarket],
+  fetchedAt: '2026-09-22T12:00:00.000Z',
+  cacheAgeMs: 50,
+  stale: false,
+  refreshing: false,
+}
 
 describe('continuousFeed', () => {
   beforeEach(() => {
@@ -62,9 +74,9 @@ describe('continuousFeed', () => {
     expect(first.everSucceeded).toBe(true)
     expect(first.lastSuccessAt).toBeTruthy()
     expect(CONTINUOUS_FEED_POLL_MS).toBe(500)
-    expect(CONTINUOUS_FEED_FETCH_TIMEOUT_MS).toBe(4000)
+    expect(CONTINUOUS_FEED_FETCH_TIMEOUT_MS).toBe(2500)
 
-    // Second poll 1s later — lastSuccessAt must advance (cache hit still counts)
+    // Second poll ~500ms later — lastSuccessAt must advance (cache hit still counts)
     const prevOk = first.lastSuccessAt!
     await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_POLL_MS)
     await Promise.resolve()
@@ -113,15 +125,6 @@ describe('continuousFeed', () => {
   })
 
   it('times out hung fetch: clears inFlight, leaves lastSuccessAt, allows next poll', async () => {
-    const okPayload = {
-      readOnly: true,
-      authenticated: true,
-      markets: [sampleMarket],
-      fetchedAt: '2026-09-22T12:00:00.000Z',
-      cacheAgeMs: 50,
-      stale: false,
-      refreshing: false,
-    }
     let mode: 'ok' | 'hang' | 'ok-again' = 'ok'
     const spy = vi.spyOn(liveBook, 'fetchLocalCrypto15m').mockImplementation((signal) => {
       if (mode === 'hang') {
@@ -151,25 +154,22 @@ describe('continuousFeed', () => {
     const prevOk = first.lastSuccessAt!
     expect(prevOk).toBeTruthy()
 
-    // Next poll hangs (inFlight stuck until self-abort)
+    // Next poll hangs until self-abort (2.5s)
     mode = 'hang'
     await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_POLL_MS)
     await Promise.resolve()
     expect(__continuousFeedInFlightForTests()).toBe(true)
     expect(getContinuousFeedSnapshot().lastSuccessAt).toBe(prevOk)
 
-    // Hung poll must self-abort after 4s — lastSuccessAt unchanged; lastError set
     await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_FETCH_TIMEOUT_MS)
     await Promise.resolve()
     await Promise.resolve()
 
     const afterTimeout = getContinuousFeedSnapshot()
     expect(afterTimeout.lastSuccessAt).toBe(prevOk)
-    expect(afterTimeout.lastError).toMatch(/feed poll timeout \(4s\)/)
-    // Abort cleared inFlight; interval may immediately start another hang — either is OK.
-    // Flip to success and ensure a later poll can run and advance lastSuccessAt.
+    expect(afterTimeout.lastError).toMatch(/feed poll timeout \(2\.5s\)/)
+
     mode = 'ok-again'
-    // If a hang is in flight from the same tick, wait for its timeout; else next poll tick.
     if (__continuousFeedInFlightForTests()) {
       await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_FETCH_TIMEOUT_MS)
       await Promise.resolve()
@@ -184,6 +184,87 @@ describe('continuousFeed', () => {
     expect(afterNext.everSucceeded).toBe(true)
     expect(afterNext.lastSuccessAt).toBeTruthy()
     expect(Date.parse(afterNext.lastSuccessAt!) >= Date.parse(prevOk)).toBe(true)
+    expect(__continuousFeedInFlightForTests()).toBe(false)
+  })
+
+  it('overlapping polls: abort-previous lets second write; late first cannot mutate', async () => {
+    type Pending = {
+      signal?: AbortSignal
+      resolve: (v: typeof okPayload) => void
+    }
+    const pending: Pending[] = []
+    let call = 0
+
+    vi.spyOn(liveBook, 'fetchLocalCrypto15m').mockImplementation((signal) => {
+      call++
+      if (call === 1) {
+        return Promise.resolve(okPayload)
+      }
+      // Ignore AbortSignal — simulates a hung browser fetch that does not reject on abort.
+      return new Promise((resolve) => {
+        pending.push({ signal, resolve: resolve as (v: typeof okPayload) => void })
+      })
+    })
+
+    subscribeContinuousFeed(() => {})
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const afterFirst = getContinuousFeedSnapshot()
+    expect(afterFirst.everSucceeded).toBe(true)
+    const prevOk = afterFirst.lastSuccessAt!
+    const genAfterFirst = __continuousFeedGenerationForTests()
+
+    // Scheduled tick starts hung poll (gen N) that ignores abort
+    await vi.advanceTimersByTimeAsync(CONTINUOUS_FEED_POLL_MS)
+    await Promise.resolve()
+    expect(pending.length).toBe(1)
+    expect(__continuousFeedInFlightForTests()).toBe(true)
+    const genHung = __continuousFeedGenerationForTests()
+    expect(genHung).toBeGreaterThan(genAfterFirst)
+
+    // Overlapping poll via kick — aborts previous controller, starts gen N+1 (also pending)
+    kickContinuousFeedPoll()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(pending[0]!.signal?.aborted).toBe(true)
+    expect(pending.length).toBe(2)
+    const genSecond = __continuousFeedGenerationForTests()
+    expect(genSecond).toBeGreaterThan(genHung)
+    // inFlight tracks the *current* gen, which is still outstanding
+    expect(__continuousFeedInFlightForTests()).toBe(true)
+
+    // Second gen succeeds
+    pending[1]!.resolve({
+      ...okPayload,
+      fetchedAt: '2026-09-22T12:00:01.000Z',
+      cacheAgeMs: 10,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const afterSecond = getContinuousFeedSnapshot()
+    expect(afterSecond.lastSuccessAt).toBeTruthy()
+    expect(Date.parse(afterSecond.lastSuccessAt!) >= Date.parse(prevOk)).toBe(true)
+    expect(afterSecond.fetchedAt).toBe('2026-09-22T12:00:01.000Z')
+    expect(__continuousFeedInFlightForTests()).toBe(false)
+
+    // Late response from aborted gen must not mutate snapshot / stick inFlight
+    const frozen = afterSecond.lastSuccessAt!
+    pending[0]!.resolve({
+      ...okPayload,
+      fetchedAt: 'STALE-SHOULD-NOT-WRITE',
+      cacheAgeMs: 99999,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const afterLate = getContinuousFeedSnapshot()
+    expect(afterLate.lastSuccessAt).toBe(frozen)
+    expect(afterLate.fetchedAt).not.toBe('STALE-SHOULD-NOT-WRITE')
     expect(__continuousFeedInFlightForTests()).toBe(false)
   })
 })
