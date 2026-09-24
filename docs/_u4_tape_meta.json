@@ -1,0 +1,1593 @@
+[
+  {
+    "session": "u322",
+    "realism_class": "FAKE-LEANING",
+    "note": "S3 covers + low-mid longs; mid_walk",
+    "start": "2026-09-23 16:58:26.338000-05:00",
+    "t0": "2026-09-23 17:00:55.706000-05:00",
+    "t1": "2026-09-23 18:00:56.054000-05:00",
+    "dur_h": 1.0,
+    "n_fills": 49,
+    "rd_sum": 5.672,
+    "fifo_pnl": 5.672,
+    "fifo_per_hr": 5.6715,
+    "WLF": "16/7/0",
+    "win_$": 7.27,
+    "loss_$": -1.598,
+    "open_lots": 3,
+    "soft_n": 3,
+    "soft_rd": 0.0,
+    "soft_pct": 6.1,
+    "strict_n": 46,
+    "strict_rd": 5.672,
+    "other_n": 0,
+    "other_rd": 0.0,
+    "reasons": {
+      "mid_walk": 3,
+      "taker_cross": 35,
+      "book_depth": 11
+    },
+    "scenarios": {
+      "house_mid": 26,
+      "S3": 15,
+      "flatten": 8
+    },
+    "coins": {
+      "ZEC": 8,
+      "BTC": 8,
+      "ETH": 6,
+      "XRP": 6,
+      "SOL": 5,
+      "BNB": 5,
+      "HYPE": 4,
+      "NEAR": 4,
+      "DOGE": 3
+    },
+    "tau_rd": {
+      "2-4": {
+        "n": 8,
+        "rd": 3.98
+      },
+      "4-7": {
+        "n": 5,
+        "rd": 3.01
+      },
+      "7-10": {
+        "n": 2,
+        "rd": 0.0
+      },
+      ">10": {
+        "n": 25,
+        "rd": 0.2
+      },
+      "\u22642": {
+        "n": 9,
+        "rd": -1.518
+      }
+    },
+    "open_mid_band": {
+      "20-40": {
+        "opens": 9,
+        "long_opens": 7,
+        "short_opens": 2
+      },
+      "40-50": {
+        "opens": 5,
+        "long_opens": 2,
+        "short_opens": 3
+      },
+      "50-60": {
+        "opens": 5,
+        "long_opens": 0,
+        "short_opens": 5
+      },
+      "60-80": {
+        "opens": 2,
+        "long_opens": 0,
+        "short_opens": 2
+      },
+      ">80": {
+        "opens": 3,
+        "long_opens": 0,
+        "short_opens": 3
+      },
+      "\u226420": {
+        "opens": 2,
+        "long_opens": 2,
+        "short_opens": 0
+      }
+    },
+    "long_open_mid_pnl": {
+      "20-40": {
+        "n": 6,
+        "pnl": -1.348
+      },
+      "40-50": {
+        "n": 1,
+        "pnl": 0.58
+      },
+      "\u226420": {
+        "n": 2,
+        "pnl": -0.17
+      }
+    },
+    "short_open_mid_pnl": {
+      "20-40": {
+        "n": 2,
+        "pnl": 0.62
+      },
+      "40-50": {
+        "n": 2,
+        "pnl": 0.51
+      },
+      "50-60": {
+        "n": 5,
+        "pnl": 2.18
+      },
+      "60-80": {
+        "n": 2,
+        "pnl": 0.67
+      },
+      ">80": {
+        "n": 3,
+        "pnl": 2.63
+      }
+    },
+    "flatten_loss_$": -1.598,
+    "cover_win_$": 7.19,
+    "long_1c_n": 4,
+    "long_1c_$": -1.19,
+    "fake_covers_n": 0,
+    "fake_covers_sample": [],
+    "settle_n": 0,
+    "hold_med_min": 9.418,
+    "hold_p90": 12.13,
+    "win_hold_med": 7.636,
+    "loss_hold_med": 11.236,
+    "top_wins": [
+      {
+        "asset": "NEAR",
+        "dir": "short",
+        "open_px": 0.92,
+        "close_px": 0.0,
+        "pnl": 0.92,
+        "open_mid": 0.9299999999999999,
+        "close_scen": "S3",
+        "hold_min": 5.970433333333333,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "BNB",
+        "dir": "short",
+        "open_px": 0.89,
+        "close_px": 0.0,
+        "pnl": 0.89,
+        "open_mid": 0.895,
+        "close_scen": "S3",
+        "hold_min": 9.417733333333333,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "XRP",
+        "dir": "short",
+        "open_px": 0.82,
+        "close_px": 0.0,
+        "pnl": 0.82,
+        "open_mid": 0.825,
+        "close_scen": "S3",
+        "hold_min": 10.026900000000001,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ZEC",
+        "dir": "short",
+        "open_px": 0.62,
+        "close_px": 0.0,
+        "pnl": 0.62,
+        "open_mid": 0.61,
+        "close_scen": "S3",
+        "hold_min": 10.245766666666666,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ZEC",
+        "dir": "long",
+        "open_px": 0.41,
+        "close_px": 0.99,
+        "pnl": 0.5800000000000001,
+        "open_mid": 0.42,
+        "close_scen": "S3",
+        "hold_min": 5.274933333333333,
+        "close_reason": "taker_cross"
+      }
+    ],
+    "top_losses": [
+      {
+        "asset": "XRP",
+        "dir": "long",
+        "open_px": 0.36,
+        "close_px": 0.01,
+        "pnl": -0.35,
+        "open_mid": 0.355,
+        "close_scen": "flatten",
+        "hold_min": 10.232750000000001,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "BTC",
+        "dir": "long",
+        "open_px": 0.34,
+        "close_px": 0.01,
+        "pnl": -0.33,
+        "open_mid": 0.335,
+        "close_scen": "flatten",
+        "hold_min": 10.383566666666667,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "DOGE",
+        "dir": "long",
+        "open_px": 0.3,
+        "close_px": 0.01,
+        "pnl": -0.29,
+        "open_mid": 0.295,
+        "close_scen": "flatten",
+        "hold_min": 12.662133333333333,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "SOL",
+        "dir": "long",
+        "open_px": 0.29,
+        "close_px": 0.052,
+        "pnl": -0.238,
+        "open_mid": 0.28500000000000003,
+        "close_scen": "flatten",
+        "hold_min": 12.675833333333333,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ETH",
+        "dir": "long",
+        "open_px": 0.23,
+        "close_px": 0.01,
+        "pnl": -0.22,
+        "open_mid": 0.225,
+        "close_scen": "flatten",
+        "hold_min": 12.129933333333334,
+        "close_reason": "taker_cross"
+      }
+    ],
+    "long_adv_n": 6,
+    "short_adv_n": 8,
+    "long_rt_n": 9,
+    "short_rt_n": 14,
+    "short_pnl": 6.61,
+    "long_pnl": -0.938,
+    "short_adv_$": 5.1,
+    "long_adv_$": -1.578
+  },
+  {
+    "session": "u323",
+    "realism_class": "MIXED",
+    "note": "curb 0.40; house_cover; mid_walk",
+    "start": "2026-09-23 18:26:48.108000-05:00",
+    "t0": "2026-09-23 18:26:54.323000-05:00",
+    "t1": "2026-09-23 19:28:00.992000-05:00",
+    "dur_h": 1.019,
+    "n_fills": 52,
+    "rd_sum": 3.46,
+    "fifo_pnl": 2.981,
+    "fifo_per_hr": 2.9268,
+    "WLF": "19/6/1",
+    "win_$": 4.99,
+    "loss_$": -2.009,
+    "open_lots": 0,
+    "soft_n": 9,
+    "soft_rd": 0.26,
+    "soft_pct": 17.3,
+    "strict_n": 42,
+    "strict_rd": 3.2,
+    "other_n": 1,
+    "other_rd": 0.0,
+    "reasons": {
+      "mid_walk": 9,
+      "taker_cross": 23,
+      "book_depth": 19,
+      "settlement": 1
+    },
+    "scenarios": {
+      "house_mid": 27,
+      "flatten": 8,
+      "house_cover": 17
+    },
+    "coins": {
+      "ZEC": 10,
+      "NEAR": 10,
+      "HYPE": 8,
+      "DOGE": 8,
+      "XRP": 4,
+      "ETH": 4,
+      "BTC": 4,
+      "BNB": 2,
+      "SOL": 2
+    },
+    "tau_rd": {
+      "2-4": {
+        "n": 10,
+        "rd": 2.32
+      },
+      "4-7": {
+        "n": 2,
+        "rd": 0.01
+      },
+      "7-10": {
+        "n": 6,
+        "rd": 0.21
+      },
+      ">10": {
+        "n": 26,
+        "rd": 1.01
+      },
+      "\u22642": {
+        "n": 8,
+        "rd": -0.09
+      }
+    },
+    "open_mid_band": {
+      "20-40": {
+        "opens": 1,
+        "long_opens": 0,
+        "short_opens": 1
+      },
+      "40-50": {
+        "opens": 3,
+        "long_opens": 2,
+        "short_opens": 1
+      },
+      "50-60": {
+        "opens": 5,
+        "long_opens": 1,
+        "short_opens": 4
+      },
+      "60-80": {
+        "opens": 10,
+        "long_opens": 4,
+        "short_opens": 6
+      },
+      ">80": {
+        "opens": 6,
+        "long_opens": 5,
+        "short_opens": 1
+      },
+      "\u226420": {
+        "opens": 1,
+        "long_opens": 0,
+        "short_opens": 1
+      }
+    },
+    "long_open_mid_pnl": {
+      "40-50": {
+        "n": 2,
+        "pnl": -0.459
+      },
+      "50-60": {
+        "n": 1,
+        "pnl": 0.0
+      },
+      "60-80": {
+        "n": 4,
+        "pnl": 0.26
+      },
+      ">80": {
+        "n": 5,
+        "pnl": -0.02
+      }
+    },
+    "short_open_mid_pnl": {
+      "20-40": {
+        "n": 1,
+        "pnl": 0.38
+      },
+      "40-50": {
+        "n": 1,
+        "pnl": 0.46
+      },
+      "50-60": {
+        "n": 4,
+        "pnl": 1.36
+      },
+      "60-80": {
+        "n": 6,
+        "pnl": 1.38
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.04
+      },
+      "\u226420": {
+        "n": 1,
+        "pnl": -0.42
+      }
+    },
+    "flatten_loss_$": -1.53,
+    "cover_win_$": 3.55,
+    "long_1c_n": 1,
+    "long_1c_$": -0.479,
+    "fake_covers_n": 0,
+    "fake_covers_sample": [],
+    "settle_n": 1,
+    "hold_med_min": 7.943,
+    "hold_p90": 11.952,
+    "win_hold_med": 7.943,
+    "loss_hold_med": 11.952,
+    "top_wins": [
+      {
+        "asset": "ETH",
+        "dir": "short",
+        "open_px": 0.76,
+        "close_px": 0.0,
+        "pnl": 0.76,
+        "open_mid": 0.765,
+        "close_scen": "house_cover",
+        "hold_min": 10.994883333333332,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "BTC",
+        "dir": "short",
+        "open_px": 0.74,
+        "close_px": 0.05,
+        "pnl": 0.69,
+        "open_mid": 0.745,
+        "close_scen": "flatten",
+        "hold_min": 9.893333333333334,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ZEC",
+        "dir": "short",
+        "open_px": 0.53,
+        "close_px": 0.01,
+        "pnl": 0.52,
+        "open_mid": 0.515,
+        "close_scen": "house_cover",
+        "hold_min": 11.257133333333334,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "NEAR",
+        "dir": "short",
+        "open_px": 0.61,
+        "close_px": 0.09,
+        "pnl": 0.52,
+        "open_mid": 0.585,
+        "close_scen": "house_cover",
+        "hold_min": 9.356116666666667,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "DOGE",
+        "dir": "short",
+        "open_px": 0.57,
+        "close_px": 0.08,
+        "pnl": 0.48999999999999994,
+        "open_mid": 0.575,
+        "close_scen": "flatten",
+        "hold_min": 9.909483333333332,
+        "close_reason": "taker_cross"
+      }
+    ],
+    "top_losses": [
+      {
+        "asset": "DOGE",
+        "dir": "long",
+        "open_px": 0.48,
+        "close_px": 0.001,
+        "pnl": -0.479,
+        "open_mid": 0.48,
+        "close_scen": "house_mid",
+        "hold_min": 13.998700000000001,
+        "close_reason": "settlement"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "short",
+        "open_px": 0.14,
+        "close_px": 0.56,
+        "pnl": -0.42000000000000004,
+        "open_mid": 0.15500000000000003,
+        "close_scen": "flatten",
+        "hold_min": 1.0737666666666668,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "long",
+        "open_px": 0.84,
+        "close_px": 0.42,
+        "pnl": -0.42,
+        "open_mid": 0.84,
+        "close_scen": "flatten",
+        "hold_min": 2.7617333333333334,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ETH",
+        "dir": "long",
+        "open_px": 0.67,
+        "close_px": 0.32,
+        "pnl": -0.35000000000000003,
+        "open_mid": 0.665,
+        "close_scen": "flatten",
+        "hold_min": 11.952016666666667,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "short",
+        "open_px": 0.58,
+        "close_px": 0.75,
+        "pnl": -0.17000000000000004,
+        "open_mid": 0.585,
+        "close_scen": "flatten",
+        "hold_min": 5.094233333333333,
+        "close_reason": "taker_cross"
+      }
+    ],
+    "long_adv_n": 3,
+    "short_adv_n": 4,
+    "long_rt_n": 12,
+    "short_rt_n": 14,
+    "short_pnl": 3.2,
+    "long_pnl": -0.219,
+    "short_adv_$": -0.0,
+    "long_adv_$": -1.249
+  },
+  {
+    "session": "u324",
+    "realism_class": "MIXED",
+    "note": "noOpen=4",
+    "start": "2026-09-23 19:40:25.948000-05:00",
+    "t0": "2026-09-23 19:40:30.163000-05:00",
+    "t1": "2026-09-23 20:05:03.504000-05:00",
+    "dur_h": 0.409,
+    "n_fills": 34,
+    "rd_sum": 0.014,
+    "fifo_pnl": 0.014,
+    "fifo_per_hr": 0.0342,
+    "WLF": "9/4/2",
+    "win_$": 1.19,
+    "loss_$": -1.176,
+    "open_lots": 4,
+    "soft_n": 5,
+    "soft_rd": 0.0,
+    "soft_pct": 14.7,
+    "strict_n": 29,
+    "strict_rd": 0.014,
+    "other_n": 0,
+    "other_rd": 0.0,
+    "reasons": {
+      "taker_cross": 16,
+      "mid_walk": 5,
+      "book_depth": 13
+    },
+    "scenarios": {
+      "house_mid": 19,
+      "house_cover": 9,
+      "flatten": 6
+    },
+    "coins": {
+      "ZEC": 10,
+      "NEAR": 8,
+      "BNB": 4,
+      "XRP": 3,
+      "BTC": 3,
+      "SOL": 2,
+      "ETH": 2,
+      "HYPE": 1,
+      "DOGE": 1
+    },
+    "tau_rd": {
+      "2-4": {
+        "n": 2,
+        "rd": 0.33
+      },
+      "4-7": {
+        "n": 7,
+        "rd": 0.53
+      },
+      "7-10": {
+        "n": 2,
+        "rd": 0.03
+      },
+      ">10": {
+        "n": 19,
+        "rd": 0.3
+      },
+      "\u22642": {
+        "n": 4,
+        "rd": -1.176
+      }
+    },
+    "open_mid_band": {
+      "20-40": {
+        "opens": 2,
+        "long_opens": 0,
+        "short_opens": 2
+      },
+      "40-50": {
+        "opens": 8,
+        "long_opens": 4,
+        "short_opens": 4
+      },
+      "50-60": {
+        "opens": 4,
+        "long_opens": 4,
+        "short_opens": 0
+      },
+      "60-80": {
+        "opens": 2,
+        "long_opens": 0,
+        "short_opens": 2
+      },
+      ">80": {
+        "opens": 2,
+        "long_opens": 1,
+        "short_opens": 1
+      },
+      "\u226420": {
+        "opens": 1,
+        "long_opens": 0,
+        "short_opens": 1
+      }
+    },
+    "long_open_mid_pnl": {
+      "40-50": {
+        "n": 3,
+        "pnl": -0.866
+      },
+      "50-60": {
+        "n": 3,
+        "pnl": 0.05
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.06
+      }
+    },
+    "short_open_mid_pnl": {
+      "20-40": {
+        "n": 2,
+        "pnl": 0.3
+      },
+      "40-50": {
+        "n": 3,
+        "pnl": 0.24
+      },
+      "60-80": {
+        "n": 1,
+        "pnl": 0.18
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.06
+      },
+      "\u226420": {
+        "n": 1,
+        "pnl": -0.01
+      }
+    },
+    "flatten_loss_$": -1.176,
+    "cover_win_$": 0.86,
+    "long_1c_n": 1,
+    "long_1c_$": -0.48,
+    "fake_covers_n": 0,
+    "fake_covers_sample": [],
+    "settle_n": 0,
+    "hold_med_min": 0.419,
+    "hold_p90": 10.024,
+    "win_hold_med": 0.368,
+    "loss_hold_med": 10.024,
+    "top_wins": [
+      {
+        "asset": "BNB",
+        "dir": "short",
+        "open_px": 0.47,
+        "close_px": 0.01,
+        "pnl": 0.45999999999999996,
+        "open_mid": 0.475,
+        "close_scen": "house_cover",
+        "hold_min": 7.01415,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ETH",
+        "dir": "short",
+        "open_px": 0.28,
+        "close_px": 0.01,
+        "pnl": 0.27,
+        "open_mid": 0.28500000000000003,
+        "close_scen": "flatten",
+        "hold_min": 8.017883333333334,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ZEC",
+        "dir": "short",
+        "open_px": 0.67,
+        "close_px": 0.49,
+        "pnl": 0.18000000000000005,
+        "open_mid": 0.66,
+        "close_scen": "house_cover",
+        "hold_min": 0.4185666666666667,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "ZEC",
+        "dir": "short",
+        "open_px": 0.51,
+        "close_px": 0.44,
+        "pnl": 0.07,
+        "open_mid": 0.49,
+        "close_scen": "house_cover",
+        "hold_min": 0.2016,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "NEAR",
+        "dir": "long",
+        "open_px": 0.87,
+        "close_px": 0.93,
+        "pnl": 0.06000000000000005,
+        "open_mid": 0.87,
+        "close_scen": "house_cover",
+        "hold_min": 0.11633333333333334,
+        "close_reason": "book_depth"
+      }
+    ],
+    "top_losses": [
+      {
+        "asset": "ZEC",
+        "dir": "long",
+        "open_px": 0.49,
+        "close_px": 0.01,
+        "pnl": -0.48,
+        "open_mid": 0.49,
+        "close_scen": "flatten",
+        "hold_min": 10.024433333333333,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "BTC",
+        "dir": "long",
+        "open_px": 0.43,
+        "close_px": 0.034,
+        "pnl": -0.396,
+        "open_mid": 0.425,
+        "close_scen": "flatten",
+        "hold_min": 7.83285,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "SOL",
+        "dir": "short",
+        "open_px": 0.46,
+        "close_px": 0.75,
+        "pnl": -0.29,
+        "open_mid": 0.46499999999999997,
+        "close_scen": "flatten",
+        "hold_min": 11.65005,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "BNB",
+        "dir": "short",
+        "open_px": 0.14,
+        "close_px": 0.15,
+        "pnl": -0.009999999999999981,
+        "open_mid": 0.14500000000000002,
+        "close_scen": "flatten",
+        "hold_min": 2.392733333333333,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ZEC",
+        "dir": "long",
+        "open_px": 0.52,
+        "close_px": 0.52,
+        "pnl": 0.0,
+        "open_mid": 0.505,
+        "close_scen": "house_cover",
+        "hold_min": 0.38453333333333334,
+        "close_reason": "book_depth"
+      }
+    ],
+    "long_adv_n": 2,
+    "short_adv_n": 1,
+    "long_rt_n": 7,
+    "short_rt_n": 8,
+    "short_pnl": 0.77,
+    "long_pnl": -0.756,
+    "short_adv_$": -0.29,
+    "long_adv_$": -0.876
+  },
+  {
+    "session": "u325",
+    "realism_class": "MIXED",
+    "note": "curb persist bug; flatten bleed",
+    "start": "2026-09-23 20:14:36.184000-05:00",
+    "t0": "2026-09-23 20:15:17.509000-05:00",
+    "t1": "2026-09-23 20:47:21.787000-05:00",
+    "dur_h": 0.535,
+    "n_fills": 28,
+    "rd_sum": -1.26,
+    "fifo_pnl": -1.26,
+    "fifo_per_hr": -2.3572,
+    "WLF": "6/6/0",
+    "win_$": 1.17,
+    "loss_$": -2.43,
+    "open_lots": 4,
+    "soft_n": 4,
+    "soft_rd": 0.0,
+    "soft_pct": 14.3,
+    "strict_n": 24,
+    "strict_rd": -1.26,
+    "other_n": 0,
+    "other_rd": 0.0,
+    "reasons": {
+      "taker_cross": 16,
+      "book_depth": 8,
+      "mid_walk": 4
+    },
+    "scenarios": {
+      "house_mid": 16,
+      "house_cover": 5,
+      "flatten": 7
+    },
+    "coins": {
+      "HYPE": 7,
+      "SOL": 5,
+      "XRP": 4,
+      "ETH": 3,
+      "BTC": 3,
+      "ZEC": 2,
+      "NEAR": 2,
+      "BNB": 2
+    },
+    "tau_rd": {
+      "4-7": {
+        "n": 4,
+        "rd": 0.4
+      },
+      "7-10": {
+        "n": 3,
+        "rd": 0.52
+      },
+      ">10": {
+        "n": 14,
+        "rd": 0.05
+      },
+      "\u22642": {
+        "n": 7,
+        "rd": -2.23
+      }
+    },
+    "open_mid_band": {
+      "20-40": {
+        "opens": 2,
+        "long_opens": 0,
+        "short_opens": 2
+      },
+      "40-50": {
+        "opens": 4,
+        "long_opens": 4,
+        "short_opens": 0
+      },
+      "50-60": {
+        "opens": 6,
+        "long_opens": 4,
+        "short_opens": 2
+      },
+      "60-80": {
+        "opens": 3,
+        "long_opens": 1,
+        "short_opens": 2
+      },
+      ">80": {
+        "opens": 1,
+        "long_opens": 0,
+        "short_opens": 1
+      }
+    },
+    "long_open_mid_pnl": {
+      "40-50": {
+        "n": 2,
+        "pnl": -0.2
+      },
+      "50-60": {
+        "n": 4,
+        "pnl": -1.56
+      },
+      "60-80": {
+        "n": 1,
+        "pnl": -0.16
+      }
+    },
+    "short_open_mid_pnl": {
+      "50-60": {
+        "n": 2,
+        "pnl": 0.66
+      },
+      "60-80": {
+        "n": 2,
+        "pnl": -0.24
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.24
+      }
+    },
+    "flatten_loss_$": -2.43,
+    "cover_win_$": 0.97,
+    "long_1c_n": 3,
+    "long_1c_$": -1.493,
+    "fake_covers_n": 0,
+    "fake_covers_sample": [],
+    "settle_n": 0,
+    "hold_med_min": 10.39,
+    "hold_p90": 12.118,
+    "win_hold_med": 6.746,
+    "loss_hold_med": 11.348,
+    "top_wins": [
+      {
+        "asset": "ZEC",
+        "dir": "short",
+        "open_px": 0.58,
+        "close_px": 0.06,
+        "pnl": 0.52,
+        "open_mid": 0.5549999999999999,
+        "close_scen": "house_cover",
+        "hold_min": 6.980533333333333,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "BNB",
+        "dir": "short",
+        "open_px": 0.92,
+        "close_px": 0.68,
+        "pnl": 0.24,
+        "open_mid": 0.921,
+        "close_scen": "house_cover",
+        "hold_min": 4.368783333333334,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "ETH",
+        "dir": "long",
+        "open_px": 0.49,
+        "close_px": 0.69,
+        "pnl": 0.19999999999999996,
+        "open_mid": 0.485,
+        "close_scen": "flatten",
+        "hold_min": 11.230500000000001,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "short",
+        "open_px": 0.57,
+        "close_px": 0.43,
+        "pnl": 0.13999999999999996,
+        "open_mid": 0.58,
+        "close_scen": "house_cover",
+        "hold_min": 0.8540500000000001,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "long",
+        "open_px": 0.52,
+        "close_px": 0.57,
+        "pnl": 0.04999999999999993,
+        "open_mid": 0.52,
+        "close_scen": "house_cover",
+        "hold_min": 1.4361166666666667,
+        "close_reason": "book_depth"
+      }
+    ],
+    "top_losses": [
+      {
+        "asset": "SOL",
+        "dir": "long",
+        "open_px": 0.57,
+        "close_px": 0.014,
+        "pnl": -0.5559999999999999,
+        "open_mid": 0.565,
+        "close_scen": "flatten",
+        "hold_min": 12.721616666666668,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "SOL",
+        "dir": "long",
+        "open_px": 0.55,
+        "close_px": 0.013,
+        "pnl": -0.537,
+        "open_mid": 0.545,
+        "close_scen": "flatten",
+        "hold_min": 12.117899999999999,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "XRP",
+        "dir": "long",
+        "open_px": 0.59,
+        "close_px": 0.073,
+        "pnl": -0.517,
+        "open_mid": 0.585,
+        "close_scen": "flatten",
+        "hold_min": 10.3896,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "XRP",
+        "dir": "long",
+        "open_px": 0.41,
+        "close_px": 0.01,
+        "pnl": -0.39999999999999997,
+        "open_mid": 0.405,
+        "close_scen": "flatten",
+        "hold_min": 11.348,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "NEAR",
+        "dir": "short",
+        "open_px": 0.72,
+        "close_px": 0.98,
+        "pnl": -0.26,
+        "open_mid": 0.72,
+        "close_scen": "flatten",
+        "hold_min": 11.097583333333334,
+        "close_reason": "taker_cross"
+      }
+    ],
+    "long_adv_n": 5,
+    "short_adv_n": 1,
+    "long_rt_n": 7,
+    "short_rt_n": 5,
+    "short_pnl": 0.66,
+    "long_pnl": -1.92,
+    "short_adv_$": -0.26,
+    "long_adv_$": -2.17
+  },
+  {
+    "session": "u326",
+    "realism_class": "FAKE-PNL",
+    "note": "mid_walk $0 covers mid~0.98 \u2014 DO NOT LEARN",
+    "start": "2026-09-23 20:58:00.698000-05:00",
+    "t0": "2026-09-23 21:00:36.869000-05:00",
+    "t1": "2026-09-23 21:42:22.494000-05:00",
+    "dur_h": 0.696,
+    "n_fills": 36,
+    "rd_sum": 5.202,
+    "fifo_pnl": 5.202,
+    "fifo_per_hr": 7.4741,
+    "WLF": "17/1/0",
+    "win_$": 5.622,
+    "loss_$": -0.42,
+    "open_lots": 0,
+    "soft_n": 4,
+    "soft_rd": 0.0,
+    "soft_pct": 11.1,
+    "strict_n": 32,
+    "strict_rd": 5.202,
+    "other_n": 0,
+    "other_rd": 0.0,
+    "reasons": {
+      "book_depth": 16,
+      "taker_cross": 16,
+      "mid_walk": 4
+    },
+    "scenarios": {
+      "house_mid": 18,
+      "house_cover": 7,
+      "house_soft_exit": 1,
+      "flatten": 10
+    },
+    "coins": {
+      "NEAR": 10,
+      "DOGE": 6,
+      "BTC": 4,
+      "HYPE": 4,
+      "XRP": 4,
+      "SOL": 4,
+      "ETH": 4
+    },
+    "tau_rd": {
+      "2-4": {
+        "n": 9,
+        "rd": 2.9
+      },
+      "4-7": {
+        "n": 6,
+        "rd": 1.45
+      },
+      "7-10": {
+        "n": 2,
+        "rd": 0.12
+      },
+      ">10": {
+        "n": 18,
+        "rd": 0.44
+      },
+      "\u22642": {
+        "n": 1,
+        "rd": 0.292
+      }
+    },
+    "open_mid_band": {
+      "20-40": {
+        "opens": 3,
+        "long_opens": 0,
+        "short_opens": 3
+      },
+      "40-50": {
+        "opens": 4,
+        "long_opens": 0,
+        "short_opens": 4
+      },
+      "50-60": {
+        "opens": 3,
+        "long_opens": 2,
+        "short_opens": 1
+      },
+      "60-80": {
+        "opens": 6,
+        "long_opens": 4,
+        "short_opens": 2
+      },
+      ">80": {
+        "opens": 2,
+        "long_opens": 1,
+        "short_opens": 1
+      }
+    },
+    "long_open_mid_pnl": {
+      "50-60": {
+        "n": 2,
+        "pnl": 0.03
+      },
+      "60-80": {
+        "n": 4,
+        "pnl": 1.092
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.13
+      }
+    },
+    "short_open_mid_pnl": {
+      "20-40": {
+        "n": 3,
+        "pnl": 0.59
+      },
+      "40-50": {
+        "n": 4,
+        "pnl": 1.53
+      },
+      "50-60": {
+        "n": 1,
+        "pnl": 0.12
+      },
+      "60-80": {
+        "n": 2,
+        "pnl": 0.84
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.87
+      }
+    },
+    "flatten_loss_$": 0,
+    "cover_win_$": 2.43,
+    "long_1c_n": 0,
+    "long_1c_$": 0,
+    "fake_covers_n": 0,
+    "fake_covers_sample": [],
+    "settle_n": 0,
+    "hold_med_min": 7.787,
+    "hold_p90": 12.253,
+    "win_hold_med": 7.787,
+    "loss_hold_med": 5.122,
+    "top_wins": [
+      {
+        "asset": "HYPE",
+        "dir": "short",
+        "open_px": 0.87,
+        "close_px": 0.0,
+        "pnl": 0.87,
+        "open_mid": 0.86,
+        "close_scen": "house_cover",
+        "hold_min": 7.787333333333334,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "SOL",
+        "dir": "short",
+        "open_px": 0.72,
+        "close_px": 0.0,
+        "pnl": 0.72,
+        "open_mid": 0.72,
+        "close_scen": "house_cover",
+        "hold_min": 9.210199999999999,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "DOGE",
+        "dir": "short",
+        "open_px": 0.46,
+        "close_px": 0.01,
+        "pnl": 0.45,
+        "open_mid": 0.46499999999999997,
+        "close_scen": "flatten",
+        "hold_min": 10.22645,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "BTC",
+        "dir": "long",
+        "open_px": 0.54,
+        "close_px": 0.99,
+        "pnl": 0.44999999999999996,
+        "open_mid": 0.535,
+        "close_scen": "flatten",
+        "hold_min": 10.711983333333334,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "NEAR",
+        "dir": "short",
+        "open_px": 0.44,
+        "close_px": 0.02,
+        "pnl": 0.42,
+        "open_mid": 0.45,
+        "close_scen": "flatten",
+        "hold_min": 12.2526,
+        "close_reason": "book_depth"
+      }
+    ],
+    "top_losses": [
+      {
+        "asset": "BTC",
+        "dir": "long",
+        "open_px": 0.56,
+        "close_px": 0.14,
+        "pnl": -0.42000000000000004,
+        "open_mid": 0.555,
+        "close_scen": "house_soft_exit",
+        "hold_min": 5.122333333333333,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "NEAR",
+        "dir": "short",
+        "open_px": 0.24,
+        "close_px": 0.16,
+        "pnl": 0.07999999999999999,
+        "open_mid": 0.22,
+        "close_scen": "house_cover",
+        "hold_min": 0.4850333333333333,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "ETH",
+        "dir": "short",
+        "open_px": 0.63,
+        "close_px": 0.51,
+        "pnl": 0.12,
+        "open_mid": 0.635,
+        "close_scen": "house_cover",
+        "hold_min": 3.871366666666667,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "NEAR",
+        "dir": "short",
+        "open_px": 0.55,
+        "close_px": 0.43,
+        "pnl": 0.12000000000000005,
+        "open_mid": 0.54,
+        "close_scen": "house_cover",
+        "hold_min": 0.6023166666666667,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "XRP",
+        "dir": "long",
+        "open_px": 0.86,
+        "close_px": 0.99,
+        "pnl": 0.13,
+        "open_mid": 0.855,
+        "close_scen": "flatten",
+        "hold_min": 3.8662666666666667,
+        "close_reason": "book_depth"
+      }
+    ],
+    "long_adv_n": 1,
+    "short_adv_n": 4,
+    "long_rt_n": 7,
+    "short_rt_n": 11,
+    "short_pnl": 3.95,
+    "long_pnl": 1.252,
+    "short_adv_$": 2.24,
+    "long_adv_$": -0.42
+  },
+  {
+    "session": "u328",
+    "realism_class": "STRICT-CLAIM",
+    "note": "U3.2.8 strict L2 overnight",
+    "start": "2026-09-23 22:26:03.793000-05:00",
+    "t0": "2026-09-23 22:30:08.339000-05:00",
+    "t1": "2026-09-24 15:04:09.839000-05:00",
+    "dur_h": 16.567,
+    "n_fills": 83,
+    "rd_sum": 2.79,
+    "fifo_pnl": -1.1675,
+    "fifo_per_hr": -0.0705,
+    "WLF": "26/15/0",
+    "win_$": 4.109,
+    "loss_$": -5.2765,
+    "open_lots": 1,
+    "soft_n": 0,
+    "soft_rd": 0.0,
+    "soft_pct": 0.0,
+    "strict_n": 70,
+    "strict_rd": 2.79,
+    "other_n": 13,
+    "other_rd": 0.0,
+    "reasons": {
+      "book_depth": 62,
+      "taker_cross": 8,
+      "settlement": 13
+    },
+    "scenarios": {
+      "house_mid": 50,
+      "house_cover": 18,
+      "flatten": 15
+    },
+    "coins": {
+      "SOL": 20,
+      "XRP": 17,
+      "DOGE": 16,
+      "ETH": 12,
+      "BTC": 10,
+      "HYPE": 6,
+      "NEAR": 2
+    },
+    "tau_rd": {
+      "4-7": {
+        "n": 17,
+        "rd": 0.27
+      },
+      "7-10": {
+        "n": 25,
+        "rd": 1.45
+      },
+      ">10": {
+        "n": 26,
+        "rd": 0.5
+      },
+      "\u22642": {
+        "n": 15,
+        "rd": 0.57
+      }
+    },
+    "open_mid_band": {
+      "20-40": {
+        "opens": 12,
+        "long_opens": 0,
+        "short_opens": 12
+      },
+      "40-50": {
+        "opens": 8,
+        "long_opens": 0,
+        "short_opens": 8
+      },
+      "50-60": {
+        "opens": 9,
+        "long_opens": 3,
+        "short_opens": 6
+      },
+      "60-80": {
+        "opens": 7,
+        "long_opens": 4,
+        "short_opens": 3
+      },
+      ">80": {
+        "opens": 3,
+        "long_opens": 1,
+        "short_opens": 2
+      },
+      "\u226420": {
+        "opens": 3,
+        "long_opens": 0,
+        "short_opens": 3
+      }
+    },
+    "long_open_mid_pnl": {
+      "50-60": {
+        "n": 3,
+        "pnl": -0.82
+      },
+      "60-80": {
+        "n": 3,
+        "pnl": 0.56
+      },
+      ">80": {
+        "n": 1,
+        "pnl": 0.029
+      }
+    },
+    "short_open_mid_pnl": {
+      "20-40": {
+        "n": 12,
+        "pnl": -0.8
+      },
+      "40-50": {
+        "n": 8,
+        "pnl": 0.016
+      },
+      "50-60": {
+        "n": 6,
+        "pnl": -0.189
+      },
+      "60-80": {
+        "n": 3,
+        "pnl": 0.003
+      },
+      ">80": {
+        "n": 2,
+        "pnl": -0.2365
+      },
+      "\u226420": {
+        "n": 3,
+        "pnl": 0.27
+      }
+    },
+    "flatten_loss_$": -2.7845,
+    "cover_win_$": 2.22,
+    "long_1c_n": 2,
+    "long_1c_$": -1.07,
+    "fake_covers_n": 0,
+    "fake_covers_sample": [],
+    "settle_n": 13,
+    "hold_med_min": 5.373,
+    "hold_p90": 23.541,
+    "win_hold_med": 3.33,
+    "loss_hold_med": 18.387,
+    "top_wins": [
+      {
+        "asset": "SOL",
+        "dir": "short",
+        "open_px": 0.69,
+        "close_px": 0.07,
+        "pnl": 0.6199999999999999,
+        "open_mid": 0.685,
+        "close_scen": "flatten",
+        "hold_min": 3.8586666666666667,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "ETH",
+        "dir": "short",
+        "open_px": 0.48,
+        "close_px": 0.08,
+        "pnl": 0.39999999999999997,
+        "open_mid": 0.475,
+        "close_scen": "flatten",
+        "hold_min": 3.71725,
+        "close_reason": "taker_cross"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "long",
+        "open_px": 0.61,
+        "close_px": 0.88,
+        "pnl": 0.27,
+        "open_mid": 0.615,
+        "close_scen": "house_cover",
+        "hold_min": 1.82555,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "SOL",
+        "dir": "long",
+        "open_px": 0.57,
+        "close_px": 0.82,
+        "pnl": 0.25,
+        "open_mid": 0.575,
+        "close_scen": "house_cover",
+        "hold_min": 2.9861500000000003,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "ETH",
+        "dir": "short",
+        "open_px": 0.25,
+        "close_px": 0.01,
+        "pnl": 0.24,
+        "open_mid": 0.245,
+        "close_scen": "flatten",
+        "hold_min": 7.912833333333333,
+        "close_reason": "taker_cross"
+      }
+    ],
+    "top_losses": [
+      {
+        "asset": "SOL",
+        "dir": "short",
+        "open_px": 0.25,
+        "close_px": 0.845,
+        "pnl": -0.595,
+        "open_mid": 0.255,
+        "close_scen": "house_mid",
+        "hold_min": 59.58861666666667,
+        "close_reason": "settlement"
+      },
+      {
+        "asset": "BTC",
+        "dir": "long",
+        "open_px": 0.58,
+        "close_px": 0.01,
+        "pnl": -0.57,
+        "open_mid": 0.585,
+        "close_scen": "flatten",
+        "hold_min": 12.886433333333335,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "HYPE",
+        "dir": "short",
+        "open_px": 0.21,
+        "close_px": 0.735,
+        "pnl": -0.525,
+        "open_mid": 0.21000000000000002,
+        "close_scen": "house_mid",
+        "hold_min": 59.371316666666665,
+        "close_reason": "settlement"
+      },
+      {
+        "asset": "SOL",
+        "dir": "long",
+        "open_px": 0.51,
+        "close_px": 0.01,
+        "pnl": -0.5,
+        "open_mid": 0.515,
+        "close_scen": "flatten",
+        "hold_min": 13.120916666666666,
+        "close_reason": "book_depth"
+      },
+      {
+        "asset": "DOGE",
+        "dir": "short",
+        "open_px": 0.5,
+        "close_px": 0.964,
+        "pnl": -0.46399999999999997,
+        "open_mid": 0.49,
+        "close_scen": "house_mid",
+        "hold_min": 12.2653,
+        "close_reason": "settlement"
+      }
+    ],
+    "long_adv_n": 2,
+    "short_adv_n": 13,
+    "long_rt_n": 7,
+    "short_rt_n": 34,
+    "short_pnl": -0.9365,
+    "long_pnl": -0.231,
+    "short_adv_$": -4.2065,
+    "long_adv_$": -1.07
+  }
+]
