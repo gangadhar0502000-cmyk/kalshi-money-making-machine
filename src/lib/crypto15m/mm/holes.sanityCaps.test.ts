@@ -103,6 +103,7 @@ describe('hole: 32¢ FV edge parks sanity (not mid fb)', () => {
         openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
         openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
         hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
+        noOpenMinutes: DEFAULT_DECISION_POLICY.noOpenMinutes,
         minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
         stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
         markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,

@@ -254,6 +254,15 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Archive forever:** `docs/rules-history/` (RULES snapshots) + `data/paper-mm/archive/` (dig tapes + INDEX). Journals never auto-purged.
 - Paper-only · read-only · never places live orders.
 
+
+## U3.2.4 — no new opens when flat ≤4m (soft reduce 2–4m)
+
+- **Knob:** `noOpenMinutes` default **4**; `hardFlatMinutes` remains **2** (U3.2.1 touch flatten).
+- **Flat + τ ≤ 4m** → park both (`U3.2.4: no new opens — τ≤4m`).
+- **Inv ≠ 0 + 2m < τ ≤ 4m** → reduce-only (maker); **τ ≤ 2m** → existing flatten-to-touch.
+- Retains U3.2.3 long-open curb (`mid ≤ 0.40`), `house_cover` tags, disk journal, rules archive.
+- Paper-only · read-only · never places live orders.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

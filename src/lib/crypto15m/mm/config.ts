@@ -175,9 +175,15 @@ export interface PaperMmConfig {
   openMinEdgeCents: number
   /**
    * No S1/S2 opens when minutesRemaining < this; S4 risk-flat closes allowed.
-   * Default 2 minutes.
+   * Default 2 minutes. U3.2.1 flatten-to-touch when inv≠0 and τ ≤ this.
    */
   hardFlatMinutes: number
+  /**
+   * U3.2.4: no NEW opens when flat and minutesRemaining ≤ this (default 4).
+   * Also reduce-only (maker) when inv≠0 in (hardFlatMinutes, noOpenMinutes].
+   * HardFlat (≤2) still hit-touch flatten. Must be ≥ hardFlatMinutes.
+   */
+  noOpenMinutes: number
   /**
    * S3 CLOSE_PROFIT: reducing fill must capture ≥ this many cents vs avgEntry
    * (signed). Default 1.0¢ — blocks −0.88¢/fill churn unwinds unless S4.
@@ -283,6 +289,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   fillMidFallback: false,
   openMinEdgeCents: 4,
   hardFlatMinutes: 2,
+  noOpenMinutes: 4,
   minCloseProfitCents: 1.0,
   minChurnCaptureCents: 1.0,
   stuckUnwindTicks: 30,
@@ -339,6 +346,7 @@ export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
     minCloseProfitCents: src.minCloseProfitCents,
     openMinEdgeCents: src.openMinEdgeCents,
     hardFlatMinutes: src.hardFlatMinutes,
+    noOpenMinutes: src.noOpenMinutes,
   }
 }
 
@@ -393,6 +401,11 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     fillMidFallback: Boolean(c.fillMidFallback),
     openMinEdgeCents: clamp(c.openMinEdgeCents, 0, 20),
     hardFlatMinutes: clamp(c.hardFlatMinutes, 0, 10),
+    noOpenMinutes: clamp(
+      Math.max(c.noOpenMinutes ?? 4, c.hardFlatMinutes ?? 2),
+      0,
+      15,
+    ),
     minCloseProfitCents: clamp(c.minCloseProfitCents, 0, 10),
     minChurnCaptureCents: clamp(
       Math.max(c.minChurnCaptureCents, c.minCloseProfitCents ?? 0),
@@ -469,6 +482,15 @@ export function migratePersistedScarcityConfig(
   }
   if (partial.hardFlatMinutes == null || !Number.isFinite(partial.hardFlatMinutes)) {
     out.hardFlatMinutes = STRICT_PAPER_MM_CONFIG.hardFlatMinutes
+  }
+  if (partial.noOpenMinutes == null || !Number.isFinite(partial.noOpenMinutes)) {
+    out.noOpenMinutes = STRICT_PAPER_MM_CONFIG.noOpenMinutes
+  } else {
+    const hf =
+      out.hardFlatMinutes ??
+      partial.hardFlatMinutes ??
+      STRICT_PAPER_MM_CONFIG.hardFlatMinutes
+    out.noOpenMinutes = Math.max(partial.noOpenMinutes, hf)
   }
   // Lift maker capture floor for older 1¢ saves.
   const cap =

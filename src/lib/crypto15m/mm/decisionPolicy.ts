@@ -16,8 +16,10 @@ import {
   U32_HOUSE_MID,
   U32_NO_MID,
   U323_NO_LATE_OPENS,
+  U324_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
   DEFAULT_LONG_OPEN_MIN_MID,
+  DEFAULT_NO_OPEN_MINUTES,
   aggressiveFlattenPrices,
   isFlattenHouseTag,
   houseMidQuotePrices,
@@ -29,8 +31,10 @@ export {
   U321_STUCK_NO_ASK,
   isFlattenHouseTag,
   U323_NO_LATE_OPENS,
+  U324_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
   DEFAULT_LONG_OPEN_MIN_MID,
+  DEFAULT_NO_OPEN_MINUTES,
   toHouseFillTag,
 } from './houseMidQuote'
 
@@ -75,6 +79,11 @@ export interface DecisionPolicyConfig {
   openEdgeAddHalfSpread: boolean
   openMinEdgeCents: number
   hardFlatMinutes: number
+  /**
+   * U3.2.4: park flat / reduce-only when minutesRemaining ≤ this (default 4).
+   * Flatten-to-touch still only when τ ≤ hardFlatMinutes (or blackout).
+   */
+  noOpenMinutes: number
   minCloseProfitCents: number
   stuckUnwindTicks: number
   markBleedCents: number
@@ -118,6 +127,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   | 'openEdgeAddHalfSpread'
   | 'openMinEdgeCents'
   | 'hardFlatMinutes'
+  | 'noOpenMinutes'
   | 'minCloseProfitCents'
   | 'stuckUnwindTicks'
   | 'markBleedCents'
@@ -139,6 +149,7 @@ export const DEFAULT_DECISION_POLICY: Pick<
   openEdgeAddHalfSpread: false,
   openMinEdgeCents: 4,
   hardFlatMinutes: 2,
+  noOpenMinutes: DEFAULT_NO_OPEN_MINUTES,
   minCloseProfitCents: 1.0,
   stuckUnwindTicks: 30,
   markBleedCents: 5,
@@ -446,23 +457,29 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   }
   const forceBlackoutFlatten = inBlackout && input.inventory !== 0
 
-  // U3.2.3: hardFlat + flat → no new opens (inv≠0 still flattens via arms below)
+  // U3.2.4: noOpen + flat → no new opens (inv≠0 still reduces / flattens via arms below)
   const hardFlat =
     Number.isFinite(cfg.hardFlatMinutes) && cfg.hardFlatMinutes >= 0
       ? cfg.hardFlatMinutes
       : 2
-  if (!forceBlackoutFlatten && mins <= hardFlat && input.inventory === 0) {
-    return parkBoth(U323_NO_LATE_OPENS, blank, persist, stuck)
+  const noOpen =
+    Number.isFinite(cfg.noOpenMinutes) && cfg.noOpenMinutes >= 0
+      ? Math.max(cfg.noOpenMinutes, hardFlat)
+      : Math.max(DEFAULT_NO_OPEN_MINUTES, hardFlat)
+  if (!forceBlackoutFlatten && mins <= noOpen && input.inventory === 0) {
+    return parkBoth(U324_NO_LATE_OPENS, blank, persist, stuck)
   }
+
+  // Reduce-only through noOpen window; hardFlat/blackout still force flatten arms.
+  const reduceOnlyMinutes = forceBlackoutFlatten
+    ? Math.max(hardFlat, noOpen, mins)
+    : Math.max(hardFlat, noOpen)
 
   const arms = familyESideArms({
     inventory: input.inventory,
     maxInventory: cfg.maxInventory,
     minutesRemaining: mins,
-    // Force flatten even if blackoutMinutes > hardFlatMinutes.
-    hardFlatMinutes: forceBlackoutFlatten
-      ? Math.max(cfg.hardFlatMinutes, mins)
-      : cfg.hardFlatMinutes,
+    hardFlatMinutes: reduceOnlyMinutes,
   })
 
   let bidActive = arms.bidActive
@@ -485,10 +502,10 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     askReason = U32_HOUSE_MID
   }
 
-  
-  // U3.2.1: in flatten / blackout_flatten, price exit through the touch so L2 can fill.
-  // Maker-only join leaves ask above a 1¢ dump and never exits — hit bid (long) / lift ask (short).
-  if (unwindActive && isFlattenHouseTag(tag)) {
+  // U3.2.1: hardFlat / blackout_flatten → price exit through the touch so L2 can fill.
+  // Soft reduce band (hardFlat < τ ≤ noOpen): maker reduce-only — do NOT force taker.
+  const inHardFlatten = forceBlackoutFlatten || mins <= hardFlat
+  if (unwindActive && isFlattenHouseTag(tag) && inHardFlatten) {
     const flatPx = aggressiveFlattenPrices({
       inventory: input.inventory,
       yesBid,

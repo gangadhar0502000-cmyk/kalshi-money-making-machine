@@ -14,6 +14,7 @@ import {
   U32_HOUSE_MID,
   U32_NO_MID,
   U323_NO_LATE_OPENS,
+  U324_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
   toHouseFillTag,
   type DecisionPolicyConfig,
@@ -44,6 +45,7 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
     openEdgeAddHalfSpread: DEFAULT_DECISION_POLICY.openEdgeAddHalfSpread,
     openMinEdgeCents: DEFAULT_DECISION_POLICY.openMinEdgeCents,
     hardFlatMinutes: DEFAULT_DECISION_POLICY.hardFlatMinutes,
+    noOpenMinutes: DEFAULT_DECISION_POLICY.noOpenMinutes,
     minCloseProfitCents: DEFAULT_DECISION_POLICY.minCloseProfitCents,
     stuckUnwindTicks: DEFAULT_DECISION_POLICY.stuckUnwindTicks,
     markBleedCents: DEFAULT_DECISION_POLICY.markBleedCents,
@@ -418,12 +420,12 @@ describe('U3.2.3 no late opens + long-open curb', () => {
         inventory: 0,
         minutesRemaining: 1.5,
         mid: 0.5,
-        config: baseConfig({ hardFlatMinutes: 2, blackoutMinutes: 0.75 }),
+        config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
       }),
     )
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(false)
-    expect(d.bothOffReason).toBe(U323_NO_LATE_OPENS)
+    expect(d.bothOffReason).toBe(U324_NO_LATE_OPENS)
   })
 
   it('inv≠0 + τ≤hardFlat → flatten still works', () => {
@@ -484,3 +486,90 @@ describe('U3.2.3 no late opens + long-open curb', () => {
   })
 })
 
+
+describe('U3.2.4 noOpenMinutes park + soft reduce', () => {
+  it('flat + τ=3 ≤ noOpen → no opens (park)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 3,
+        mid: 0.5,
+        bookBestBid: 0.48,
+        bookBestAsk: 0.52,
+        config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(false)
+    expect(d.bothOffReason).toBe(U324_NO_LATE_OPENS)
+  })
+
+  it('flat + τ=5 > noOpen → house_mid may open', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 5,
+        mid: 0.5,
+        bookBestBid: 0.48,
+        bookBestAsk: 0.52,
+        config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.activeScenario).toBe('house_mid')
+    expect(d.bidActive || d.askActive).toBe(true)
+    expect(d.bothOffReason).toBeNull()
+  })
+
+  it('inv≠0 + τ=3 soft reduce — maker reduce only (ask not forced to bid)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        minutesRemaining: 3,
+        mid: 0.5,
+        bookBestBid: 0.48,
+        bookBestAsk: 0.52,
+        config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.unwindActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    expect(d.bidActive).toBe(false)
+    expect(d.activeScenario).toBe('flatten')
+    // Soft band: maker reduce — ask stays above best bid (not taker-through-touch)
+    expect(d.yesAsk).toBeGreaterThan(0.48)
+  })
+
+  it('inv≠0 + τ=1.5 hardFlat → flatten touch', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        minutesRemaining: 1.5,
+        mid: 0.5,
+        bookBestBid: 0.48,
+        bookBestAsk: 0.52,
+        config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
+      }),
+    )
+    expect(d.unwindActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    expect(d.bidActive).toBe(false)
+    expect(d.activeScenario).toBe('flatten')
+    expect(d.yesAsk).toBeCloseTo(0.48, 5)
+  })
+
+  it('U3.2.3 mid≤0.40 long curb still green', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 8,
+        mid: 0.3,
+        bookBestBid: 0.28,
+        bookBestAsk: 0.32,
+        config: baseConfig({ longOpenMinMid: 0.4, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.bidReason).toBe(U323_LONG_OPEN_CURB)
+  })
+})

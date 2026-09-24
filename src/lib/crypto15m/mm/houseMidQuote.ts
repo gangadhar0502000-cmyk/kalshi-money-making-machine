@@ -29,12 +29,16 @@ export type HouseTag =
   | 'house_cover'
   | 'house_close'
 
-/** U3.2.3: flat inventory + τ ≤ hardFlatMinutes — no new opens. */
+/** @deprecated U3.2.4 parks flat via U324_NO_LATE_OPENS (τ ≤ noOpenMinutes). Kept for digests. */
 export const U323_NO_LATE_OPENS = 'U3.2.3: no new opens — hardFlat τ'
+/** U3.2.4: flat inventory + τ ≤ noOpenMinutes — no new opens (default 4m). */
+export const U324_NO_LATE_OPENS = 'U3.2.4: no new opens — τ≤4m'
 /** U3.2.3: refuse NEW long opens when mid is in the bleed band. */
 export const U323_LONG_OPEN_CURB = 'U3.2.3: long open curb — mid too low'
 /** Default floor mid for NEW long YES opens (dig losers ~0.13–0.36). */
 export const DEFAULT_LONG_OPEN_MIN_MID = 0.4
+/** Default minutes: park flat / reduce-only opens (U3.2.4). */
+export const DEFAULT_NO_OPEN_MINUTES = 4
 
 /**
  * Map legacy evaluateClose / leftover S* ids → house tags for NEW fill stamps.

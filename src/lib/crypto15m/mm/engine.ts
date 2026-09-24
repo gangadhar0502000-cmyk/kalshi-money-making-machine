@@ -49,7 +49,9 @@ import {
   U321_STUCK_NO_ASK,
   U323_LONG_OPEN_CURB,
   U323_NO_LATE_OPENS,
+  U324_NO_LATE_OPENS,
   DEFAULT_LONG_OPEN_MIN_MID,
+  DEFAULT_NO_OPEN_MINUTES,
   toHouseFillTag,
 } from './decisionPolicy'
 import { evaluateClose } from './profitableScenarios'
@@ -1092,6 +1094,8 @@ export class PaperMmEngine {
       tauSkewAccel: this.config.tauSkewAccel ?? DEFAULT_DECISION_POLICY.tauSkewAccel,
       longOpenMinMid:
         this.config.longOpenMinMid ?? DEFAULT_DECISION_POLICY.longOpenMinMid,
+      noOpenMinutes:
+        this.config.noOpenMinutes ?? DEFAULT_DECISION_POLICY.noOpenMinutes,
     }
 
     const decision = decideQuoteSides({
@@ -1368,10 +1372,12 @@ export class PaperMmEngine {
       }
     }
 
-    // U3.2.3: no inventory-increasing opens when τ ≤ hardFlatMinutes
+    // U3.2.4: no inventory-increasing opens when τ ≤ noOpenMinutes
     if (reason !== 'settlement') {
       const minsLeft = this.market?.minutesRemaining
       const hardFlat = this.config.hardFlatMinutes ?? 2
+      const noOpenRaw = this.config.noOpenMinutes ?? DEFAULT_NO_OPEN_MINUTES
+      const noOpen = Math.max(noOpenRaw, hardFlat)
       const increasingOpen =
         (side === 'buy_yes' && this.inventory >= 0) ||
         (side === 'sell_yes' && this.inventory <= 0)
@@ -1379,11 +1385,11 @@ export class PaperMmEngine {
         increasingOpen &&
         minsLeft != null &&
         Number.isFinite(minsLeft) &&
-        minsLeft <= hardFlat
+        minsLeft <= noOpen
       ) {
         this.midCrossRejectCount += 1
         this.message =
-          `${U323_NO_LATE_OPENS} (τ=${minsLeft.toFixed(2)}m). Read-only · never places trades.`
+          `${U324_NO_LATE_OPENS} (τ=${minsLeft.toFixed(2)}m). Read-only · never places trades.`
         this.rebuildQuote(true)
         return
       }

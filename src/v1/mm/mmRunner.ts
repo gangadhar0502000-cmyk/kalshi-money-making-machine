@@ -402,6 +402,7 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           fvQuoting: true,
           blackoutMinutes: 0.75,
           hardFlatMinutes: 2,
+          noOpenMinutes: 4,
           quoteClampEpsilon: 0.01,
           tauSkewAccel: 1,
         })
