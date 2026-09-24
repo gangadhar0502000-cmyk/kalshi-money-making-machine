@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Crypto15mMarket } from '../../../types/crypto15m'
-import { PaperMmPortfolio } from './portfolio'
+import { PaperMmPortfolio, U329_HOLD_INV_NO_EARLY_MARK } from './portfolio'
 import type { MmFill } from './types'
 
 function mk(
@@ -685,6 +685,178 @@ describe('PaperMmPortfolio', () => {
       expect(st.books.map((b) => b.snapshot.marketTicker)).not.toContain('BTC-DROP-STRIP')
     })
 
+  })
+
+  describe('U3.2.9 hold inv — no early roll/release mid-mark', () => {
+    it('skips early same-asset roll while inventory open (keeps old ticker)', () => {
+      const older = mk({
+        ticker: 'KXSOL15M-OLD',
+        asset: 'SOL',
+        midYes: 0.25,
+        floorStrike: 100,
+        minutesRemaining: 8,
+        closeTime: new Date(Date.now() + 8 * 60_000).toISOString(),
+      })
+      const newer = mk({
+        ticker: 'KXSOL15M-NEW',
+        asset: 'SOL',
+        midYes: 0.48,
+        floorStrike: 101,
+        minutesRemaining: 14,
+        closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
+      })
+      portfolio.seedSpot('SOL', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        autoRoll: true,
+        useLiveBook: false,
+        fillMidFallback: true,
+        fvQuoting: false,
+      })
+      portfolio.syncMarketUniverse([older])
+      portfolio.start()
+      const eng = portfolio.getEngineForTests('KXSOL15M-OLD')
+      expect(eng).toBeTruthy()
+      eng!.seedInventory(-1, 0.25) // short — classic U3.2.8 bleed shape
+      expect(eng!.getState().snapshot.inventory).toBe(-1)
+
+      portfolio.syncMarketUniverse([older, newer])
+      const st = portfolio.getState()
+      expect(st.books[0]!.snapshot.marketTicker).toBe('KXSOL15M-OLD')
+      expect(st.books[0]!.snapshot.inventory).toBe(-1)
+      expect(st.message).toContain(U329_HOLD_INV_NO_EARLY_MARK)
+      // No settlement mark-to-mid fill minted
+      const settles = st.sessionFills.filter((f) => f.reason === 'settlement')
+      expect(settles).toHaveLength(0)
+    })
+
+    it('still rolls when flat and newer same-asset window appears', () => {
+      const older = mk({
+        ticker: 'KXSOL15M-FLAT-OLD',
+        asset: 'SOL',
+        midYes: 0.48,
+        floorStrike: 100,
+        minutesRemaining: 8,
+        closeTime: new Date(Date.now() + 8 * 60_000).toISOString(),
+      })
+      const newer = mk({
+        ticker: 'KXSOL15M-FLAT-NEW',
+        asset: 'SOL',
+        midYes: 0.48,
+        floorStrike: 101,
+        minutesRemaining: 14,
+        closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
+      })
+      portfolio.seedSpot('SOL', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        autoRoll: true,
+        useLiveBook: false,
+        fillMidFallback: true,
+        fvQuoting: false,
+      })
+      portfolio.syncMarketUniverse([older])
+      portfolio.start()
+      expect(portfolio.getState().books[0]!.snapshot.inventory).toBe(0)
+
+      portfolio.syncMarketUniverse([older, newer])
+      const st = portfolio.getState()
+      expect(st.books[0]!.snapshot.marketTicker).toBe('KXSOL15M-FLAT-NEW')
+      expect(st.message).toMatch(/Rolled.*KXSOL15M-FLAT-OLD.*KXSOL15M-FLAT-NEW/i)
+    })
+
+    it('still rolls when inventory open but current market is closed', () => {
+      const older = mk({
+        ticker: 'KXETH15M-DEAD',
+        asset: 'ETH',
+        midYes: 0.55,
+        floorStrike: 100,
+        minutesRemaining: 5,
+        closeTime: new Date(Date.now() + 5 * 60_000).toISOString(),
+      })
+      portfolio.seedSpot('ETH', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        autoRoll: true,
+        useLiveBook: false,
+        fillMidFallback: true,
+        fvQuoting: false,
+      })
+      portfolio.syncMarketUniverse([older])
+      portfolio.start()
+      const eng = portfolio.getEngineForTests('KXETH15M-DEAD')
+      eng!.seedInventory(-1, 0.55)
+
+      const closed = mk({
+        ...older,
+        status: 'closed',
+        minutesRemaining: 0,
+        closeTime: new Date(Date.now() - 1000).toISOString(),
+        midYes: 0.9,
+      })
+      const next = mk({
+        ticker: 'KXETH15M-NEXT',
+        asset: 'ETH',
+        midYes: 0.48,
+        floorStrike: 101,
+        minutesRemaining: 14,
+        closeTime: new Date(Date.now() + 14 * 60_000).toISOString(),
+      })
+      portfolio.syncMarketUniverse([closed, next])
+      const st = portfolio.getState()
+      expect(st.books[0]!.snapshot.marketTicker).toBe('KXETH15M-NEXT')
+      expect(st.books[0]!.snapshot.inventory).toBe(0) // settled on roll away from closed
+      expect(st.message).toMatch(/Rolled.*KXETH15M-DEAD.*KXETH15M-NEXT/i)
+    })
+
+    it('skips top-N release while inventory open on a live book', () => {
+      const weak = mk({
+        ticker: 'KXDOGE15M-WEAK',
+        asset: 'DOGE',
+        midYes: 0.22,
+        yesBid: 0.2,
+        yesAsk: 0.24,
+        floorStrike: 100,
+        minutesRemaining: 10,
+        closeTime: new Date(Date.now() + 10 * 60_000).toISOString(),
+      })
+      const btc = mk({
+        ticker: 'KXBTC15M-S1',
+        asset: 'BTC',
+        midYes: 0.5,
+        floorStrike: 100,
+        minutesRemaining: 12,
+      })
+      portfolio.seedSpot('DOGE', 100.05)
+      portfolio.seedSpot('BTC', 100.05)
+      portfolio.setConfig({
+        maxActiveMarkets: 1,
+        multiBook: true,
+        useLiveBook: false,
+        fillMidFallback: true,
+        fvQuoting: false,
+      })
+      portfolio.syncMarketUniverse([weak])
+      portfolio.start()
+      const eng = portfolio.getEngineForTests('KXDOGE15M-WEAK')
+      eng!.seedInventory(-1, 0.22)
+
+      // Drop DOGE out of ranked universe (no floorStrike) while keeping it open in
+      // the feed — sticky fails → rebalance would removeBook; U3.2.9 must hold.
+      const weakUnranked = mk({
+        ...weak,
+        floorStrike: 0,
+      })
+      portfolio.syncMarketUniverse([weakUnranked, btc])
+      const st = portfolio.getState()
+      expect(st.books.some((b) => b.snapshot.marketTicker === 'KXDOGE15M-WEAK')).toBe(true)
+      expect(st.books.find((b) => b.snapshot.marketTicker === 'KXDOGE15M-WEAK')!.snapshot.inventory).toBe(-1)
+      expect(st.message).toContain(U329_HOLD_INV_NO_EARLY_MARK)
+      expect(st.sessionFills.filter((f) => f.reason === 'settlement')).toHaveLength(0)
+    })
   })
 
 })

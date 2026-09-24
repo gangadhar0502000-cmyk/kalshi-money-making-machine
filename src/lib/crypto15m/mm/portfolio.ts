@@ -49,6 +49,10 @@ import {
   type FillCapSnapshot,
 } from './fillCaps'
 
+/** U3.2.9 — do not mark-to-mid via early roll/release while inventory is open. */
+export const U329_HOLD_INV_NO_EARLY_MARK =
+  'U3.2.9: hold inv — no early roll/release mid-mark'
+
 export interface PortfolioBookView {
   slotId: string
   snapshot: MmSnapshot
@@ -521,7 +525,17 @@ export class PaperMmPortfolio {
       const target = pickRollTarget(markets, current)
       if (target && target.ticker !== current.ticker) {
         if (canonicalMmAsset(target.asset) === canonicalMmAsset(current.asset)) {
-          this.rollBook(slotId, eng, target)
+          // U3.2.9: never early-roll an open book with inventory — mark-to-mid
+          // on still-live τ was the dominant U3.2.8 short P&L bleed.
+          const inv = eng.getState().snapshot.inventory ?? 0
+          if (inv !== 0 && isMarketOpen(current)) {
+            this.tickBook(slotId, eng, current)
+            this.message =
+              `${U329_HOLD_INV_NO_EARLY_MARK} (${current.ticker} inv=${inv > 0 ? '+' : ''}${inv}). ` +
+              'Read-only · never places trades.'
+          } else {
+            this.rollBook(slotId, eng, target)
+          }
         } else if (!isMarketOpen(current) && hasValidRanked) {
           // Dead with only cross-asset option → free slot for next-best edge
           toRemove.push(slotId)
@@ -773,6 +787,19 @@ export class PaperMmPortfolio {
       const t = eng?.getState().snapshot.marketTicker
       const row = t ? scanByTicker.get(t) : undefined
       const inv = t ? inventoryByTicker[t] ?? 0 : 0
+      // U3.2.9: hold open inventory — do not removeBook→settleNow mark-to-mid
+      // while the contract is still live (same hole as early roll).
+      if (inv !== 0 && eng) {
+        const live =
+          (t && markets.find((m) => m.ticker === t)) || null
+        if (live && isMarketOpen(live)) {
+          this.tickBook(slotId, eng, live)
+          this.message =
+            `${U329_HOLD_INV_NO_EARLY_MARK} (${t} inv=${inv > 0 ? '+' : ''}${inv}). ` +
+            'Read-only · never places trades.'
+          continue
+        }
+      }
       const evictNote =
         row?.sanityPark && inv === 0
           ? `SLOT_EVICT sanity+flat; `

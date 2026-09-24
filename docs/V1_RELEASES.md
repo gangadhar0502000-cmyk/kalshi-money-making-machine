@@ -299,6 +299,14 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Paper-only · read-only · never places live orders. **Reset + Start** after hard refresh.
 
 
+
+## U3.2.9 — hold inv: no early roll/release mid-mark
+
+- **Dig (U3.2.8 Mac, 83 fills, −$1.27 realized):** dominant hole = short inventory **settlement mark-to-mid** on still-open books (early same-asset roll + top-N release). Gross short-settle ≈ −$4.09 (≈ −$2.49 roll@mid); long ~1¢ bleed secondary ≈ −$1.07. Soft-sim/$0 covers still gone.
+- **Fix:** skip `rollBook` when current open + inv≠0; skip `removeBook` release on live+inv. Fail-loud `U3.2.9: hold inv — no early roll/release mid-mark`. Flat early-roll + closed-market settle unchanged.
+- Keep house mid, longOpenMinMid 0.50, hardFlat/noOpen, strict L2 depth 3/touch 2, absurd $0 refuse. No soft-sim / no S1–S5.
+- Paper-only · read-only · never places live orders. **Reset + Start** after pull.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.
