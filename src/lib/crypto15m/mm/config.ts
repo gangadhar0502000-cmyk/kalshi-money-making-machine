@@ -347,6 +347,7 @@ export function presetsForMode(strict: boolean): Partial<PaperMmConfig> {
     openMinEdgeCents: src.openMinEdgeCents,
     hardFlatMinutes: src.hardFlatMinutes,
     noOpenMinutes: src.noOpenMinutes,
+    longOpenMinMid: src.longOpenMinMid,
   }
 }
 
@@ -432,7 +433,8 @@ function clamp(n: number, lo: number, hi: number): number {
  * Migrate persisted / older sessions onto current STRICT scarcity defaults.
  * When strictRealism: clamp maxFillsPerMarketPer15m ≤ 4 and maxFillsPerMinute ≤ 1,
  * and ensure minChurnCaptureCents ≥ STRICT default when missing/zero from older saves.
- * Loose mode is left alone.
+ * U3.2.6: always (loose AND strict) lift longOpenMinMid to ≥ STRICT 0.50 so UI Start
+ * cannot leave a persisted 0.40 curb live under loose presets.
  */
 export function migratePersistedScarcityConfig(
   partial: Partial<PaperMmConfig>,
@@ -441,7 +443,20 @@ export function migratePersistedScarcityConfig(
     partial.strictRealism !== undefined
       ? Boolean(partial.strictRealism)
       : STRICT_PAPER_MM_CONFIG.strictRealism
-  if (!strict) return { ...partial }
+  // U3.2.6: lift longOpenMinMid even in loose — UI Start uses strictRealism:false.
+  const liftLongOpen = (out: Partial<PaperMmConfig>) => {
+    const floor = STRICT_PAPER_MM_CONFIG.longOpenMinMid
+    if (partial.longOpenMinMid == null || !Number.isFinite(partial.longOpenMinMid)) {
+      out.longOpenMinMid = floor
+    } else if (partial.longOpenMinMid < floor) {
+      out.longOpenMinMid = floor
+    }
+  }
+  if (!strict) {
+    const looseOut: Partial<PaperMmConfig> = { ...partial }
+    liftLongOpen(looseOut)
+    return looseOut
+  }
   const out: Partial<PaperMmConfig> = { ...partial, strictRealism: true }
   const per15 =
     typeof partial.maxFillsPerMarketPer15m === 'number' &&
@@ -545,8 +560,6 @@ export function migratePersistedScarcityConfig(
   if (partial.quotingEnabled == null) {
     out.quotingEnabled = STRICT_PAPER_MM_CONFIG.quotingEnabled
   }
-  if (partial.longOpenMinMid == null || !Number.isFinite(partial.longOpenMinMid)) {
-    out.longOpenMinMid = STRICT_PAPER_MM_CONFIG.longOpenMinMid
-  }
+  liftLongOpen(out)
   return out
 }

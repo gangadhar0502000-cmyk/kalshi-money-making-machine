@@ -113,6 +113,7 @@ describe('U3.2.1 aggressiveFlattenPrices', () => {
   it('isFlattenHouseTag', () => {
     expect(isFlattenHouseTag('flatten')).toBe(true)
     expect(isFlattenHouseTag('blackout_flatten')).toBe(true)
+    expect(isFlattenHouseTag('house_soft_exit')).toBe(true)
     expect(isFlattenHouseTag('house_mid')).toBe(false)
   })
 })

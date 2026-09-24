@@ -16,6 +16,7 @@ import {
   U323_NO_LATE_OPENS,
   U324_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
+  U326_HOUSE_SOFT_EXIT,
   toHouseFillTag,
   type DecisionPolicyConfig,
   type DecisionPolicyInput,
@@ -526,9 +527,10 @@ describe('U3.2.4 noOpenMinutes park + soft reduce', () => {
       baseInput({
         inventory: 2,
         minutesRemaining: 3,
-        mid: 0.5,
-        bookBestBid: 0.48,
-        bookBestAsk: 0.52,
+        // mid > longOpenMinMid so U3.2.6 soft-exit does not steal this band
+        mid: 0.6,
+        bookBestBid: 0.58,
+        bookBestAsk: 0.62,
         config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
       }),
     )
@@ -537,7 +539,7 @@ describe('U3.2.4 noOpenMinutes park + soft reduce', () => {
     expect(d.bidActive).toBe(false)
     expect(d.activeScenario).toBe('flatten')
     // Soft band: maker reduce — ask stays above best bid (not taker-through-touch)
-    expect(d.yesAsk).toBeGreaterThan(0.48)
+    expect(d.yesAsk).toBeGreaterThan(0.58)
   })
 
   it('inv≠0 + τ=1.5 hardFlat → flatten touch', () => {
@@ -644,3 +646,76 @@ describe('U3.2.5 longOpenMinMid 0.50 curb', () => {
     expect(DEFAULT_DECISION_POLICY.longOpenMinMid).toBe(0.5)
   })
 })
+
+describe('U3.2.6 soft-exit longs when mid ≤ longOpenMinMid', () => {
+  it('inv=+1, mid=0.45 → soft-exit flatten ask active, bid off; tag house_soft_exit', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 1,
+        minutesRemaining: 8,
+        mid: 0.45,
+        bookBestBid: 0.43,
+        bookBestAsk: 0.47,
+        config: baseConfig({ longOpenMinMid: 0.5, hardFlatMinutes: 2, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.unwindActive).toBe(true)
+    expect(d.askActive).toBe(true)
+    expect(d.bidActive).toBe(false)
+    expect(d.activeScenario).toBe('house_soft_exit')
+    expect(d.askReason).toBe(U326_HOUSE_SOFT_EXIT)
+    // Hit-touch: ask through best bid
+    expect(d.yesAsk).toBeCloseTo(0.43, 5)
+  })
+
+  it('inv=0, mid=0.45 → still no long bid (curb)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 8,
+        mid: 0.45,
+        bookBestBid: 0.43,
+        bookBestAsk: 0.47,
+        config: baseConfig({ longOpenMinMid: 0.5, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.bidReason).toBe(U323_LONG_OPEN_CURB)
+    expect(d.activeScenario).toBe('house_mid')
+    expect(d.unwindActive).toBe(false)
+  })
+
+  it('inv=+1, mid=0.60 → normal house mid (no soft-exit)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 1,
+        minutesRemaining: 8,
+        mid: 0.6,
+        bookBestBid: 0.58,
+        bookBestAsk: 0.62,
+        config: baseConfig({ longOpenMinMid: 0.5, hardFlatMinutes: 2, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.activeScenario).not.toBe('house_soft_exit')
+    expect(d.askActive).toBe(true)
+    // Not forced through touch — maker ask above best bid
+    expect(d.yesAsk).toBeGreaterThan(0.58)
+  })
+
+  it('soft-exit even when τ > hardFlatMinutes (τ=5)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 2,
+        minutesRemaining: 5,
+        mid: 0.48,
+        bookBestBid: 0.46,
+        bookBestAsk: 0.5,
+        config: baseConfig({ longOpenMinMid: 0.5, hardFlatMinutes: 2, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.activeScenario).toBe('house_soft_exit')
+    expect(d.yesAsk).toBeCloseTo(0.46, 5)
+  })
+})
+

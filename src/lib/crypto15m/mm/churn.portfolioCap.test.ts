@@ -280,6 +280,33 @@ describe('D: migrate persisted scarcity to STRICT defaults', () => {
   })
 })
 
+
+describe('U3.2.6 migrate lifts longOpenMinMid even in loose', () => {
+  it('loose + persisted longOpenMinMid 0.40 → becomes 0.50', () => {
+    const migrated = migratePersistedScarcityConfig({
+      strictRealism: false,
+      longOpenMinMid: 0.4,
+    })
+    expect(migrated.longOpenMinMid).toBe(0.5)
+    expect(migrated.strictRealism).toBe(false)
+  })
+
+  it('loose + missing longOpenMinMid → STRICT 0.50', () => {
+    const migrated = migratePersistedScarcityConfig({
+      strictRealism: false,
+    })
+    expect(migrated.longOpenMinMid).toBe(0.5)
+  })
+
+  it('strict + saved 0.40 → lifts to 0.50', () => {
+    const migrated = migratePersistedScarcityConfig({
+      strictRealism: true,
+      longOpenMinMid: 0.4,
+    })
+    expect(migrated.longOpenMinMid).toBe(0.5)
+  })
+})
+
 describe('E: settle inventory before ticker roll — never silent wipe', () => {
   it('roll realizes open inventory into realizedSpreadPnl', () => {
     const eng = new PaperMmEngine()
@@ -376,3 +403,83 @@ describe('portfolio integrates hard cap + capture metrics', () => {
     expect(portfolio.getFillCapStore().getPortfolioCap15m()).toBe(8)
   })
 })
+
+describe('U3.2.6 applyFill still refuses new long at mid≤0.50', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', {
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('buy_yes at mid 0.45 with flat inv is refused', () => {
+    const eng = new PaperMmEngine()
+    eng.setConfig(
+      clampConfig({
+        ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.5,
+        fillCooldownMs: 0,
+        maxFillsPerMinute: 60,
+        maxFillsPerMarketPer15m: 60,
+        fvQuoting: false,
+        useLiveBook: false,
+        applyFees: false,
+      }),
+    )
+    eng.setMarket(
+      mk({
+        ticker: 'BTC-CURB',
+        asset: 'BTC',
+        midYes: 0.45,
+        yesBid: 0.43,
+        yesAsk: 0.47,
+        minutesRemaining: 8,
+      }),
+    )
+    eng.start()
+    const fill = applyFill(eng)
+    fill('buy_yes', 0.43, 1, 0.45, false, 'book_depth', false)
+    const snap = eng.getState().snapshot
+    expect(snap.inventory).toBe(0)
+    expect(snap.fillCount).toBe(0)
+    eng.stop()
+  })
+
+  it('buy_yes cover while short at mid 0.45 still allowed', () => {
+    const eng = new PaperMmEngine()
+    eng.setConfig(
+      clampConfig({
+        ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.5,
+        fillCooldownMs: 0,
+        maxFillsPerMinute: 60,
+        maxFillsPerMarketPer15m: 60,
+        fvQuoting: false,
+        useLiveBook: false,
+        applyFees: false,
+        minCloseProfitCents: 0,
+        minChurnCaptureCents: 0,
+      }),
+    )
+    eng.setMarket(
+      mk({
+        ticker: 'BTC-COVER',
+        asset: 'BTC',
+        midYes: 0.45,
+        yesBid: 0.43,
+        yesAsk: 0.47,
+        minutesRemaining: 8,
+      }),
+    )
+    eng.start()
+    eng.seedInventory(-1, 0.55)
+    const fill = applyFill(eng)
+    fill('buy_yes', 0.43, 1, 0.45, false, 'book_depth', false)
+    expect(eng.getState().snapshot.inventory).toBe(0)
+    eng.stop()
+  })
+})
+

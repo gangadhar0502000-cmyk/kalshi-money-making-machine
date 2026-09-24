@@ -18,6 +18,7 @@ import {
   U323_NO_LATE_OPENS,
   U324_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
+  U326_HOUSE_SOFT_EXIT,
   DEFAULT_LONG_OPEN_MIN_MID,
   DEFAULT_NO_OPEN_MINUTES,
   aggressiveFlattenPrices,
@@ -33,6 +34,7 @@ export {
   U323_NO_LATE_OPENS,
   U324_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
+  U326_HOUSE_SOFT_EXIT,
   DEFAULT_LONG_OPEN_MIN_MID,
   DEFAULT_NO_OPEN_MINUTES,
   toHouseFillTag,
@@ -237,7 +239,7 @@ export interface DecisionPolicyResult {
   unwindActive: boolean
   edgePersist: EdgePersistState
   stuckUnwind: StuckUnwindState
-  /** Plain tags: house_mid / open / flatten / blackout / blackout_flatten — not S1–S5. */
+  /** Plain tags: house_mid / house_soft_exit / flatten / blackout / blackout_flatten — not S1–S5. */
   bidScenario?: string
   askScenario?: string
   activeScenario?: string
@@ -486,7 +488,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   let askActive = arms.askActive
   let bidReason = arms.bidReason
   let askReason = arms.askReason
-  const unwindActive = arms.unwindActive
+  let unwindActive = arms.unwindActive
   let tag: HouseTag = forceBlackoutFlatten ? 'blackout_flatten' : arms.tag
   if (tag === 'open') tag = 'house_mid'
   if (forceBlackoutFlatten) {
@@ -502,9 +504,29 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     askReason = U32_HOUSE_MID
   }
 
-  // U3.2.1: hardFlat / blackout_flatten → price exit through the touch so L2 can fill.
-  // Soft reduce band (hardFlat < τ ≤ noOpen): maker reduce-only — do NOT force taker.
-  const inHardFlatten = forceBlackoutFlatten || mins <= hardFlat
+  const mid = input.mid
+  const inv = input.inventory
+  const minLong =
+    Number.isFinite(cfg.longOpenMinMid) && cfg.longOpenMinMid > 0
+      ? cfg.longOpenMinMid
+      : DEFAULT_LONG_OPEN_MIN_MID
+  // U3.2.6: if you would not *open* a long at this mid, do not *hold* one.
+  // Soft-exit when inv>0 && mid≤longOpenMinMid even if τ > hardFlatMinutes.
+  // Leave blackout_flatten / hardFlat (τ≤hardFlat) tags alone — they already hit-touch.
+  const softExitLong =
+    inv > 0 && mid <= minLong && !forceBlackoutFlatten && mins > hardFlat
+  if (softExitLong) {
+    bidActive = false
+    askActive = true
+    bidReason = 'house soft-exit: no new longs'
+    askReason = U326_HOUSE_SOFT_EXIT
+    tag = 'house_soft_exit'
+    unwindActive = true
+  }
+
+  // U3.2.1 / U3.2.6: hardFlat / blackout_flatten / soft-exit → price exit through touch.
+  // Soft reduce band (hardFlat < τ ≤ noOpen) without soft-exit: maker reduce-only.
+  const inHardFlatten = forceBlackoutFlatten || mins <= hardFlat || softExitLong
   if (unwindActive && isFlattenHouseTag(tag) && inHardFlatten) {
     const flatPx = aggressiveFlattenPrices({
       inventory: input.inventory,
@@ -526,8 +548,6 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   }
 
   // U3.1.1 symmetric extreme-mid: refuse opens; keep reduce/flatten side.
-  const mid = input.mid
-  const inv = input.inventory
   {
     const atLow = mid <= cfg.toxicMidLow
     const atHigh = mid >= cfg.toxicMidHigh
@@ -549,15 +569,10 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
   }
 
   // U3.2.5: curb NEW long opens when mid ≤ longOpenMinMid (default 0.50; shorts / covers OK)
-  {
-    const minLong =
-      Number.isFinite(cfg.longOpenMinMid) && cfg.longOpenMinMid > 0
-        ? cfg.longOpenMinMid
-        : DEFAULT_LONG_OPEN_MIN_MID
-    if (mid <= minLong && bidActive && inv >= 0 && !unwindActive) {
-      bidActive = false
-      bidReason = U323_LONG_OPEN_CURB
-    }
+  // Soft-exit path already set unwindActive — skip so we do not overwrite soft-exit reason.
+  if (mid <= minLong && bidActive && inv >= 0 && !unwindActive) {
+    bidActive = false
+    bidReason = U323_LONG_OPEN_CURB
   }
 
   if (input.now < input.toxicBidPullUntil && bidActive) {

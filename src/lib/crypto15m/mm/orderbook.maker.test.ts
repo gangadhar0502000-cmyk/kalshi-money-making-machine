@@ -178,13 +178,14 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
 
   it('unwind long joins ask (maker), never crosses bestBid', () => {
     const d = decideQuoteSides({
-      mid: 0.5,
+      // mid > longOpenMinMid so U3.2.6 soft-exit does not force hit-touch
+      mid: 0.6,
       fairValue: null,
       edgeCents: null,
       inventory: 10,
-      avgEntry: 0.5,
-      bookBestBid: 0.48,
-      bookBestAsk: 0.52,
+      avgEntry: 0.6,
+      bookBestBid: 0.58,
+      bookBestAsk: 0.62,
       minutesRemaining: 8,
       running: true,
       settled: false,
@@ -231,7 +232,7 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
     expect(d.centerMode).toBe('mid')
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(true)
-    expect(d.yesAsk).toBeGreaterThanOrEqual(0.52 - 1e-9)
+    expect(d.yesAsk).toBeGreaterThanOrEqual(0.62 - 1e-9)
     expect(d.yesAsk).toBeGreaterThan(d.yesBid)
   })
 })

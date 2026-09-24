@@ -596,6 +596,9 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                     hardFlatMinutes: draft.hardFlatMinutes ?? 2,
                     quoteClampEpsilon: draft.quoteClampEpsilon ?? 0.01,
                     tauSkewAccel: draft.tauSkewAccel ?? 1,
+                    // U3.2.6: pin 50¢ curb every Start — do not inherit persisted 0.40
+                    longOpenMinMid: 0.5,
+                    noOpenMinutes: draft.noOpenMinutes ?? 4,
                   }
                   setDraft(startCfg)
                   if (multiBook) {

@@ -272,6 +272,14 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Keeps U3.2.4 `noOpenMinutes=4`, `hardFlatMinutes=2`, `house_cover` tags, disk journal, rules archive.
 - Paper-only · read-only · never places live orders.
 
+## U3.2.6 — force longOpenMinMid 0.50 on UI + soft-exit longs when mid ≤50¢
+
+- **Evidence (U3.2.5 session ~8:14pm CT):** 28 fills, −$1.26. UI Start loose skipped migrate; `presetsForMode` omitted `longOpenMinMid` → persisted **0.40** stayed live. Longs opened >50¢ then bled to ~1–7¢ at hardFlat.
+- **Migrate:** always (loose + strict) lift `longOpenMinMid` to ≥ **0.50** when missing or saved < 0.50.
+- **`presetsForMode` + Start:** include / pin `longOpenMinMid: 0.5` so UI cannot drift.
+- **Soft-exit:** `inv > 0` && `mid ≤ longOpenMinMid` → hit-touch sell, tag **`house_soft_exit`**, even when `τ > hardFlatMinutes`. Flat curb unchanged; covers/shorts OK.
+- Paper-only · read-only · never places live orders. **Reset + Start** after pull.
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

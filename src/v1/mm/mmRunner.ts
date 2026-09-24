@@ -405,6 +405,8 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           noOpenMinutes: 4,
           quoteClampEpsilon: 0.01,
           tauSkewAccel: 1,
+          // U3.2.6: pin 50¢ curb every Start — do not inherit persisted 0.40
+          longOpenMinMid: 0.5,
         })
         portfolio.syncMarketUniverse(markets)
         portfolio.start()

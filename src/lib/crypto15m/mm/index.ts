@@ -117,6 +117,7 @@ export {
   U32_RANK_LIQUIDITY,
   U321_STUCK_NO_BID,
   U321_STUCK_NO_ASK,
+  U326_HOUSE_SOFT_EXIT,
   isFlattenHouseTag,
   aggressiveFlattenPrices,
   type HouseTag,

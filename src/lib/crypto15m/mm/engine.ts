@@ -48,6 +48,7 @@ import {
   U321_STUCK_NO_BID,
   U321_STUCK_NO_ASK,
   U323_LONG_OPEN_CURB,
+  U326_HOUSE_SOFT_EXIT,
   U323_NO_LATE_OPENS,
   U324_NO_LATE_OPENS,
   DEFAULT_LONG_OPEN_MIN_MID,
@@ -1178,6 +1179,16 @@ export class PaperMmEngine {
             decision.bidReason) ||
           null
         this.message = stuck || 'U3.1: flatten — exit only'
+      } else if (decision.active && decision.activeScenario === 'house_soft_exit') {
+        const stuck =
+          (typeof decision.askReason === 'string' &&
+            decision.askReason.startsWith('U3.2.1:') &&
+            decision.askReason) ||
+          (typeof decision.bidReason === 'string' &&
+            decision.bidReason.startsWith('U3.2.1:') &&
+            decision.bidReason) ||
+          null
+        this.message = stuck || U326_HOUSE_SOFT_EXIT
       } else if (decision.active && decision.activeScenario === 'house_mid') {
         this.message = U32_HOUSE_MID
       } else if (

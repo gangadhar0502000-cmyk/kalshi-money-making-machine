@@ -28,6 +28,7 @@ export type HouseTag =
   | 'house_mid'
   | 'house_cover'
   | 'house_close'
+  | 'house_soft_exit'
 
 /** @deprecated U3.2.4 parks flat via U324_NO_LATE_OPENS (τ ≤ noOpenMinutes). Kept for digests. */
 export const U323_NO_LATE_OPENS = 'U3.2.3: no new opens — hardFlat τ'
@@ -35,6 +36,8 @@ export const U323_NO_LATE_OPENS = 'U3.2.3: no new opens — hardFlat τ'
 export const U324_NO_LATE_OPENS = 'U3.2.4: no new opens — τ≤4m'
 /** U3.2.3: refuse NEW long opens when mid is in the bleed band. */
 export const U323_LONG_OPEN_CURB = 'U3.2.5: long open curb — mid ≤50¢'
+/** U3.2.6: exit held longs when mid ≤ longOpenMinMid (would not open here). */
+export const U326_HOUSE_SOFT_EXIT = 'U3.2.6: soft-exit long — mid ≤50¢'
 /** Default floor mid for NEW long YES opens (U3.2.5: 0.50; was 0.40). */
 export const DEFAULT_LONG_OPEN_MIN_MID = 0.5
 /** Default minutes: park flat / reduce-only opens (U3.2.4). */
@@ -150,9 +153,13 @@ export const U321_STUCK_NO_BID = 'U3.2.1: stuck inventory, no bid'
 /** U3.2.1: short flatten but book has no YES ask to lift. */
 export const U321_STUCK_NO_ASK = 'U3.2.1: stuck inventory, no ask'
 
-/** True for hard-τ / blackout inventory exit tags. */
+/** True for hard-τ / blackout / soft-exit inventory exit tags. */
 export function isFlattenHouseTag(tag: string | null | undefined): boolean {
-  return tag === 'flatten' || tag === 'blackout_flatten'
+  return (
+    tag === 'flatten' ||
+    tag === 'blackout_flatten' ||
+    tag === 'house_soft_exit'
+  )
 }
 
 /**
