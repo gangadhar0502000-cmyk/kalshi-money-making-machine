@@ -12,6 +12,7 @@ Live runtime journals under `data/paper-mm/` (ui-journal.jsonl, journal.jsonl) m
 | `20260923-mac-u324-midrun/` | ~7:40–8:05 CT Sep 23 2026 | Mac U3.2.4 mid-run dig — 34 fills, +$0.014 FIFO/UI; 0 late≤4m, 0 low-mid longs; cover still on; red feel = flatten-long bleed mid>40¢ (ZEC/BTC) not noOpen=4. Report + fills CSV + dig-stats. |
 | `20260923-mac-u325-midrun/` | ~20:14–20:47 CT Sep 23 2026 | Mac U3.2.5 midrun — 28 fills, −$1.26; runtime curb still 0.40 (migrate skip + Start omit); 4 longs mid in (0.40,0.50]; soft-exit before hardFlat next. REPORT.md + journal + meta. |
 | `20260923-mac-u326-3rot/` | ~44.4 min / 3×15m rotations Sep 23 2026 | Mac U3.2.6 paper session — 36 fills, +$5.202 realized, 17W/1L; 0 new longs with mid≤0.50; realism flag on px≈0 cover/flatten buys at mid≈0.98–0.99. |
+| `20260924-mac-u328-midrun/` | ~22:26 CT Sep 23 → 15:04 CT Sep 24 2026 | Mac U3.2.8 mid-run urgent archive — **83 session fills** / 319 cumulative in journal; CASH $97.44, REALIZED −$1.2675; HEAD 1b14132; live journals left intact. |
 
 PAPER ONLY.
 
@@ -22,3 +23,12 @@ PAPER ONLY.
 - UI claim at dig: ~35m run, CASH $98.67, REALIZED -$1.26, MARK -$1.24, 28 fills
 - Active books claimed: LONG ETH @ mid 25¢, LONG BTC @ mid 34¢
 - Purpose: diagnose how longs opened under curb; round-trip attribution; U3.2.6 slice
+
+
+## 20260924-mac-u328-midrun (U3.2.8 mid-run urgent archive)
+- Copied: 2026-09-24 ~15:05 CT from Mac machine 87ba847f (read-only copy; UI NOT reset)
+- HEAD on Mac: 1b14132 (U3.2.8 usable strict L2)
+- sessionStart (meta): 2026-09-24T03:26:03.793Z ≈ 2026-09-23 22:26:03 CT
+- UI claim at archive: fills=83; CASH $97.44; REALIZED −$1.2675; inventory=1
+- Journal: 262680 bytes / 755 lines; session fills 83 vs cumulative fills 319 in file
+- Purpose: urgent append-only pull — user said data being lost
