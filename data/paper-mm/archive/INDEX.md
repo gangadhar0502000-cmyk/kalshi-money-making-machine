@@ -11,6 +11,7 @@ Live runtime journals under `data/paper-mm/` (ui-journal.jsonl, journal.jsonl) m
 | `20260923-mac-u323-hr1/` | ~6:26–7:28 CT Sep 23 2026 | Mac U3.2.3 hour1 dig — 52 fills, +$2.981 UI/FIFO; 0 late≤2m, 0 low-mid longs, 0 S3 (house_cover). COMPARE-u322-vs-u323.md + fills CSV + report. |
 | `20260923-mac-u324-midrun/` | ~7:40–8:05 CT Sep 23 2026 | Mac U3.2.4 mid-run dig — 34 fills, +$0.014 FIFO/UI; 0 late≤4m, 0 low-mid longs; cover still on; red feel = flatten-long bleed mid>40¢ (ZEC/BTC) not noOpen=4. Report + fills CSV + dig-stats. |
 | `20260923-mac-u325-midrun/` | ~20:14–20:47 CT Sep 23 2026 | Mac U3.2.5 midrun — 28 fills, −$1.26; runtime curb still 0.40 (migrate skip + Start omit); 4 longs mid in (0.40,0.50]; soft-exit before hardFlat next. REPORT.md + journal + meta. |
+| `20260923-mac-u326-3rot/` | ~44.4 min / 3×15m rotations Sep 23 2026 | Mac U3.2.6 paper session — 36 fills, +$5.202 realized, 17W/1L; 0 new longs with mid≤0.50; realism flag on px≈0 cover/flatten buys at mid≈0.98–0.99. |
 
 PAPER ONLY.
 
