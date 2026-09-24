@@ -280,6 +280,14 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Soft-exit:** `inv > 0` && `mid ≤ longOpenMinMid` → hit-touch sell, tag **`house_soft_exit`**, even when `τ > hardFlatMinutes`. Flat curb unchanged; covers/shorts OK.
 - Paper-only · read-only · never places live orders. **Reset + Start** after pull.
 
+## U3.2.7 — kill fake/soft paper fills (strict L2 Start + absurd $0 refuse)
+
+- **Evidence (U3.2.6 3×15m dig):** curb + soft_exit OK, but loose Start (`allowMidWalk` / taker) minted **buy_yes @ price=0** covers while mid≈0.98–0.99 (~+$2.24 fake). **Do not treat +$5.20 as live edge.**
+- **UI Start = STRICT L2:** `setStrictRealism(true)` + `presetsForMode(true)`; `allowMidWalk: false`; `fillMidFallback: false`; `useLiveBook: true`. Keep `longOpenMinMid: 0.5`, `noOpenMinutes: 4`, `hardFlatMinutes: 2`.
+- **`applyFill` hard refuse:** non-settlement fills must sit near the relevant touch; refuse **price ≈ 0** when mid/touch ≥ 50¢. Strip `U3.2.7: ABSURD FILL REFUSED`.
+- Paper-only · read-only · never places live orders. **Reset + Start** after pull.
+
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

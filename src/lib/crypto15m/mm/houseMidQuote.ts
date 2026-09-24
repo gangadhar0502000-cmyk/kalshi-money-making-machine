@@ -212,6 +212,59 @@ export function aggressiveFlattenPrices(input: {
   return { yesBid, yesAsk, stuckReason: null }
 }
 
+/** U3.2.7 fail-loud strip — absurd / soft fill prices. */
+export const U327_ABSURD_FILL = 'U3.2.7: ABSURD FILL REFUSED'
+/** Max |fill − relevant touch| (dollars) before refuse. */
+export const ABSURD_FILL_TOUCH_EPS = 0.05
+/** Near-zero fill threshold (scam $0 covers). */
+export const ABSURD_FILL_NEAR_ZERO = 0.02
+/** Book "high" floor — refuse ~$0 when mid/touch ≥ this. */
+export const ABSURD_FILL_HIGH_BOOK = 0.5
+
+/**
+ * U3.2.7 — belt-and-suspenders refuse for non-settlement fills.
+ * Returns fail-loud message or null if the fill price is plausible.
+ * buy ≈ ask (taker) / bid (maker); sell ≈ bid (taker) / ask (maker).
+ * Always refuses price ≈ 0 when mid or touch ≥ 50¢ (U3.2.6 dig fake covers).
+ */
+export function absurdNonSettlementFillReason(input: {
+  side: 'buy_yes' | 'sell_yes'
+  price: number
+  mid: number
+  taker: boolean
+  yesBid: number | null | undefined
+  yesAsk: number | null | undefined
+}): string | null {
+  const { side, price, mid } = input
+  if (!Number.isFinite(price)) {
+    return `${U327_ABSURD_FILL} ${side} @ non-finite — fail-loud · no soft fills`
+  }
+  const bid =
+    input.yesBid != null && Number.isFinite(input.yesBid) ? Number(input.yesBid) : null
+  const ask =
+    input.yesAsk != null && Number.isFinite(input.yesAsk) ? Number(input.yesAsk) : null
+  const touchRef =
+    Number.isFinite(mid) && mid > 0
+      ? mid
+      : bid != null && ask != null
+        ? (bid + ask) / 2
+        : bid ?? ask
+
+  // Only the U3.2.6 dig scam: ~$0 fill while book still priced ≥50¢.
+  // Do not tight-match every maker fill to best touch (breaks real L2 depth fills).
+  if (
+    price <= ABSURD_FILL_NEAR_ZERO &&
+    touchRef != null &&
+    touchRef >= ABSURD_FILL_HIGH_BOOK
+  ) {
+    return (
+      `${U327_ABSURD_FILL} ${side} @ $${price.toFixed(4)} — ` +
+      `book mid/touch ≈ $${touchRef.toFixed(4)} (≥50¢); no soft $0 fills`
+    )
+  }
+  return null
+}
+
 /**
  * Mid-quality score for ranking (higher = better): room from toxic extremes.
  * Not |FV−mid|.

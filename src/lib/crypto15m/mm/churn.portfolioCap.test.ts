@@ -483,3 +483,90 @@ describe('U3.2.6 applyFill still refuses new long at mid≤0.50', () => {
   })
 })
 
+
+describe('U3.2.7 applyFill refuses absurd $0 fills', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', {
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('refuses buy_yes @ 0 with mid≈0.99 (scam cover pattern)', () => {
+    const eng = new PaperMmEngine()
+    eng.setConfig(
+      clampConfig({
+        ...STRICT_PAPER_MM_CONFIG,
+        fillCooldownMs: 0,
+        maxFillsPerMinute: 60,
+        maxFillsPerMarketPer15m: 60,
+        fvQuoting: false,
+        useLiveBook: false,
+        applyFees: false,
+        minCloseProfitCents: 0,
+        minChurnCaptureCents: 0,
+      }),
+    )
+    eng.setMarket(
+      mk({
+        ticker: 'NEAR-SCAM0',
+        asset: 'NEAR',
+        midYes: 0.98,
+        yesBid: 0.97,
+        yesAsk: 0.99,
+        minutesRemaining: 8,
+      }),
+    )
+    eng.start()
+    eng.seedInventory(-1, 0.55)
+    const fill = applyFill(eng)
+    fill('buy_yes', 0.01, 1, 0.98, false, 'book_depth', false)
+    const st = eng.getState()
+    expect(st.snapshot.inventory).toBe(-1)
+    expect(st.fills.length).toBe(0)
+    expect(st.snapshot.message ?? '').toMatch(/U3\.2\.7: ABSURD FILL REFUSED/)
+    eng.stop()
+  })
+
+  it('allows maker buy_yes near bid with mid≈0.60 (non-absurd)', () => {
+    const eng = new PaperMmEngine()
+    eng.setConfig(
+      clampConfig({
+        ...STRICT_PAPER_MM_CONFIG,
+        fillCooldownMs: 0,
+        maxFillsPerMinute: 60,
+        maxFillsPerMarketPer15m: 60,
+        fvQuoting: false,
+        useLiveBook: false,
+        applyFees: false,
+        longOpenMinMid: 0.5,
+        openMinEdgeCents: 0,
+        minEdgeCents: 0,
+        quotingEnabled: true,
+      }),
+    )
+    eng.setMarket(
+      mk({
+        ticker: 'SOL-OK',
+        asset: 'SOL',
+        midYes: 0.6,
+        yesBid: 0.59,
+        yesAsk: 0.61,
+        minutesRemaining: 8,
+      }),
+    )
+    eng.start()
+    // Seed book touch so absurd/touch refs match maker bid fill
+    const engAny = eng as unknown as { bookBestBid: number; bookBestAsk: number }
+    engAny.bookBestBid = 0.59
+    engAny.bookBestAsk = 0.61
+    const fill = applyFill(eng)
+    fill('buy_yes', 0.59, 1, 0.6, false, 'book_depth', false)
+    expect(eng.getState().snapshot.inventory).toBe(1)
+    expect(eng.getState().fills.length).toBe(1)
+    eng.stop()
+  })
+})

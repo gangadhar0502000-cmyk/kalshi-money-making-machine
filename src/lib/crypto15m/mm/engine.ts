@@ -49,6 +49,7 @@ import {
   U321_STUCK_NO_ASK,
   U323_LONG_OPEN_CURB,
   U326_HOUSE_SOFT_EXIT,
+  absurdNonSettlementFillReason,
   U323_NO_LATE_OPENS,
   U324_NO_LATE_OPENS,
   DEFAULT_LONG_OPEN_MIN_MID,
@@ -1338,6 +1339,28 @@ export class PaperMmEngine {
       console.warn(`[paper-mm] reject fill with non-dollar price price=${priceRaw} mid=${midRaw}`)
       this.unitsWarning = `Rejected fill with cents-like price (price=${priceRaw}, mid=${midRaw})`
       return
+    }
+
+    // U3.2.7: hard refuse absurd fill prices (belt-and-suspenders vs soft/taker $0 covers).
+    // Settlement may still clear at 0/1; non-settlement must sit near the relevant touch.
+    if (reason !== 'settlement') {
+      const touchBid = this.bookBestBid ?? this.quote?.yesBid ?? null
+      const touchAsk = this.bookBestAsk ?? this.quote?.yesAsk ?? null
+      const absurd = absurdNonSettlementFillReason({
+        side,
+        price,
+        mid,
+        taker,
+        yesBid: touchBid,
+        yesAsk: touchAsk,
+      })
+      if (absurd) {
+        this.midCrossRejectCount += 1
+        this.rebuildQuote(true)
+        // Set after requote — rebuildQuote overwrites strip with house-mid status.
+        this.message = `${absurd}. Read-only · never places trades.`
+        return
+      }
     }
 
     // Enforce per-ticker fill caps immediately before accepting any non-settlement fill.

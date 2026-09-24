@@ -328,19 +328,25 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
     return { store, portfolio, runner, markets, feed }
   }
 
-  it('Start with 2+ feed markets → loose multi portfolio + aggregate stats', () => {
+  it('Start with 2+ feed markets → strict L2 multi portfolio + aggregate stats', () => {
     const { store, portfolio, runner, markets } = pair()
 
     runner.start(markets[0]!.ticker)
 
-    expect(portfolio.setStrictRealism).toHaveBeenCalledWith(false)
+    expect(portfolio.setStrictRealism).toHaveBeenCalledWith(true)
     expect(portfolio.setConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         multiBook: true,
         maxActiveMarkets: MM_MAX_ACTIVE_BOOKS,
-        strictRealism: false,
+        strictRealism: true,
+        allowMidWalk: false,
+        fillMidFallback: false,
+        useLiveBook: true,
         bookPollMs: 1000,
         quotingEnabled: true,
+        longOpenMinMid: 0.5,
+        noOpenMinutes: 4,
+        hardFlatMinutes: 2,
       }),
     )
     expect(portfolio.syncMarketUniverse).toHaveBeenCalled()

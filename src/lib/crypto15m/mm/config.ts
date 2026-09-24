@@ -433,8 +433,8 @@ function clamp(n: number, lo: number, hi: number): number {
  * Migrate persisted / older sessions onto current STRICT scarcity defaults.
  * When strictRealism: clamp maxFillsPerMarketPer15m ≤ 4 and maxFillsPerMinute ≤ 1,
  * and ensure minChurnCaptureCents ≥ STRICT default when missing/zero from older saves.
- * U3.2.6: always (loose AND strict) lift longOpenMinMid to ≥ STRICT 0.50 so UI Start
- * cannot leave a persisted 0.40 curb live under loose presets.
+ * U3.2.6: always (loose AND strict) lift longOpenMinMid to ≥ STRICT 0.50 so a
+ * persisted 0.40 curb cannot stick. U3.2.7 UI Start uses strictRealism:true.
  */
 export function migratePersistedScarcityConfig(
   partial: Partial<PaperMmConfig>,
@@ -443,7 +443,7 @@ export function migratePersistedScarcityConfig(
     partial.strictRealism !== undefined
       ? Boolean(partial.strictRealism)
       : STRICT_PAPER_MM_CONFIG.strictRealism
-  // U3.2.6: lift longOpenMinMid even in loose — UI Start uses strictRealism:false.
+  // U3.2.6: lift longOpenMinMid even in loose (legacy / toggle); U3.2.7 Start is strict.
   const liftLongOpen = (out: Partial<PaperMmConfig>) => {
     const floor = STRICT_PAPER_MM_CONFIG.longOpenMinMid
     if (partial.longOpenMinMid == null || !Number.isFinite(partial.longOpenMinMid)) {

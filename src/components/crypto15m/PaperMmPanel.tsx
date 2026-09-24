@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Crypto15mMarket } from '../../types/crypto15m'
 import { formatCents, formatDollars, formatRelativeTime } from '../../lib/format'
 import { isAbortOnlyError } from '../../lib/crypto15m/labRefresh'
-import { type PaperMmConfig } from '../../lib/crypto15m/mm/config'
+import { presetsForMode, type PaperMmConfig } from '../../lib/crypto15m/mm/config'
 import { paperMmEngine } from '../../lib/crypto15m/mm/engine'
 import { paperMmPortfolio } from '../../lib/crypto15m/mm/portfolio'
 import { formatPnlDual, isValidQuoteMid } from '../../lib/crypto15m/mm/prices'
@@ -588,8 +588,14 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
+                  // U3.2.7: Start always STRICT L2 — ignore draft loose / mid_walk / taker soft path
                   const startCfg = {
                     ...draft,
+                    ...presetsForMode(true),
+                    strictRealism: true,
+                    useLiveBook: true,
+                    allowMidWalk: false,
+                    fillMidFallback: false,
                     quotingEnabled: true,
                     fvQuoting: true,
                     blackoutMinutes: draft.blackoutMinutes ?? 0.75,
@@ -602,10 +608,12 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                   }
                   setDraft(startCfg)
                   if (multiBook) {
+                    paperMmPortfolio.setStrictRealism(true)
                     paperMmPortfolio.setConfig(startCfg)
                     paperMmPortfolio.syncMarketUniverse(mmMarkets)
                     paperMmPortfolio.start()
                   } else {
+                    paperMmEngine.setStrictRealism(true)
                     paperMmEngine.setConfig(startCfg)
                     paperMmEngine.start()
                   }

@@ -18,6 +18,8 @@ import {
   U323_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
   DEFAULT_LONG_OPEN_MIN_MID,
+  absurdNonSettlementFillReason,
+  U327_ABSURD_FILL,
 } from './houseMidQuote'
 
 describe('houseMidQuotePrices', () => {
@@ -126,5 +128,33 @@ describe('U3.2.3 house fill tags', () => {
     expect(U323_NO_LATE_OPENS).toMatch(/hardFlat/)
     expect(U323_LONG_OPEN_CURB).toMatch(/U3\.2\.5.*50¢|long open curb/)
     expect(DEFAULT_LONG_OPEN_MIN_MID).toBe(0.5)
+  })
+})
+
+describe('U3.2.7 absurdNonSettlementFillReason', () => {
+  it('refuses buy @ 0 when mid ~0.99', () => {
+    const msg = absurdNonSettlementFillReason({
+      side: 'buy_yes',
+      price: 0,
+      mid: 0.99,
+      taker: true,
+      yesBid: 0.97,
+      yesAsk: 0.99,
+    })
+    expect(msg).toMatch(/U3\.2\.7: ABSURD FILL REFUSED/)
+    expect(msg).toContain(U327_ABSURD_FILL)
+  })
+
+  it('allows taker buy near ask', () => {
+    expect(
+      absurdNonSettlementFillReason({
+        side: 'buy_yes',
+        price: 0.99,
+        mid: 0.98,
+        taker: true,
+        yesBid: 0.97,
+        yesAsk: 0.99,
+      }),
+    ).toBeNull()
   })
 })

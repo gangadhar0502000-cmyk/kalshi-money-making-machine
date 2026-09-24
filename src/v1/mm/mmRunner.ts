@@ -1,6 +1,6 @@
 /**
- * U2.4 / U2.5 — Bind PaperMmPortfolio (loose multi-book) to the Start/Stop/Reset shell.
- * Default Start → multi-book + strictRealism: false (LOOSE presets).
+ * U2.4 / U2.5 — Bind PaperMmPortfolio (multi-book) to the Start/Stop/Reset shell.
+ * U3.2.7: Default Start → multi-book + strictRealism: true (STRICT L2; no soft fills).
  * U2.5: map portfolio books → MmBookRow[] for Active books panel.
  * Reuses existing PaperMmPortfolio / engines — U3.2 house mid quotes — no S* playbook / no FV mismatch opens.
  * U2.2/U2.3 helpers remain for residual single-engine / error mapping.
@@ -387,13 +387,13 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
       ensurePortfolioSub()
 
       try {
-        // Loose multi-book (not strict/tight). Match PaperMmPanel: setStrict then setConfig.
-        portfolio.setStrictRealism(false)
+        // U3.2.7: STRICT L2 multi-book — no mid_walk / taker soft fills (U3.2.6 dig $0 covers).
+        portfolio.setStrictRealism(true)
         portfolio.setConfig({
           multiBook: true,
           maxActiveMarkets: MM_MAX_ACTIVE_BOOKS,
-          ...presetsForMode(false),
-          strictRealism: false,
+          ...presetsForMode(true),
+          strictRealism: true,
           useLiveBook: true,
           // U2.10: slightly slower L2 polls under multi so coalesce flush + feed share connections
           bookPollMs: 1000,
@@ -407,6 +407,9 @@ export function createMmRunner(deps: MmRunnerDeps = {}): MmRunner {
           tauSkewAccel: 1,
           // U3.2.6: pin 50¢ curb every Start — do not inherit persisted 0.40
           longOpenMinMid: 0.5,
+          // U3.2.7 belt: explicit strict fill knobs (also from presetsForMode(true))
+          allowMidWalk: false,
+          fillMidFallback: false,
         })
         portfolio.syncMarketUniverse(markets)
         portfolio.start()
