@@ -281,6 +281,22 @@ describe('D: migrate persisted scarcity to STRICT defaults', () => {
 })
 
 
+describe('U3.2.8 migrate snaps depth/touch to STRICT 3/2', () => {
+  it('strict + saved 8/4 → 3/2; soft paths stay off', () => {
+    const migrated = migratePersistedScarcityConfig({
+      strictRealism: true,
+      minBookDepthConsumed: 8,
+      minTouchPolls: 4,
+      allowMidWalk: true,
+      fillMidFallback: true,
+    })
+    expect(migrated.minBookDepthConsumed).toBe(3)
+    expect(migrated.minTouchPolls).toBe(2)
+    expect(migrated.allowMidWalk).toBe(false)
+    expect(migrated.fillMidFallback).toBe(false)
+  })
+})
+
 describe('U3.2.6 migrate lifts longOpenMinMid even in loose', () => {
   it('loose + persisted longOpenMinMid 0.40 → becomes 0.50', () => {
     const migrated = migratePersistedScarcityConfig({

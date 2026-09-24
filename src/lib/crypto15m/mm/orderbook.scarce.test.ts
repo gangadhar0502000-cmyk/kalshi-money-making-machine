@@ -84,12 +84,12 @@ describe('strictRealism scarce book fills', () => {
     for (let i = 0; i < 100; i++) {
       const bestBid = 0.48
       const bestAsk = 0.52
-      // Mild flicker: ±0..4 contracts — well below minBookDepthConsumed=8
+      // Mild flicker: ±0..2 contracts — well below minBookDepthConsumed=3 (U3.2.8)
       const next = book({
         bestBid,
         bestAsk,
-        yesBids: [{ price: bestBid, size: 40 - (i % 5) }],
-        yesAsks: [{ price: bestAsk, size: 40 - ((i + 2) % 4) }],
+        yesBids: [{ price: bestBid, size: 40 - (i % 3) }],
+        yesAsks: [{ price: bestAsk, size: 40 - ((i + 1) % 3) }],
         t: now0 + i * 750,
       })
       const signals = detectBookFills(
@@ -168,25 +168,90 @@ describe('strictRealism scarce book fills', () => {
     expect(walk.bidQueueAhead).toBe(0)
     prev = next
 
-    // Depth arrives behind us; build touch polls (strict needs 4). No fill yet.
+    // Depth arrives behind us; build touch polls (U3.2.8 strict needs 2). No fill yet.
     let got = 0
-    for (let i = 2; i <= 4; i++) {
+    for (let i = 2; i <= 2; i++) {
       next = depthAt(i, 100)
       got += detectBookFills(prev, next, q, 0, 10, walk, strictOpts(i)).length
       prev = next
     }
     expect(got).toBe(0)
     expect(walk.bidQueueAhead).toBe(0)
-    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(3)
+    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(1)
 
-    // Large consume at touch with polls satisfied → fill (attributed ≥ minBookDepthConsumed)
-    next = depthAt(5, 20) // consume 80 from 100
-    const sigs = detectBookFills(prev, next, q, 0, 10, walk, strictOpts(5))
-    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(4)
+    // Large consume at touch with polls satisfied → fill (attributed ≥ minBookDepthConsumed=3)
+    next = depthAt(3, 20) // consume 80 from 100
+    const sigs = detectBookFills(prev, next, q, 0, 10, walk, strictOpts(3))
+    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(2)
     expect(sigs).toHaveLength(1)
     expect(sigs[0]!.reason).toBe('book_depth')
     expect(sigs[0]!.side).toBe('buy_yes')
     expect(sigs[0]!.size).toBe(1)
+  })
+
+  it('U3.2.8 depth 3 / touch 2 still refuses mid_walk (pure L2 only)', () => {
+    const walk: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
+    const prev = book({ bestBid: 0.5, bestAsk: 0.54, mid: 0.52 })
+    const next = book({ bestBid: 0.46, bestAsk: 0.5, mid: 0.48 })
+    const signals = detectBookFills(
+      prev,
+      next,
+      { yesBid: 0.5, yesAsk: 0.54, size: 1, active: true },
+      0,
+      10,
+      walk,
+      {
+        allowTakerCross: false,
+        allowMidWalk: false,
+        minBookDepthConsumed: 3,
+        minTouchPolls: 2,
+        midWalkCooldownMs: 20_000,
+        nowMs: Date.now(),
+      },
+    )
+    expect(signals).toEqual([])
+    expect(STRICT_PAPER_MM_CONFIG.allowMidWalk).toBe(false)
+    expect(STRICT_PAPER_MM_CONFIG.fillMidFallback).toBe(false)
+  })
+
+  it('U3.2.8 consume below minBookDepthConsumed=3 does not fill', () => {
+    const walk: DetectBookFillsState = { ...DEFAULT_DETECT_STATE }
+    const bid = 0.48
+    const ask = 0.52
+    const q = { yesBid: bid, yesAsk: ask, size: 1, active: true as const }
+    const depthAt = (t: number, size: number): OrderBookSnapshot => ({
+      ticker: 'KXBTC15M-T',
+      t,
+      yesBids: [{ price: bid, size }],
+      yesAsks: [{ price: ask, size: 100 }],
+      bestBid: bid,
+      bestAsk: ask,
+      mid: (bid + ask) / 2,
+      authenticated: false,
+    })
+    const emptyAt = (t: number): OrderBookSnapshot => ({
+      ticker: 'KXBTC15M-T',
+      t,
+      yesBids: [],
+      yesAsks: [{ price: ask, size: 100 }],
+      bestBid: bid,
+      bestAsk: ask,
+      mid: (bid + ask) / 2,
+      authenticated: false,
+    })
+    detectBookFills(null, emptyAt(0), q, 0, 10, walk, strictOpts(0))
+    let prev = emptyAt(0)
+    let next = emptyAt(1)
+    detectBookFills(prev, next, q, 0, 10, walk, strictOpts(1))
+    prev = next
+    next = depthAt(2, 100)
+    detectBookFills(prev, next, q, 0, 10, walk, strictOpts(2))
+    prev = next
+    // Consume only 2 (< minBookDepthConsumed 3) after touch polls OK
+    next = depthAt(3, 98)
+    const sigs = detectBookFills(prev, next, q, 0, 10, walk, strictOpts(3))
+    expect(walk.bidTouchPolls).toBeGreaterThanOrEqual(2)
+    expect(sigs).toEqual([])
   })
 })
 
@@ -289,9 +354,11 @@ describe('engine cooldown + per-window caps', () => {
 
   it('STRICT defaults expose harsh scarcity knobs', () => {
     expect(STRICT_PAPER_MM_CONFIG.fillCooldownMs).toBeGreaterThanOrEqual(15_000)
-    expect(STRICT_PAPER_MM_CONFIG.minBookDepthConsumed).toBeGreaterThanOrEqual(5)
-    expect(STRICT_PAPER_MM_CONFIG.minTouchPolls).toBeGreaterThanOrEqual(3)
+    // U3.2.8: usable pure-L2 (was 8/4)
+    expect(STRICT_PAPER_MM_CONFIG.minBookDepthConsumed).toBe(3)
+    expect(STRICT_PAPER_MM_CONFIG.minTouchPolls).toBe(2)
     expect(STRICT_PAPER_MM_CONFIG.allowMidWalk).toBe(false)
+    expect(STRICT_PAPER_MM_CONFIG.fillMidFallback).toBe(false)
     expect(STRICT_PAPER_MM_CONFIG.maxFillsPerMinute).toBe(1)
     expect(STRICT_PAPER_MM_CONFIG.maxFillsPerMarketPer15m).toBe(4)
   })

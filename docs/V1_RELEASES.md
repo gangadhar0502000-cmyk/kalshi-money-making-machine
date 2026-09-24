@@ -288,6 +288,17 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - Paper-only · read-only · never places live orders. **Reset + Start** after pull.
 
 
+
+## U3.2.8 — usable strict L2 fills (depth 3 / touch 2) + maker join BBO
+
+- **Problem:** U3.2.7 strict L2 was correct but over-scarce (`minBookDepthConsumed: 8`, `minTouchPolls: 4`) and maker clamp left mid±half quotes **behind** touch → near-zero real book_depth activity.
+- **Knobs:** STRICT `minBookDepthConsumed` **3**, `minTouchPolls` **2**. Still `allowMidWalk: false`, `fillMidFallback: false`, absurd $0 refuse ≥50¢ mid/touch.
+- **Join BBO:** `clampQuotesMakerOnly` joins touch when behind (lift bid / drop ask to BBO; never improve/cross) so L2 queue can burn.
+- **Start / migrate:** pin 3/2 on UI Start; strict migrate snaps older 8/4 → 3/2.
+- Keep house mid, flatten/soft-exit, longOpenMinMid 0.50, disk journal, rules archive. No soft-sim / no S1–S5.
+- Paper-only · read-only · never places live orders. **Reset + Start** after hard refresh.
+
+
 ## Upcoming
 
 - **U2.5+ residual** — optional strict toggle; keyboard nav if needed.

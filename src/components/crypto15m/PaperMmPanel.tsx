@@ -588,7 +588,7 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
-                  // U3.2.7: Start always STRICT L2 — ignore draft loose / mid_walk / taker soft path
+                  // U3.2.8: Start always STRICT L2 — depth 3 / touch 2; no mid_walk / soft path
                   const startCfg = {
                     ...draft,
                     ...presetsForMode(true),
@@ -596,6 +596,8 @@ export function PaperMmPanel({ markets, selectedTicker, onSelect }: Props) {
                     useLiveBook: true,
                     allowMidWalk: false,
                     fillMidFallback: false,
+                    minBookDepthConsumed: 3,
+                    minTouchPolls: 2,
                     quotingEnabled: true,
                     fvQuoting: true,
                     blackoutMinutes: draft.blackoutMinutes ?? 0.75,

@@ -140,12 +140,12 @@ export interface PaperMmConfig {
   /**
    * Minimum contracts of depth that must be consumed at our touch price
    * between consecutive book polls to count as a book_depth fill.
-   * Strict default is high so mild flicker does not print fills.
+   * U3.2.8 STRICT default 3 (was 8) — usable L2 while still blocking mild flicker.
    */
   minBookDepthConsumed: number
   /**
    * Consecutive polls our quote must sit at/inside touch before book_depth
-   * can fire. Raises queue-time cost of getting filled.
+   * can fire. U3.2.8 STRICT default 2 (was 4).
    */
   minTouchPolls: number
   /**
@@ -281,8 +281,8 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   twoSidedEdgeBandCents: 0,
   openingEdgeExtraCents: 0,
   openEdgeAddHalfSpread: false,
-  minBookDepthConsumed: 8,
-  minTouchPolls: 4,
+  minBookDepthConsumed: 3,
+  minTouchPolls: 2,
   allowMidWalk: false,
   maxFillsPerMarketPer15m: 4,
   maxFillsPerMinute: 1,
@@ -435,6 +435,7 @@ function clamp(n: number, lo: number, hi: number): number {
  * and ensure minChurnCaptureCents ≥ STRICT default when missing/zero from older saves.
  * U3.2.6: always (loose AND strict) lift longOpenMinMid to ≥ STRICT 0.50 so a
  * persisted 0.40 curb cannot stick. U3.2.7 UI Start uses strictRealism:true.
+ * U3.2.8: snap older harsh minBookDepthConsumed/minTouchPolls (8/4) down to STRICT (3/2).
  */
 export function migratePersistedScarcityConfig(
   partial: Partial<PaperMmConfig>,
@@ -560,6 +561,25 @@ export function migratePersistedScarcityConfig(
   if (partial.quotingEnabled == null) {
     out.quotingEnabled = STRICT_PAPER_MM_CONFIG.quotingEnabled
   }
+  // U3.2.8: snap older harsh L2 scarcity (8/4) down to usable STRICT (3/2).
+  // Keep custom values that are already ≤ STRICT (more fills) — never raise.
+  const depthRaw =
+    typeof partial.minBookDepthConsumed === 'number' &&
+    Number.isFinite(partial.minBookDepthConsumed)
+      ? partial.minBookDepthConsumed
+      : STRICT_PAPER_MM_CONFIG.minBookDepthConsumed
+  out.minBookDepthConsumed = Math.min(
+    depthRaw,
+    STRICT_PAPER_MM_CONFIG.minBookDepthConsumed,
+  )
+  const touchRaw =
+    typeof partial.minTouchPolls === 'number' && Number.isFinite(partial.minTouchPolls)
+      ? partial.minTouchPolls
+      : STRICT_PAPER_MM_CONFIG.minTouchPolls
+  out.minTouchPolls = Math.min(touchRaw, STRICT_PAPER_MM_CONFIG.minTouchPolls)
+  // Belt: never re-enable soft fill paths on strict sessions.
+  out.allowMidWalk = false
+  out.fillMidFallback = false
   liftLongOpen(out)
   return out
 }

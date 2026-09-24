@@ -236,3 +236,33 @@ describe('clampQuotesMakerOnly / decisionPolicy', () => {
     expect(d.yesAsk).toBeGreaterThan(d.yesBid)
   })
 })
+
+describe('U3.2.8 clampQuotesMakerOnly join BBO when behind', () => {
+  it('lifts bid up to bestBid when desired sits behind', () => {
+    // Desired mid±half behind touch: bid 0.45 < bestBid 0.48
+    const c = clampQuotesMakerOnly(0.45, 0.55, 0.48, 0.52)
+    expect(c.bid).toBeCloseTo(0.48, 5)
+    expect(c.ask).toBeCloseTo(0.52, 5)
+  })
+
+  it('drops ask down to bestAsk when desired sits behind', () => {
+    const c = clampQuotesMakerOnly(0.4, 0.6, 0.48, 0.52)
+    expect(c.bid).toBeCloseTo(0.48, 5)
+    expect(c.ask).toBeCloseTo(0.52, 5)
+  })
+
+  it('never improves past BBO (clips crossing desire)', () => {
+    // Would-be improve: bid 0.51 > bestBid 0.48, ask 0.49 < bestAsk 0.52
+    const c = clampQuotesMakerOnly(0.51, 0.49, 0.48, 0.52)
+    expect(c.bid).toBeCloseTo(0.48, 5)
+    expect(c.ask).toBeCloseTo(0.52, 5)
+    expect(c.bid).toBeLessThan(c.ask)
+  })
+
+  it('already-at-touch stays at BBO', () => {
+    const c = clampQuotesMakerOnly(0.48, 0.52, 0.48, 0.52)
+    expect(c.bid).toBeCloseTo(0.48, 5)
+    expect(c.ask).toBeCloseTo(0.52, 5)
+  })
+}
+)

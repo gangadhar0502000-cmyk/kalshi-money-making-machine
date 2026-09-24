@@ -341,6 +341,8 @@ describe('mmRunner multi-book loose start/stop/reset', () => {
         strictRealism: true,
         allowMidWalk: false,
         fillMidFallback: false,
+        minBookDepthConsumed: 3,
+        minTouchPolls: 2,
         useLiveBook: true,
         bookPollMs: 1000,
         quotingEnabled: true,

@@ -313,8 +313,10 @@ export function makerCaptureCents(
 }
 
 /**
- * Maker-only clamp: bid ≤ bestBid (join touch), ask ≥ bestAsk.
- * Never cross the live BBO.
+ * Maker-only clamp: join BBO when behind touch; never improve/cross.
+ * U3.2.8: desired bid < bestBid → lift to bestBid; desired ask > bestAsk → drop to
+ * bestAsk. Quotes sit AT touch so L2 queue can burn (not parked behind).
+ * Still never posts through the opposite side of the live BBO.
  */
 export function clampQuotesMakerOnly(
   bid: number,
@@ -328,10 +330,12 @@ export function clampQuotesMakerOnly(
   const hasAsk = bookBestAsk != null && Number.isFinite(bookBestAsk) && bookBestAsk > 0
 
   if (hasBid) {
-    b = clampPx(Math.min(b, bookBestBid!))
+    // Join BBO: lift when behind, clip when would improve — always AT bestBid.
+    b = clampPx(bookBestBid!)
   }
   if (hasAsk) {
-    a = clampPx(Math.max(a, bookBestAsk!))
+    // Join BBO: drop when behind, clip when would improve — always AT bestAsk.
+    a = clampPx(bookBestAsk!)
   }
   if (hasAsk && !(b < bookBestAsk!)) {
     b = clampPx(bookBestAsk! - 0.01)

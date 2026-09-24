@@ -158,3 +158,24 @@ describe('U3.2.7 absurdNonSettlementFillReason', () => {
     ).toBeNull()
   })
 })
+
+describe('U3.2.8 join BBO via houseMidQuotePrices', () => {
+  it('joins BBO when mid±half sits behind touch', () => {
+    const q = houseMidQuotePrices({
+      mid: 0.5,
+      inventory: 0,
+      minutesRemaining: 8,
+      halfSpreadCents: 5,
+      inventorySkewCentsPerUnit: 0,
+      hardFlatMinutes: 2,
+      tauSkewAccel: 1,
+      quoteClampEpsilon: 0.01,
+      bookBestBid: 0.48,
+      bookBestAsk: 0.52,
+      makerOnly: true,
+      clampQuotesMakerOnly,
+    })
+    expect(q.yesBid).toBeCloseTo(0.48, 5)
+    expect(q.yesAsk).toBeCloseTo(0.52, 5)
+  })
+})
