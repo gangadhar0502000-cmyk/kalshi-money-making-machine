@@ -14,5 +14,6 @@
 |------|--------|
 | `RULES-20260923-182004-pre-U3.2.3.md` | Pre-U3.2.3 (post U3.2.2 UI disk journal) |
 | `RULES-20260923-193727-pre-U3.2.4.md` | Pre-U3.2.4 (post U3.2.3 late-open curb) |
+| `RULES-20260923-200932-pre-U3.2.5.md` | Pre-U3.2.5 (post U3.2.4 noOpen=4; longOpenMinMid still 0.40) |
 
 PAPER ONLY — never places live Kalshi orders.

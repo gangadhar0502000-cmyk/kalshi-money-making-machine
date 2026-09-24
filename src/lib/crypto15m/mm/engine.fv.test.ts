@@ -17,11 +17,11 @@ function mkMarket(partial: Partial<Crypto15mMarket> & { ticker: string }): Crypt
     status: partial.status ?? 'active',
     openTime: partial.openTime ?? new Date(Date.now() - 5 * 60_000).toISOString(),
     closeTime: partial.closeTime ?? new Date(Date.now() + 10 * 60_000).toISOString(),
-    yesBid: partial.yesBid ?? 0.48,
-    yesAsk: partial.yesAsk ?? 0.52,
+    yesBid: partial.yesBid ?? 0.53,
+    yesAsk: partial.yesAsk ?? 0.57,
     noBid: 0.48,
     noAsk: 0.52,
-    midYes: partial.midYes ?? 0.5,
+    midYes: partial.midYes ?? 0.55,
     spreadCents: 4,
     last: 0.5,
     volume: 0,
@@ -42,7 +42,7 @@ function mkMarket(partial: Partial<Crypto15mMarket> & { ticker: string }): Crypt
   }
 }
 
-function wideBook(ticker: string, mid = 0.5): OrderBookSnapshot {
+function wideBook(ticker: string, mid = 0.55): OrderBookSnapshot {
   return {
     ticker,
     t: Date.now(),
@@ -55,7 +55,7 @@ function wideBook(ticker: string, mid = 0.5): OrderBookSnapshot {
   }
 }
 
-function book(ticker: string, mid = 0.5): OrderBookSnapshot {
+function book(ticker: string, mid = 0.55): OrderBookSnapshot {
   return {
     ticker,
     t: Date.now(),
@@ -78,6 +78,7 @@ describe('U3.2 house mid + FV telemetry', () => {
     })
     engine = new PaperMmEngine()
     engine.setConfig({
+      longOpenMinMid: 0.05, // U3.2.5: allow test mids; curb covered in decisionPolicy tests
       fillCooldownMs: 60_000,
       maxInventory: 10,
       unwindThreshold: 1,

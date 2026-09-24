@@ -206,6 +206,7 @@ describe('engine cooldown + per-window caps', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         fillCooldownMs: 20_000,
         maxFillsPerMinute: 2,
         maxFillsPerMarketPer15m: 8,
@@ -249,6 +250,7 @@ describe('engine cooldown + per-window caps', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         fillCooldownMs: 0,
         maxFillsPerMinute: 2,
         maxFillsPerMarketPer15m: 8,

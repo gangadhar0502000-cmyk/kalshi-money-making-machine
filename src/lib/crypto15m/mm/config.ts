@@ -232,8 +232,8 @@ export interface PaperMmConfig {
    */
   tauSkewAccel: number
   /**
-   * U3.2.3: refuse NEW long YES (`buy_yes` opens) when book mid ≤ this (0–1).
-   * Dig losers opened ~0.13–0.36 then died via flatten@1¢. Default 0.40.
+   * U3.2.5: refuse NEW long YES (`buy_yes` opens) when book mid ≤ this (0–1).
+   * Midrun losses ZEC/BTC longs @ mid 0.49/0.425 (above 0.40 curb). Default 0.50.
    * Short opens and flatten/cover reduces still allowed. Fail-loud if missing.
    */
   longOpenMinMid: number
@@ -299,7 +299,7 @@ export const STRICT_PAPER_MM_CONFIG: PaperMmConfig = {
   blackoutMinutes: 0.75,
   quoteClampEpsilon: 0.01,
   tauSkewAccel: 1,
-  longOpenMinMid: 0.4,
+  longOpenMinMid: 0.5,
 }
 
 /** Soft debug presets — easier fills; do not treat green P&L as live edge. */
@@ -419,7 +419,7 @@ export function clampConfig(partial: Partial<PaperMmConfig>): PaperMmConfig {
     blackoutMinutes: clamp(c.blackoutMinutes ?? 0.75, 0, 5),
     quoteClampEpsilon: clamp(c.quoteClampEpsilon ?? 0.01, 0.001, 0.2),
     tauSkewAccel: clamp(c.tauSkewAccel ?? 1, 0, 20),
-    longOpenMinMid: clamp(c.longOpenMinMid ?? 0.4, 0.05, 0.9),
+    longOpenMinMid: clamp(c.longOpenMinMid ?? 0.5, 0.05, 0.9),
   }
 }
 

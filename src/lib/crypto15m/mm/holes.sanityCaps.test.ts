@@ -243,6 +243,7 @@ describe('hole: fill caps persist per ticker across sync/rebuild/restore', () =>
     portfolio.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         maxFillsPerMinute: 1,
         maxFillsPerMarketPer15m: 4,
         maxActiveMarkets: 2,
@@ -271,6 +272,7 @@ describe('hole: fill caps persist per ticker across sync/rebuild/restore', () =>
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         maxFillsPerMinute: 1,
         maxFillsPerMarketPer15m: 4,
         fillCooldownMs: 0,
@@ -321,6 +323,7 @@ describe('hole: fill caps persist per ticker across sync/rebuild/restore', () =>
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         maxFillsPerMinute: 1,
         maxFillsPerMarketPer15m: 4,
         fillCooldownMs: 0,

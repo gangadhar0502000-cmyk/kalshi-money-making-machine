@@ -1356,7 +1356,7 @@ export class PaperMmEngine {
       return
     }
 
-    // U3.2.3: refuse NEW long opens in low-mid bleed band (covers/shorts OK)
+    // U3.2.5: refuse NEW long opens when mid <= longOpenMinMid (default 0.50; covers/shorts OK)
     if (reason !== 'settlement' && side === 'buy_yes' && this.inventory >= 0) {
       const minLong =
         Number.isFinite(this.config.longOpenMinMid) && this.config.longOpenMinMid > 0

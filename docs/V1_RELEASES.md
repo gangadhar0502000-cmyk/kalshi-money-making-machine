@@ -249,7 +249,7 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 
 - **Evidence (Mac dig):** shorts→near-expiry cover won; all flatten@1¢ losses were low-mid `house_mid` longs; late open with ~1.6m left then flatten.
 - **No late opens:** flat + `τ ≤ hardFlatMinutes` (default 2) → park both (`U3.2.3: no new opens — hardFlat τ`); inventory still flattens (U3.2.1).
-- **Long-open curb:** no NEW long YES when `mid ≤ longOpenMinMid` (default **0.40**); shorts/covers OK (`U3.2.3: long open curb — mid too low`).
+- **Long-open curb:** no NEW long YES when `mid ≤ longOpenMinMid` (default was **0.40**; raised to **0.50** in U3.2.5); shorts/covers OK.
 - **Tags:** new fills use `house_cover` / `house_close` instead of leftover S3/S4*; digests still read historical S*.
 - **Archive forever:** `docs/rules-history/` (RULES snapshots) + `data/paper-mm/archive/` (dig tapes + INDEX). Journals never auto-purged.
 - Paper-only · read-only · never places live orders.
@@ -260,7 +260,16 @@ Frozen pre-v1 baseline: git tag `legacy-v0`.
 - **Knob:** `noOpenMinutes` default **4**; `hardFlatMinutes` remains **2** (U3.2.1 touch flatten).
 - **Flat + τ ≤ 4m** → park both (`U3.2.4: no new opens — τ≤4m`).
 - **Inv ≠ 0 + 2m < τ ≤ 4m** → reduce-only (maker); **τ ≤ 2m** → existing flatten-to-touch.
-- Retains U3.2.3 long-open curb (`mid ≤ 0.40`), `house_cover` tags, disk journal, rules archive.
+- Retains long-open curb (raised in U3.2.5), `house_cover` tags, disk journal, rules archive.
+- Paper-only · read-only · never places live orders.
+
+
+## U3.2.5 — raise longOpenMinMid 0.40 → 0.50
+
+- **Evidence (U3.2.4 midrun):** ZEC long mid=0.49 (−$0.48), BTC long mid=0.425 (−$0.40) — both above 0.40 curb, below 0.50, then flatten bleed.
+- **Knob:** `longOpenMinMid` default **0.50** (was 0.40). Refuse NEW long YES (`buy_yes` opens) when `mid ≤ 0.50`.
+- Strip: `U3.2.5: long open curb — mid ≤50¢`. Shorts / covers / flatten / reduce unchanged.
+- Keeps U3.2.4 `noOpenMinutes=4`, `hardFlatMinutes=2`, `house_cover` tags, disk journal, rules archive.
 - Paper-only · read-only · never places live orders.
 
 ## Upcoming

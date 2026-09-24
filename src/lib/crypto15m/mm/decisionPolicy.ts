@@ -106,8 +106,8 @@ export interface DecisionPolicyConfig {
    */
   tauSkewAccel: number
   /**
-   * U3.2.3: refuse NEW long YES opens when mid ≤ this (dollars 0–1).
-   * Dig evidence: low-mid longs repeatedly died via flatten@1¢. Default 0.40.
+   * U3.2.5: refuse NEW long YES opens when mid ≤ this (dollars 0–1).
+   * Midrun: ZEC/BTC longs @ 0.49/0.425 bled via flatten. Default 0.50 (was 0.40).
    * Short opens / flatten reduces still allowed.
    */
   longOpenMinMid: number
@@ -548,7 +548,7 @@ export function decideQuoteSides(input: DecisionPolicyInput): DecisionPolicyResu
     }
   }
 
-  // U3.2.3: curb NEW long opens when mid in bleed band (shorts / covers OK)
+  // U3.2.5: curb NEW long opens when mid ≤ longOpenMinMid (default 0.50; shorts / covers OK)
   {
     const minLong =
       Number.isFinite(cfg.longOpenMinMid) && cfg.longOpenMinMid > 0

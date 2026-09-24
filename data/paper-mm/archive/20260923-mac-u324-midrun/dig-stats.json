@@ -1,0 +1,38 @@
+{
+  "start_ct": "2026-09-23 19:40:25.948 CT",
+  "end_ct": "2026-09-23 20:05:03.504 CT",
+  "fills": 34,
+  "realized_sum_rd": 0.014000000000000012,
+  "ui_realized": 0.014,
+  "rt_pnl": 0.014000000000000012,
+  "rts": 15,
+  "wins": 9,
+  "losses": 4,
+  "flats": 2,
+  "win_sum": 1.19,
+  "loss_sum": -1.176,
+  "open_lots": 4,
+  "unreal": -0.020000000000000018,
+  "scen": {
+    "house_mid": 19,
+    "house_cover": 9,
+    "flatten": 6
+  },
+  "reason": {
+    "taker_cross": 16,
+    "mid_walk": 5,
+    "book_depth": 13
+  },
+  "late4": 0,
+  "late2": 0,
+  "late5": 4,
+  "lowmid": 0,
+  "cover_fills": 9,
+  "flatten_fills": 6,
+  "s3": 0,
+  "cash_min": 98.64999999999998,
+  "cash_max": 101.72000000000003,
+  "cash_last": 100.03,
+  "meta_sha": null,
+  "git_expected": "c79f7d9"
+}

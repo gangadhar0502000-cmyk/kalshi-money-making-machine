@@ -60,12 +60,13 @@ function baseConfig(partial: Partial<DecisionPolicyConfig> = {}): DecisionPolicy
 
 function baseInput(partial: Partial<DecisionPolicyInput> = {}): DecisionPolicyInput {
   return {
-    mid: 0.5,
-    fairValue: 0.55,
+    // Default mid above longOpenMinMid (0.50) so two-sided open tests stay valid under U3.2.5
+    mid: 0.55,
+    fairValue: 0.58,
     edgeCents: 5,
     inventory: 0,
-    bookBestBid: 0.48,
-    bookBestAsk: 0.52,
+    bookBestBid: 0.53,
+    bookBestAsk: 0.57,
     minutesRemaining: 8,
     running: true,
     settled: false,
@@ -509,9 +510,9 @@ describe('U3.2.4 noOpenMinutes park + soft reduce', () => {
       baseInput({
         inventory: 0,
         minutesRemaining: 5,
-        mid: 0.5,
-        bookBestBid: 0.48,
-        bookBestAsk: 0.52,
+        mid: 0.55,
+        bookBestBid: 0.53,
+        bookBestAsk: 0.57,
         config: baseConfig({ hardFlatMinutes: 2, noOpenMinutes: 4, blackoutMinutes: 0.75 }),
       }),
     )
@@ -557,7 +558,7 @@ describe('U3.2.4 noOpenMinutes park + soft reduce', () => {
     expect(d.yesAsk).toBeCloseTo(0.48, 5)
   })
 
-  it('U3.2.3 mid≤0.40 long curb still green', () => {
+  it('U3.2.3 mid≤0.40 long curb still green (explicit 0.4)', () => {
     const d = decideQuoteSides(
       baseInput({
         inventory: 0,
@@ -571,5 +572,75 @@ describe('U3.2.4 noOpenMinutes park + soft reduce', () => {
     expect(d.bidActive).toBe(false)
     expect(d.askActive).toBe(true)
     expect(d.bidReason).toBe(U323_LONG_OPEN_CURB)
+  })
+})
+
+describe('U3.2.5 longOpenMinMid 0.50 curb', () => {
+  it('mid 0.45 flat → long bid OFF; short ask may stay', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 8,
+        mid: 0.45,
+        bookBestBid: 0.43,
+        bookBestAsk: 0.47,
+        config: baseConfig({ longOpenMinMid: 0.5, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.bidReason).toBe(U323_LONG_OPEN_CURB)
+    expect(d.activeScenario).toBe('house_mid')
+  })
+
+  it('mid 0.55 flat → long bid may allow', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 8,
+        mid: 0.55,
+        bookBestBid: 0.53,
+        bookBestAsk: 0.57,
+        config: baseConfig({ longOpenMinMid: 0.5, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(true)
+    expect(d.bidReason).not.toBe(U323_LONG_OPEN_CURB)
+    expect(d.activeScenario).toBe('house_mid')
+  })
+
+  it('mid 0.30 flat → still OFF (below 0.50)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: 0,
+        minutesRemaining: 8,
+        mid: 0.3,
+        bookBestBid: 0.28,
+        bookBestAsk: 0.32,
+        config: baseConfig({ longOpenMinMid: 0.5, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(false)
+    expect(d.askActive).toBe(true)
+    expect(d.bidReason).toBe(U323_LONG_OPEN_CURB)
+  })
+
+  it('mid 0.45 short → cover bid stays (shorts OK)', () => {
+    const d = decideQuoteSides(
+      baseInput({
+        inventory: -2,
+        minutesRemaining: 8,
+        mid: 0.45,
+        bookBestBid: 0.43,
+        bookBestAsk: 0.47,
+        config: baseConfig({ longOpenMinMid: 0.5, noOpenMinutes: 4 }),
+      }),
+    )
+    expect(d.bidActive).toBe(true)
+    expect(d.bidReason).not.toBe(U323_LONG_OPEN_CURB)
+  })
+
+  it('default longOpenMinMid is 0.50', () => {
+    expect(DEFAULT_DECISION_POLICY.longOpenMinMid).toBe(0.5)
   })
 })

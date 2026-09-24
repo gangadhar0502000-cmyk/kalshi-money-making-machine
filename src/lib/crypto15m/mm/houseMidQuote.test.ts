@@ -17,6 +17,7 @@ import {
   toHouseFillTag,
   U323_NO_LATE_OPENS,
   U323_LONG_OPEN_CURB,
+  DEFAULT_LONG_OPEN_MIN_MID,
 } from './houseMidQuote'
 
 describe('houseMidQuotePrices', () => {
@@ -122,6 +123,7 @@ describe('U3.2.3 house fill tags', () => {
     expect(toHouseFillTag('S3')).toBe('house_cover')
     expect(toHouseFillTag('S4')).toBe('house_close')
     expect(U323_NO_LATE_OPENS).toMatch(/hardFlat/)
-    expect(U323_LONG_OPEN_CURB).toMatch(/long open curb/)
+    expect(U323_LONG_OPEN_CURB).toMatch(/U3\.2\.5.*50¢|long open curb/)
+    expect(DEFAULT_LONG_OPEN_MIN_MID).toBe(0.5)
   })
 })

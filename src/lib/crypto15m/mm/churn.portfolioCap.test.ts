@@ -109,6 +109,7 @@ describe('A: hard portfolio fill cap blocks applyFill', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         fillCooldownMs: 0,
         maxFillsPerMinute: 10,
         maxFillsPerMarketPer15m: 10,
@@ -147,6 +148,7 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         fillCooldownMs: 0,
         maxFillsPerMinute: 20,
         maxFillsPerMarketPer15m: 50,
@@ -181,6 +183,7 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         fillCooldownMs: 0,
         maxFillsPerMinute: 20,
         maxFillsPerMarketPer15m: 50,
@@ -210,6 +213,7 @@ describe('C: churn filter skips flat closes near avgEntry', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         fillCooldownMs: 0,
         maxFillsPerMinute: 20,
         maxFillsPerMarketPer15m: 50,
@@ -252,6 +256,7 @@ describe('D: migrate persisted scarcity to STRICT defaults', () => {
       running: false,
       config: clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         maxFillsPerMarketPer15m: 8,
         maxFillsPerMinute: 4,
       }),
@@ -281,6 +286,7 @@ describe('E: settle inventory before ticker roll — never silent wipe', () => {
     eng.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         autoRoll: true,
         settleOnClose: true,
         applyFees: false,
@@ -338,6 +344,7 @@ describe('portfolio integrates hard cap + capture metrics', () => {
     portfolio.setConfig(
       clampConfig({
         ...STRICT_PAPER_MM_CONFIG,
+        longOpenMinMid: 0.05,
         maxActiveMarkets: 2,
         maxFillsPerMarketPer15m: 4,
         maxFillsPerMinute: 10,

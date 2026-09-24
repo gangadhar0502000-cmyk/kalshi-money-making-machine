@@ -64,6 +64,7 @@ describe('engine inventory unwind + fill discipline', () => {
     })
     engine = new PaperMmEngine()
     engine.setConfig({
+      longOpenMinMid: 0.05,
       fillCooldownMs: 0,
       maxInventory: 10,
       unwindThreshold: 1,
@@ -152,6 +153,7 @@ describe('measurement: fill scenarioId stamp + stuckTicks', () => {
     })
     engine = new PaperMmEngine()
     engine.setConfig({
+      longOpenMinMid: 0.05,
       fillCooldownMs: 0,
       maxInventory: 10,
       unwindThreshold: 1,
